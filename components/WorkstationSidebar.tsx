@@ -12,6 +12,7 @@ import {
   PanelLeftOpen,
   Plug,
   ScrollText,
+  Server,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -34,6 +35,8 @@ export type View =
   | "subagents"
   /** 并行试验：同一任务开 N 个候选，各自在独立 worktree 里跑，跑完并排比 */
   | "candidates"
+  /** 系统：服务 / 门禁 / 备份 / 版本 / 部署 / 资源的只读快照 */
+  | "system"
   | "settings";
 
 /** 导航项。展开态为「图标 + 文字」整行，收起态为 36×36 纯图标按钮（靠 title 兜底提示）。
@@ -178,6 +181,7 @@ export function WorkstationSidebar({
           <NavItem collapsed={isCollapsed} icon={<FlaskConical size={14} />} label="并行试验" active={view === "candidates"} onClick={() => onViewChange("candidates")} />
 
       <div className={groupCls}>系统</div>
+          <NavItem collapsed={isCollapsed} icon={<Server size={14} />} label="系统" active={view === "system"} onClick={() => onViewChange("system")} />
           <NavItem collapsed={isCollapsed} icon={<Settings size={14} />} label="设置" active={view === "settings"} onClick={() => onViewChange("settings")} />
 
       {/* 侧栏统计卡。这里**刻意不再重复「Pi 内核就绪」** —— 内核状态已移到页脚
