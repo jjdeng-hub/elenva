@@ -14,6 +14,7 @@ import { SettingsPage } from "@/components/SettingsPage";
 import { ShortcutPanel } from "@/components/ShortcutPanel";
 import { SkillsPage } from "@/components/SkillsPage";
 import { SubagentsPage } from "@/components/SubagentsPage";
+import { SystemPage } from "@/components/SystemPage";
 import { SystemPromptPage } from "@/components/SystemPromptPage";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { WorkstationSidebar, type View } from "@/components/WorkstationSidebar";
@@ -37,6 +38,7 @@ const PAGE_TITLES: Record<string, string> = {
   plugins: "插件",
   subagents: "子代理",
   candidates: "并行试验",
+  system: "系统",
   settings: "设置",
 };
 
@@ -787,6 +789,7 @@ export function AppShell() {
             onOpenSession={openSessionById}
           />
         )}
+        {view === "system" && <SystemPage />}
         {view === "settings" && <SettingsPage projects={memoryProjects} defaultCwd={defaultCwd} />}
         {view === "chat" && (
           <ChatView
