@@ -20,6 +20,10 @@
   --color-danger: var(--danger);
   --color-success: var(--success);
   --color-warn: var(--warn);
+  --color-viz-1: var(--viz-1);
+  --color-viz-2: var(--viz-2);
+  --color-viz-3: var(--viz-3);
+  --color-viz-4: var(--viz-4);
   --color-overlay: var(--overlay);
   --radius-card: 12px;
   /* 圆角三档：sm=chip/图标按钮 · md=按钮/输入框 · lg=弹层 · card=面板/卡片 */
@@ -47,6 +51,9 @@
   --icon-md: 14px;
   --icon-emph: 16px;
   --icon-lg: 20px;
+  /* 间距十档（2026-09-21 增，4 基准）：2 内嵌细缝 · 4/6 图标与行内 · 8/10 行与控件 ·
+     12/16 卡片内边距与区块 · 20/24 大区块 · 32 页面级。Tailwind 对应 0.5 / 1 / 1.5 / 2 /
+     2.5 / 3 / 4 / 5 / 6 / 8。组件里只允许用这些档，超出的收进最近档。 */
 
   /* 聊天列宽：消息区与输入框共用的唯一来源（两者不一致会看起来错位）。
      横向由 .chat-col 统一负责：左右各 --chat-pad，内容居中，
@@ -106,6 +113,12 @@
   --danger: #c9302c;
   --success: #3b6d11;
   --warn: #ba7517;
+  /* 数据可视化色阶（viz-1..4，2026-09-21 增）：图表专用派生阶 —— 纯红保留给
+     动作/警示/选中态。红锚 + 暖棕 + 中灰 + 浅灰，保证相邻段可辨；深色主题重映射。 */
+  --viz-1: #c9302c;
+  --viz-2: #c07a63;
+  --viz-3: #8f8c84;
+  --viz-4: #cdc8bc;
   /* 浮层遮罩：深色下基底本来就暗，需更重的不透明度才有压暗效果 */
   --overlay: rgba(0, 0, 0, 0.32);
   --scrollbar: rgba(0, 0, 0, 0.14);
@@ -139,6 +152,10 @@
   --danger: #e05654;
   --success: #7fb75b;
   --warn: #d9a24a;
+  --viz-1: #e87b78;
+  --viz-2: #b8875d;
+  --viz-3: #8b8880;
+  --viz-4: #635f57;
   --overlay: rgba(0, 0, 0, 0.62);
   --scrollbar: rgba(255, 255, 255, 0.16);
   --scrollbar-hover: rgba(255, 255, 255, 0.3);

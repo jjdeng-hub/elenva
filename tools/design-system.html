@@ -95,7 +95,12 @@
       <div class="sw" data-page-node-id="Mynkd10XwcgbJyBXHYZtyD"><i style="background:#3b6d11" data-page-node-id="JIIJqbvfkJ1AglEqsPDvnk"></i><div data-page-node-id="Xrp15YhL8NpRj7gZ5dT3my"><b data-page-node-id="Q7VvD6uA6mbjZGdaIDSH5M">success</b><u data-page-node-id="cnF4JfF8YDHV6DRGLJWFkW">#3b6d11</u>成功/新增</div></div>
       <div class="sw" data-page-node-id="cZly7vgYiDwdkABnhsssPf"><i style="background:#ba7517" data-page-node-id="XmuK2LWMDNG3TEKwEQwaVC"></i><div data-page-node-id="eZYtrkx71VUscwDxCjnevP"><b data-page-node-id="atgHYyxtyyYjkfrGYC9kKW">warn</b><u data-page-node-id="7Z4QaWQQ0AB2AoOrKRdXEm">#ba7517</u>警告</div></div>
       <div class="sw" data-page-node-id="ClgOKHPnijKrEwadyy4ul9"><i style="background:#c9302c" data-page-node-id="6EjUIm86NwbuuTbJtk5mk4"></i><div data-page-node-id="Pu5wb1o2UttWDJfLSIGbGy"><b data-page-node-id="rj4w0LwedKz6lBH7eEMvWd">danger</b><u data-page-node-id="ImwYMZ4OCjWbQuXDJc8xDu">#c9302c</u>错误/删除</div></div>
+      <div class="sw"><i style="background:#c9302c"></i><div><b>viz-1</b><u>#c9302c</u>图表 · 红锚</div></div>
+      <div class="sw"><i style="background:#c07a63"></i><div><b>viz-2</b><u>#c07a63</u>图表 · 暖棕</div></div>
+      <div class="sw"><i style="background:#8f8c84"></i><div><b>viz-3</b><u>#8f8c84</u>图表 · 中灰</div></div>
+      <div class="sw"><i style="background:#cdc8bc"></i><div><b>viz-4</b><u>#cdc8bc</u>图表 · 浅灰</div></div>
     </div>
+    <p class="note">viz-1..4 = 数据可视化派生阶（2026-09-21 增）：纯红只给「输出」锚点，其余用暖棕/灰阶；深色主题重映射（#e87b78 / #b8875d / #8b8880 / #635f57，见 globals.css）。相邻段之间加 1px 面板色分隔；条整体加 1px line-soft 内描边定界。</p>
   </section>
 
   <section data-page-node-id="uGBz452Kx1GzWiVqqeEG7C">
@@ -107,6 +112,17 @@
       <div style="border-radius:var(--r-lg)" data-page-node-id="X7xW2zu8xj8fO2gHra7gw3">lg · 10px<br data-page-node-id="bJqhBe6RSXSA0kqS0gtMBh"><span class="kv" data-page-node-id="6XL2t8RfrEaKqwokwPoozE">弹层 / 菜单</span></div>
       <div style="border-radius:var(--r-card)" data-page-node-id="AGhNga2PVBl18ErHWsKGkn">card · 12px<br data-page-node-id="l09UCdU5mbk1svgNrh4VPE"><span class="kv" data-page-node-id="F8ho6CtoZMtUizguGTbIZw">卡片 / 面板</span></div>
     </div>
+  </section>
+
+  <section>
+    <h2>间距</h2>
+    <p class="sub">十档，4 基准（2026-09-21 增）· 组件只允许用这些档，超出的收进最近档</p>
+    <div class="box">
+      <div style="display:flex;align-items:flex-end;gap:16px">
+{bars}
+      </div>
+    </div>
+    <p class="note">2 内嵌细缝 · 4/6 图标与行内 · 8/10 行与控件 · 12/16 卡片内边距与区块 · 20/24 大区块 · 32 页面级。Tailwind 对应 0.5 / 1 / 1.5 / 2 / 2.5 / 3 / 4 / 5 / 6 / 8。卡片头 12/16、卡片体 12/16、页面 32 为既有实测约定。</p>
   </section>
 
   <section data-page-node-id="YfLQhMjhXx9TTAf0DOU26B">

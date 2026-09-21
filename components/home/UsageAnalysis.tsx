@@ -15,22 +15,33 @@ function shortModel(model?: string): string {
 /** Token 构成堆叠条 + 分项数值 */
 function CompositionBar({ report }: { report: UsageReport }) {
   const t = report.allTime.tokens;
+  // 颜色走 viz 色阶（2026-09-21）：纯红只给「输出」这个锚点；缓存两段用灰阶，
+  // 大面积（缓存读取）取最浅一档保证不吵；相邻段之间加 1px 面板色分隔（见下）。
   const parts = [
-    { key: "输入", value: t.input, color: "var(--muted)" },
-    { key: "输出", value: t.output, color: "var(--accent)" },
-    { key: "缓存读取", value: t.cacheRead, color: "var(--accent)", opacity: 0.28 },
-    { key: "缓存写入", value: t.cacheWrite, color: "var(--accent)", opacity: 0.55 },
+    { key: "输入", value: t.input, color: "var(--viz-3)" },
+    { key: "输出", value: t.output, color: "var(--viz-1)" },
+    { key: "缓存读取", value: t.cacheRead, color: "var(--viz-4)" },
+    { key: "缓存写入", value: t.cacheWrite, color: "var(--viz-2)" },
   ];
   const total = Math.max(t.total, 1);
   return (
     <div>
-      <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-panel-2">
+      <div
+        className="flex h-2.5 w-full overflow-hidden rounded-full bg-panel-2"
+        style={{ boxShadow: "inset 0 0 0 1px var(--line-soft)" }}
+      >
         {parts
           .filter((p) => p.value > 0)
-          .map((p) => (
+          .map((p, i) => (
             <div
               key={p.key}
-              style={{ width: `${(p.value / total) * 100}%`, backgroundColor: p.color, opacity: p.opacity }}
+              className="shrink-0"
+              style={{
+                width: `${(p.value / total) * 100}%`,
+                minWidth: 2,
+                backgroundColor: p.color,
+                boxShadow: i > 0 ? "inset 1px 0 0 0 var(--panel)" : undefined,
+              }}
               title={`${p.key} ${formatTokens(p.value)}（${Math.round((p.value / total) * 100)}%）`}
             />
           ))}
@@ -40,7 +51,7 @@ function CompositionBar({ report }: { report: UsageReport }) {
           .filter((p) => p.value > 0 || p.key === "输入" || p.key === "输出")
           .map((p) => (
             <div key={p.key} className="flex items-center gap-1.5 text-[12px]">
-              <span className="size-2 rounded-[2px]" style={{ backgroundColor: p.color, opacity: p.opacity ?? 1 }} />
+              <span className="size-2 rounded-[2px]" style={{ backgroundColor: p.color }} />
               <span className="text-dim">{p.key}</span>
               <span className="ml-auto tabular-nums text-muted">{formatTokens(p.value)}</span>
               <span className="w-10 shrink-0 text-right tabular-nums text-dim">

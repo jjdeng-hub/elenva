@@ -192,7 +192,7 @@ function PiSettingsSection() {
           </Field>
           <Field
             label="压缩保留 Token（keepRecentTokens）"
-            hint="压缩时**不总结**的最近内容量。调小 = 压得更彻底、上下文丢得更多；调大 = 保留更多细节。"
+            hint="压缩时不总结的最近内容量。调小 = 压得更彻底、上下文丢得更多；调大 = 保留更多细节。"
           >
             <input
               type="number"
@@ -278,6 +278,9 @@ function ToolsSection() {
         body: JSON.stringify({ enabled: !psEnabled }),
       });
       if (res.ok) setPsEnabled(!psEnabled);
+      else toast("保存失败（网络原因）");
+    } catch {
+      toast("保存失败（网络原因）");
     } finally {
       setSaving(false);
     }
@@ -288,6 +291,7 @@ function ToolsSection() {
       <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
         <Wrench size={14} className="text-accent" />
         <span className="text-[13px] font-semibold text-fg">工具</span>
+        <span className="ml-auto text-[11px] text-dim">即时生效</span>
       </div>
       <div className="flex items-center gap-3 px-4 py-3.5">
         <div className="min-w-0 flex-1">
@@ -297,7 +301,16 @@ function ToolsSection() {
         {psEnabled === null ? (
           <Loader2 size={14} className="animate-spin text-dim" />
         ) : !isWindows ? (
-          <span className="text-[12px] text-dim">仅 Windows 可用</span>
+          <div className="flex shrink-0 items-center gap-2" title="当前系统不支持（仅 Windows 可用）">
+            <span className="text-[11px] text-dim">仅 Windows 可用</span>
+            <button
+              disabled
+              aria-disabled="true"
+              className="relative h-5 w-9 shrink-0 cursor-not-allowed rounded-full bg-line opacity-50"
+            >
+              <span className="absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-sm" />
+            </button>
+          </div>
         ) : (
           <button
             onClick={toggle}
@@ -508,6 +521,9 @@ function GuardrailsSection({ projects, defaultCwd }: {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json() as Record<string, unknown>;
+    } catch (e) {
+      toast("保存失败（网络原因）");
+      throw e;
     } finally {
       setSaving(false);
     }
@@ -540,6 +556,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
       <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
         <ShieldCheck size={14} className="text-accent" />
         <span className="text-[13px] font-semibold text-fg">安全确认</span>
+        <span className="ml-auto text-[11px] text-dim">即时生效</span>
       </div>
       <div className="px-4 py-3.5">
         <div className="text-[13px] font-medium text-fg">危险操作审批</div>
@@ -741,6 +758,12 @@ function HostPromptCard() {
         {data && (
           <>
             <div className="mt-2.5 flex flex-col gap-1">
+              {/* 列头（2026-09-21 增）：没有它时行尾的字符数看起来像个孤立数字 */}
+              <div className="flex items-baseline gap-2 text-[10px] text-dim/80">
+                <span className="shrink-0 font-mono">段</span>
+                <span className="min-w-0 flex-1">说明</span>
+                <span className="shrink-0">字符</span>
+              </div>
               {data.sections.map((section) => (
                 <div key={section.id} className="flex items-baseline gap-2 text-[11px]">
                   <span className="shrink-0 font-mono text-muted">{section.id}</span>
