@@ -1,6 +1,7 @@
 "use client";
 
 import { PanelLeftClose, PanelLeftOpen, PanelRight, CircleDot, FileCode2, GitBranch, Loader2, Menu, Search, X } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentStatusBar } from "@/components/AgentStatusBar";
 import { ChatInput, type ContextHistory } from "@/components/ChatInput";
@@ -631,14 +632,14 @@ export function ChatView({
             <button
               onClick={onOpenNav}
               aria-label="打开导航"
-              className="flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg text-dim t-fast hover:bg-hover hover:text-fg"
+              className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-dim t-fast hover:bg-hover hover:text-fg"
             >
               <Menu size={14} />
             </button>
           )}
           <button
             onClick={toggleSidebar}
-            className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-dim t-fast hover:bg-hover hover:text-fg"
+            className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-dim t-fast hover:bg-hover hover:text-fg"
             title={sidebarCollapsed ? "展开会话列表" : "收起会话列表"}
           >
             {sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
@@ -654,7 +655,7 @@ export function ChatView({
           <div className="ml-auto flex items-center gap-2.5">
             {/* 会话内搜索 */}
             {searchOpen ? (
-              <div className="flex h-7 items-center gap-1.5 rounded-lg border border-accent/50 bg-panel-2 px-2">
+              <div className="flex h-8 items-center gap-1.5 rounded-lg border border-accent/50 bg-panel-2 px-2">
                 <Search size={12} className="shrink-0 text-dim" />
                 <input
                   ref={searchInputRef}
@@ -683,7 +684,7 @@ export function ChatView({
                   setSearchOpen(true);
                   requestAnimationFrame(() => searchInputRef.current?.focus());
                 }}
-                className="flex size-7 cursor-pointer items-center justify-center rounded-lg text-dim t-fast hover:bg-hover hover:text-fg"
+                className="flex size-8 cursor-pointer items-center justify-center rounded-lg text-dim t-fast hover:bg-hover hover:text-fg"
                 title="会话内搜索（Ctrl+F）"
               >
                 <Search size={14} />
@@ -697,7 +698,7 @@ export function ChatView({
                   setPreviewOpen((v) => !v);
                 }}
                 className={cn(
-                  "flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-lg border px-2 text-[12px] t-fast",
+                  "flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-lg border px-2 text-[12px] t-fast",
                   previewOpen
                     ? "border-accent/40 bg-accent-soft text-accent"
                     : "border-line bg-panel-2 text-muted hover:text-fg",
@@ -735,7 +736,7 @@ export function ChatView({
                   });
                 }}
                 className={cn(
-                  "flex size-7 cursor-pointer items-center justify-center rounded-lg t-fast",
+                  "flex size-8 cursor-pointer items-center justify-center rounded-lg t-fast",
                   treeOpen ? "bg-active text-accent" : "text-dim hover:bg-hover hover:text-fg",
                 )}
                 title="会话树：浏览分支、跳转到任意历史点继续"
@@ -764,12 +765,13 @@ export function ChatView({
               aria-pressed={railOpen}
               data-testid="observatory-toggle"
               className={cn(
-                "hidden size-7 shrink-0 cursor-pointer items-center justify-center rounded-lg t-fast xl:flex",
+                "hidden size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg t-fast xl:flex",
                 railOpen ? "bg-active text-accent" : "text-dim hover:bg-hover hover:text-fg",
               )}
             >
               <PanelRight size={14} />
             </button>
+            <ThemeToggle />
             {!isNew && session && <SessionMenu actions={sessionActions} />}
           </div>
         </div>

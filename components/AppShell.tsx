@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleDot, Menu, MessageSquarePlus, Search } from "lucide-react";
+import { Menu, MessageSquarePlus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatView } from "@/components/ChatView";
 import { DirPicker } from "@/components/DirPicker";
@@ -698,37 +698,16 @@ export function AppShell() {
               </button>
             )}
             {view === "home" ? (
-              <>
-                <div className="flex h-9 max-w-md flex-1 items-center gap-2 rounded-lg border border-line bg-panel-2 px-3 text-dim">
-                  <Search size={14} />
-                  <input
-                    id="home-search"
-                    value={homeQuery}
-                    onChange={(e) => setHomeQuery(e.target.value)}
-                    placeholder="搜索会话、项目…（Ctrl+K）"
-                    className="w-full bg-transparent text-[13px] text-fg outline-none placeholder:text-dim"
-                  />
-                </div>
-                <div className="ml-auto flex items-center gap-3.5">
-                  <span
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[12px]",
-                      runningCount > 0 ? "border-accent/30 bg-active text-accent" : "border-line bg-panel-2 text-dim",
-                    )}
-                  >
-                    <CircleDot size={12} className={cn(runningCount > 0 && "anim-pulse-dot")} />
-                    {runningCount > 0 ? `${runningCount} 个运行中` : "全部空闲"}
-                  </span>
-                  <button
-                    onClick={handleNewChat}
-                    className="flex h-9 cursor-pointer items-center gap-1.5 rounded-lg bg-accent px-4 text-[13px] font-semibold text-accent-fg t-fast hover:bg-accent-hover"
-                  >
-                    <MessageSquarePlus size={14} />
-                    新建会话
-                  </button>
-                  <ThemeToggle />
-                </div>
-              </>
+              <div className="flex h-8 max-w-md flex-1 items-center gap-2 rounded-lg border border-line bg-panel-2 px-3 text-dim">
+                <Search size={14} />
+                <input
+                  id="home-search"
+                  value={homeQuery}
+                  onChange={(e) => setHomeQuery(e.target.value)}
+                  placeholder="搜索会话、项目…（Ctrl+K）"
+                  className="w-full bg-transparent text-[13px] text-fg outline-none placeholder:text-dim"
+                />
+              </div>
             ) : (
               <>
                 <button
@@ -739,17 +718,20 @@ export function AppShell() {
                 </button>
                 <span className="text-dim/50">/</span>
                 <span className="text-[14px] font-semibold">{PAGE_TITLES[view]}</span>
-                {view === "code" ? (
-                  <button
-                    onClick={handleNewChat}
-                    className="ml-auto flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-accent px-3.5 text-[12px] font-semibold text-accent-fg t-fast hover:bg-accent-hover"
-                  >
-                    <MessageSquarePlus size={14} />
-                    新会话
-                  </button>
-                ) : null}
               </>
             )}
+            {/* 全局簇：所有视图一致的常驻控件（chat 的独立顶栏里也有同样顺序的一份）。
+                原「运行中/全部空闲」胶囊已移除 —— 同一状态在 hero 状态条 / 侧栏统计卡 / 页脚已有三处。 */}
+            <div className="ml-auto flex items-center gap-3.5">
+              <ThemeToggle />
+              <button
+                onClick={handleNewChat}
+                className="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg bg-accent px-3.5 text-[12px] font-semibold text-accent-fg t-fast hover:bg-accent-hover"
+              >
+                <MessageSquarePlus size={14} />
+                新建会话
+              </button>
+            </div>
           </header>
         )}
 
@@ -761,6 +743,7 @@ export function AppShell() {
             unreadIds={unreadIds}
             onOpenSession={openChatWith}
             onViewAll={openChatView}
+            onOpenSystem={() => setView("system")}
             contentResults={contentResults}
             contentSearching={contentSearching}
             contentTruncated={contentTruncated}
