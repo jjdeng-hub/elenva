@@ -12,8 +12,8 @@ import type { AgentMessage, AssistantMessage, TextContent, ToolResultMessage } f
 
 /**
  * 一轮 = 一条 user 消息到下一条 user 消息之间的全部内容。
- * 一轮结束后把「过程」（思考 / 工具调用 / 工具结果）收成摘要，只留实质回答。
- * 展开时过程按时间线排布（每步一个节点 + 时刻），详见 ProcessGroup。
+ * 一轮结束后把「过程」（思考 / 工具调用 / 工具结果）收进左侧轨道并收成摘要，只留实质回答。
+ * 展开时过程沿轨道按时间线排布（每步一个节点 + 时刻），详见 ProcessGroup。
  *
  * 关于「哪条算实质回答」——原来取的是【该轮最后一条 assistant 消息】，
  * 这条规则在会写工具/记忆的回合里会算错：实测一个回合的消息序列是
@@ -535,8 +535,10 @@ export function ChatWindow({
  * 一轮的「过程」区。
  *
  * 设计目标：聊天主体看起来就是**一问一答** —— 用户气泡与最终回答始终可见，
- * 中间的思考与工具调用收成一条横向分割线（不做成卡片，否则看起来像又一条回复）。
- * 需要细节时点开，内容嵌在分割线与回答之间。
+ * 中段的思考与工具调用收进**同一条左侧轨道**（统一缩进 + 1px 竖线）。
+ * 收起时轨道上只留一枚摘要 pill；展开时步骤沿轨道排时间线。
+ * 不做成卡片（否则看起来像又一条回复）；答复保持全宽 + 头像锚点，
+ * 与轨道区在缩进上拉开层级 —— 扫一眼即可区分「过程」与「答复」。
  */
 function ProcessGroup({
   indices,
@@ -570,14 +572,13 @@ function ProcessGroup({
   if (thinking > 0) parts.push(`思考 ${thinking}`);
   if (tools > 0) parts.push(`工具 ${tools}`);
   return (
-    <div className="py-0.5" data-testid="process-group">
+    <div className="relative my-1 border-l-2 border-line pl-3" data-testid="process-group">
       <button
         onClick={onToggle}
         aria-expanded={expanded}
         title={expanded ? "收起这一轮的过程" : "展开这一轮的思考与工具调用"}
-        className="group flex w-full cursor-pointer items-center gap-2.5 py-1.5"
+        className="group flex w-full cursor-pointer items-center gap-2 py-1 text-left"
       >
-        <span className="h-px flex-1 bg-line-soft" />
         <span
           className={cn(
             "flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] t-fast",
@@ -598,21 +599,20 @@ function ProcessGroup({
             </span>
           )}
         </span>
-        <span className="h-px flex-1 bg-line-soft" />
       </button>
       {expanded && (
         /* 展开态走时间线：左侧轨道上每步一个节点 + 时刻。
            步骤内容仍然是 MessageView 本体（思考块懒加载 / 工具卡 / bash 卡 / 文件预览
            全部不变）—— 换的只是「列怎么排」，不是「每步怎么渲染」，所以这里的
            改动不会连带影响任何一种消息的展示。 */
-        <div className="mt-1 mb-2 border-l border-line-soft pl-3">
+        <div className="mt-1 mb-2">
           {indices.map((i) => {
             const ts = (messages[i] as { timestamp?: unknown }).timestamp;
             return (
               <div key={i} data-idx={i} className="timeline-step relative py-1">
                 <span
                   aria-hidden
-                  className="absolute -left-[13px] top-[7px] size-1.5 -translate-x-1/2 rounded-full bg-dim/50"
+                  className="absolute -left-[13px] top-[7px] size-2 -translate-x-1/2 rounded-full bg-dim/60"
                 />
                 {typeof ts === "number" && (
                   <div className="mb-0.5 flex items-center gap-1.5" data-testid="process-time">
