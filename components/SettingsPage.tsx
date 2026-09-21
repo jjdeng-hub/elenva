@@ -87,6 +87,7 @@ function PiSettingsSection() {
   const [keepRecentTokens, setKeepRecentTokens] = useState(20000);
   const [retryEnabled, setRetryEnabled] = useState(true);
   const [maxRetries, setMaxRetries] = useState(3);
+  const [cacheWarming, setCacheWarming] = useState<"off" | "streaming" | "idle">("streaming");
   const [toolSelect, setToolSelect] = useState<ToolPreset | "pi-default">("pi-default");
 
   useEffect(() => {
@@ -104,6 +105,7 @@ function PiSettingsSection() {
         setKeepRecentTokens(d.settings.compaction?.keepRecentTokens ?? 20000);
         setRetryEnabled(d.settings.retry?.enabled ?? true);
         setMaxRetries(d.settings.retry?.maxRetries ?? 3);
+        setCacheWarming(d.settings.cacheWarming ?? "streaming");
         if (d.settings.defaultTools) {
           const names = [...d.settings.defaultTools].sort().join(",");
           const match = TOOL_PRESET_VALUES.find((p) => getToolNamesForPreset(p).sort().join(",") === names);
@@ -126,6 +128,7 @@ function PiSettingsSection() {
           keepRecentTokens,
         },
         retry: { enabled: retryEnabled, maxRetries },
+        cacheWarming,
         ...(toolSelect === "pi-default" ? {} : { defaultTools: getToolNamesForPreset(toolSelect) }),
       };
       const res = await fetch("/api/pi-settings", {
@@ -232,6 +235,20 @@ function PiSettingsSection() {
               onChange={(e) => setMaxRetries(Math.max(0, Math.min(10, Math.floor(Number(e.target.value) || 0))))}
               className={inputCls}
             />
+          </Field>
+          <Field
+            label="提示词缓存保温（cacheWarming）"
+            hint="长工具/空闲间隙用一次极小的请求续住提示词缓存，避免下次请求全价重算；off 关闭。需要模型声明缓存生命周期才完全生效。"
+          >
+            <select
+              value={cacheWarming}
+              onChange={(e) => setCacheWarming(e.target.value as "off" | "streaming" | "idle")}
+              className={selectCls}
+            >
+              <option value="streaming">streaming（默认：长工具期间保温）</option>
+              <option value="idle">idle（空闲时也保温）</option>
+              <option value="off">off（关闭）</option>
+            </select>
           </Field>
           <Field label="默认启用工具（defaultTools）" hint="新会话启动时启用的内置工具集">
             <select
