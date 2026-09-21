@@ -1,11 +1,12 @@
 "use client";
 
-import { Clock, Cpu, KeyRound, Loader2, Play, Sparkles } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Cpu, Gauge, KeyRound, Loader2, Play } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
 import { basename, formatCost, formatTokens, relTime, timeLabel } from "@/lib/format";
 import type { UsageReport } from "@/lib/usage-aggregate";
 import type { AttentionItem } from "@/lib/attention";
+import type { SystemStatus } from "@/lib/system-status";
 import type { SessionInfo } from "@/lib/types";
 import { UsageAnalysis } from "@/components/home/UsageAnalysis";
 import { TodayOverview } from "@/components/home/TodayOverview";
@@ -37,6 +38,22 @@ function cleanTitle(raw: string | undefined, max = 28): string {
 /** 列表 / 头像展示标题：优先已命名，其次清洗后的首条消息。 */
 function displayTitle(s: SessionInfo): string {
   return s.name || cleanTitle(s.firstMessage) || "(无标题)";
+}
+
+/** 需关注原因 → 短标签（与会话流表格同一口径）。 */
+function attentionLabel(a: AttentionItem): string {
+  return a.reasons.includes("interrupted") ? "被中断" : "工具报错";
+}
+
+/** 本机快照卡的一行：dim 标签 + 值（tone 控制颜色）。 */
+function SnapRow({ label, value, tone }: { label: string; value: ReactNode; tone?: "ok" | "warn" | "dim" }) {
+  const color = tone === "warn" ? "font-medium text-warn" : tone === "dim" ? "text-dim" : "text-muted";
+  return (
+    <div className="flex items-center justify-between gap-3 py-2">
+      <span className="shrink-0 text-[12px] text-dim">{label}</span>
+      <span className={cn("truncate text-[12px] tabular-nums", color)}>{value}</span>
+    </div>
+  );
 }
 
 /** 问候语随小时切换；入参用调用方的时间，避免与首屏渲染不一致。 */
@@ -80,6 +97,7 @@ export function HomeDashboard({
   unreadIds,
   onOpenSession,
   onViewAll,
+  onOpenSystem,
   contentResults,
   contentSearching,
   contentTruncated,
@@ -90,6 +108,7 @@ export function HomeDashboard({
   unreadIds?: Set<string>;
   onOpenSession: (s: SessionInfo) => void;
   onViewAll: () => void;
+  onOpenSystem: () => void;
   defaultCwd?: string | null;
   contentResults?: { session: SessionInfo; before: string; match: string; after: string }[];
   contentSearching?: boolean;
@@ -132,20 +151,20 @@ export function HomeDashboard({
     return () => clearInterval(t);
   }, []);
 
-  // 技能调用排行（离线扫描全部会话，数据随使用积累）
-  const [skillUsage, setSkillUsage] = useState<{ total: number; skills: { name: string; count: number }[] } | null>(null);
+  // 本机快照（服务 / 门禁 / 备份 / 版本 / 磁盘 / 内存）：与系统页同源，只读一次
+  const [system, setSystem] = useState<SystemStatus | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/skill-usage", { cache: "no-store" })
+    fetch("/api/system", { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : null))
-      .then((d: { total: number; skills: { name: string; count: number }[] } | null) => {
-        if (!cancelled && d) setSkillUsage(d);
+      .then((d: SystemStatus | null) => {
+        if (!cancelled && d) setSystem(d);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [sessions]);
+  }, []);
 
   // 离线 token/费用汇总（跨会话全量扫描，服务端带 mtime 缓存）
   const [usage, setUsage] = useState<UsageReport | null>(null);
@@ -183,6 +202,48 @@ export function HomeDashboard({
     for (const a of attention) map.set(a.sessionId, a);
     return map;
   }, [attention]);
+
+  // 需关注行：附带对应会话对象（用于标题与跳转）
+  const sessionsById = useMemo(() => {
+    const map = new Map<string, SessionInfo>();
+    for (const item of sessions) map.set(item.id, item);
+    return map;
+  }, [sessions]);
+  const attentionRows = useMemo(
+    () => attention.map((a) => ({ a, s: sessionsById.get(a.sessionId) })),
+    [attention, sessionsById],
+  );
+
+  // 本机快照派生值（卡片是只读展示，阈值与系统页一致：磁盘/内存 ≥90% 报警）
+  const snap = useMemo(() => {
+    if (!system) return null;
+    const pctOf = (used: number, total: number) => Math.round((used / total) * 100);
+    const g = system.gates;
+    const b = system.backup.latest;
+    const d = pctOf(system.resources.disk.used, system.resources.disk.total);
+    const m = pctOf(system.resources.mem.total - system.resources.mem.free, system.resources.mem.total);
+    const v = system.versions;
+    return {
+      gates: g
+        ? g.lastResult === "ok"
+          ? { t: "通过", tone: "ok" as const }
+          : g.lastResult === "fail"
+            ? { t: "失败", tone: "warn" as const }
+            : { t: "未记录", tone: "dim" as const }
+        : { t: "未跑过", tone: "dim" as const },
+      backup: b ? { t: relTime(b.mtime), tone: "ok" as const } : { t: "无", tone: "warn" as const },
+      version:
+        v.aligned === true
+          ? { t: "三处一致", tone: "ok" as const }
+          : v.aligned === false
+            ? { t: "存在差异", tone: "warn" as const }
+            : { t: "信息不全", tone: "dim" as const },
+      disk: { t: `${d}%`, tone: d >= 90 ? ("warn" as const) : ("ok" as const) },
+      mem: { t: `${m}%`, tone: m >= 90 ? ("warn" as const) : ("ok" as const) },
+      deploy: { t: system.deploy.commit ? system.deploy.commit.slice(0, 7) : "—", tone: system.deploy.commit ? ("ok" as const) : ("dim" as const) },
+      kernel: { t: system.versions.webKernel ?? "—", tone: system.versions.webKernel ? ("ok" as const) : ("dim" as const) },
+    };
+  }, [system]);
 
   // 近 7 日每日新会话数（总会话卡 spark 已移除，保留给状态条无用；省略）
   const stats = useMemo(() => {
@@ -249,6 +310,44 @@ export function HomeDashboard({
               {stats.total} 会话 · {stats.projects} 项目
             </span>
           </div>
+
+        {/* 需关注清单：从「一个计数」升为「可直接动作的行」——被中断 / 工具报错的会话
+            在这里就能一键回到现场，不用先切到会话流再筛 tab。0 项时整条不渲染。 */}
+        {attention.length > 0 && (
+          <div
+            className="anim-fade-up mt-3 rounded-card border border-warn/30 bg-panel px-3.5 py-2.5"
+            data-testid="attention-band"
+          >
+            <div className="flex items-center gap-2">
+              <AlertTriangle size={14} className="shrink-0 text-warn" />
+              <span className="text-[12px] font-semibold text-warn">需要处理（{attention.length}）</span>
+              <button
+                onClick={() => setTab("attention")}
+                className="ml-auto cursor-pointer text-[12px] font-medium text-accent t-fast hover:text-accent-hover"
+              >
+                查看全部 →
+              </button>
+            </div>
+            <div className="mt-1 flex flex-col">
+              {attentionRows.slice(0, 3).map(({ a, s: sess }) => (
+                <button
+                  key={a.sessionId}
+                  onClick={() => sess && onOpenSession(sess)}
+                  className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-left t-fast hover:bg-hover"
+                >
+                  <span className="size-1.5 shrink-0 rounded-full bg-warn anim-pulse-dot" />
+                  <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg">
+                    {sess ? displayTitle(sess) : a.sessionId.slice(0, 8)}
+                  </span>
+                  <span className="shrink-0 rounded-sm border border-warn/30 bg-warn/10 px-1.5 py-0.5 text-[10px] font-medium text-warn">
+                    {attentionLabel(a)}
+                  </span>
+                  <span className="ml-1 hidden max-w-[34%] shrink-0 truncate text-[11px] text-dim xl:inline">{a.detail}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* 首次使用引导：未接入任何模型时主动提示，而非给一片空工作台 */}
         {hasCredential === false && (
@@ -530,31 +629,41 @@ export function HomeDashboard({
             </div>
           </div>
 
-          <div className="card px-4 py-3.5">
+          {/* 本机快照：原「技能调用排行」位（调用次数看热闹，不驱动动作）。
+              数据源与系统页同源（/api/system）；异常值亮 warn 色；「查看 →」进系统页。 */}
+          <div className="card px-4 py-3.5" data-testid="machine-snapshot">
             <div className="flex items-center justify-between">
               <h2 className="flex items-center gap-1.5 text-[14px] font-semibold">
-                <Sparkles size={14} className="text-accent" /> 技能调用排行
+                <Gauge size={14} className="text-accent" /> 本机快照
               </h2>
-              <span className="text-[12px] text-dim">累计 {skillUsage ? skillUsage.total : "…"} 次</span>
+              <button
+                onClick={onOpenSystem}
+                className="cursor-pointer text-[12px] font-medium text-accent t-fast hover:text-accent-hover"
+              >
+                查看 →
+              </button>
             </div>
-            <div className="mt-2.5 flex flex-col">
-              {Array.from({ length: 5 }).map((_, i) => {
-                const sk = skillUsage?.skills[i];
-                return (
-                  <div key={sk?.name ?? `s-${i}`} className="flex items-center gap-2.5 border-b border-line-soft py-2 last:border-b-0">
-                    <span className={cn("w-5 text-center text-[11px] font-bold", sk && i === 0 ? "text-accent" : "text-dim/40")}>{i + 1}</span>
-                    {sk ? (
-                      <>
-                        <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{sk.name}</span>
-                        <span className="whitespace-nowrap text-[12px] tabular-nums text-muted">{sk.count} 次</span>
-                      </>
-                    ) : (
-                      <span className="text-[12px] text-dim/40">—</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+            {snap ? (
+              <div className="mt-2 grid grid-cols-2 gap-x-6">
+                <SnapRow
+                  label="服务"
+                  value={
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="size-1.5 rounded-full bg-success" />运行中
+                    </span>
+                  }
+                />
+                <SnapRow label="门禁" value={snap.gates.t} tone={snap.gates.tone} />
+                <SnapRow label="备份" value={snap.backup.t} tone={snap.backup.tone} />
+                <SnapRow label="版本" value={snap.version.t} tone={snap.version.tone} />
+                <SnapRow label="磁盘" value={snap.disk.t} tone={snap.disk.tone} />
+                <SnapRow label="内存" value={snap.mem.t} tone={snap.mem.tone} />
+                <SnapRow label="部署" value={snap.deploy.t} tone={snap.deploy.tone} />
+                <SnapRow label="内核" value={snap.kernel.t} tone={snap.kernel.tone} />
+              </div>
+            ) : (
+              <div className="mt-2.5 pb-2 text-[12px] text-dim/40">读取中…</div>
+            )}
           </div>
         </div>
 

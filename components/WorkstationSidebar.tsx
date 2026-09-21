@@ -166,8 +166,11 @@ export function WorkstationSidebar({
           观感就是「文字被直接删掉，栏还在慢慢缩」。现在文字常驻、只改 opacity。 */}
       {isCollapsed ? <LogoMark size={24} /> : <Logo />}
 
+      {/* 工作台不归组：它是所有分组的公共起点（总览 + 入口），不是一个"台面" */}
+      <div className="h-3 shrink-0" />
+      <NavItem collapsed={isCollapsed} icon={<House size={14} />} label="工作台" active={view === "home"} onClick={() => onViewChange("home")} />
+
       <div className={groupCls}>工作区</div>
-          <NavItem collapsed={isCollapsed} icon={<House size={14} />} label="工作台" active={view === "home"} onClick={() => onViewChange("home")} />
           <NavItem collapsed={isCollapsed} icon={<ListChecks size={14} />} label="会话" active={view === "chat"} onClick={() => onViewChange("chat")} />
           <NavItem collapsed={isCollapsed} icon={<FolderGit2 size={14} />} label="代码" active={view === "code"} onClick={() => onViewChange("code")} />
 
