@@ -157,10 +157,16 @@ export interface AgentSessionLike {
   readonly settingsManager: SettingsManager;
   readonly agent: {
     state?: {
-      systemPrompt?: string;
+      /** 0.86 起只读：提示词由转写里的 system 消息承载，改动走「请求前投影」（agent-runtime.ts） */
+      readonly systemPrompt?: string;
       thinkingLevel?: string;
       streamingMessage?: PiAgentMessage;
     };
+    /** 请求前上下文变换（0.86：请求前投影的挂载点） */
+    transformContext?: (
+      messages: PiAgentMessage[],
+      signal?: AbortSignal,
+    ) => Promise<PiAgentMessage[]>;
     prepareNextTurnWithContext?: (
       context: PrepareNextTurnContext,
       signal?: AbortSignal,

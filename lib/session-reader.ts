@@ -647,13 +647,16 @@ function entryToUiMessage(
   entry: SessionEntry,
   options: BuildSessionContextOptions,
 ): AgentMessage | null {
-  // Supported message roles: user, assistant, toolResult, bashExecution.
+  // Supported message roles: user, assistant, toolResult, bashExecution（system 显式跳过，见下）。
   // bashExecution messages enter the case "message" branch (entry.type === "message").
   // The early return at line below ("!options.deferThinking || message.role !== "assistant"")
   // passes non-assistant messages — including bashExecution — through unchanged.
   // normalizeToolCalls is a secondary guard (returns non-assistant messages as-is).
   switch (entry.type) {
     case "message": {
+      // 0.86 起转写会包含 system 消息（提示词 / 工具变更的载体，pi-ai SystemMessage）：
+      // 不是对话内容，UI 聊天流显式跳过（角色白名单见 tools/pi-surface-check.ts 段②）。
+      if ((entry.message as { role?: string }).role === "system") return null;
       let message = options.deferToolResultImages
         ? deferToolResultBase64Images(normalizeToolCalls(entry.message), options.sessionId, entry.id)
         : normalizeToolCalls(entry.message);

@@ -254,6 +254,8 @@ export class AgentSessionWrapper {
   private extensionBindingPromise: Promise<void> | null = null;
   private extensionBindingError: unknown = null;
   private readonly exactSystemPrompt?: () => string;
+  /** 0.86：exactSystemPrompt 以「请求前投影」实现，安装一次即可 */
+  private exactSystemPromptInstalled = false;
   private readonly chatOnly: boolean;
   private readonly onAgentRunComplete?: AgentRunCompleteListener;
   private readonly suppressCompletionNotifications: boolean;
@@ -275,7 +277,6 @@ export class AgentSessionWrapper {
     this.chatOnly = options.chatOnly ?? false;
     this.onAgentRunComplete = options.onAgentRunComplete;
     this.suppressCompletionNotifications = options.suppressCompletionNotifications ?? false;
-    this.installExactSystemPromptContinuation();
     this.applyExactSystemPrompt();
   }
 
@@ -461,24 +462,36 @@ export class AgentSessionWrapper {
     }
   }
 
-  private applyExactSystemPrompt(): void {
-    if (!this.exactSystemPrompt || !this.inner.agent.state) return;
-    this.inner.agent.state.systemPrompt = this.exactSystemPrompt();
+  /**
+   * 0.86 起 `agent.state.systemPrompt` 只读 —— 系统提示词由转写里的 system 消息承载，
+   * 每次请求前回放。0.85 时代「直接写 state」的做法换成**请求前投影**：
+   * 包一层 `agent.transformContext`，把目标提示作为唯一的 system 头注入（其余 system 消息移除）。
+   * 与 SDK 自身处理 `forceSystemPrompt` 的做法一致（agent-session 的
+   * `_installAgentForcedPromptProjection`）。幂等：安装一次，所有请求（含第一条）都会经过；
+   * 在构造函数里调用即可覆盖首请求。
+   */
+  private installExactSystemPromptProjection(): void {
+    if (!this.exactSystemPrompt || this.exactSystemPromptInstalled) return;
+    this.exactSystemPromptInstalled = true;
+    const previous = this.inner.agent.transformContext;
+    const exact = this.exactSystemPrompt;
+    this.inner.agent.transformContext = async (messages, signal) => {
+      const transformed = previous ? await previous(messages, signal) : messages;
+      const wanted = exact();
+      if (wanted === undefined) return transformed;
+      const others = (transformed as Array<{ role?: string }>).filter(
+        (message) => message.role !== "system",
+      );
+      return [
+        { role: "system", content: wanted, timestamp: Date.now() },
+        ...others,
+      ] as unknown as typeof transformed;
+    };
   }
 
-  private installExactSystemPromptContinuation(): void {
-    if (!this.exactSystemPrompt) return;
-    const previous = this.inner.agent.prepareNextTurnWithContext;
-    this.inner.agent.prepareNextTurnWithContext = async (turn, signal) => {
-      const prepared = await previous?.(turn, signal);
-      return {
-        ...prepared,
-        context: {
-          ...(prepared?.context ?? turn.context),
-          systemPrompt: this.exactSystemPrompt!(),
-        },
-      };
-    };
+  /** 兼容旧调用点：含义变为「确保投影已安装」（幂等）。 */
+  private applyExactSystemPrompt(): void {
+    this.installExactSystemPromptProjection();
   }
 
   setActiveToolSelection(toolNames: string[]): void {

@@ -40,10 +40,10 @@
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish"
   },
   "dependencies": {
-    "@earendil-works/pi-agent-core": "0.85.1",
-    "@earendil-works/pi-ai": "0.85.1",
-    "@earendil-works/pi-coding-agent": "0.85.1",
-    "@earendil-works/pi-tui": "0.85.1",
+    "@earendil-works/pi-agent-core": "0.86.1",
+    "@earendil-works/pi-ai": "0.86.1",
+    "@earendil-works/pi-coding-agent": "0.86.1",
+    "@earendil-works/pi-tui": "0.86.1",
     "ansi_up": "^6.0.6",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

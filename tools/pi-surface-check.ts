@@ -50,13 +50,14 @@ const _sessionFormat: 3 = CURRENT_SESSION_VERSION;
  * 断言：SDK 的**每一个**角色，本项目的 `AgentMessage` 都得建模 —— 或进显式白名单。
  * 少一个 = SDK 能产出我们渲染不了的消息。
  *
- * 已归档（2026-09-21 决议）：`branchSummary` / `compactionSummary` **刻意不建模**。
- *   · 全量会话实测（角色直方图）：两角色以 `role` 形式出现 **0 次**；实际存为独立
- *     **条目类型**（`compaction` / `branch_summary`），两条条目路径均已建模并渲染
- *     （lib/session-reader.ts 对应分支）。
+ * 已归档（2026-09-21 决议）：`branchSummary` / `compactionSummary` / `system` **刻意不建模**。
+ *   · `branchSummary` / `compactionSummary`：全量会话实测以 `role` 形式出现 0 次；实际存为
+ *     独立**条目类型**（`compaction` / `branch_summary`），两条条目路径均已建模并渲染。
+ *   · `system`（0.86 新增，pi-ai `SystemMessage`）：承载「转写化的系统提示词 / 工具变更」，
+ *     是内核的提示词载体而非对话内容 —— UI 聊天流显式跳过（lib/session-reader.ts），
+ *     只保留在会话文件里供内核回放。
  *   · 不补消息类型 = 不引入无法用真实数据演练的死分支；护栏不撤：下方 ExtraRoles
- *     仍要求 SDK 多出的角色**恰好**是白名单这两个 —— pi 若把 summary 塞进 message、
- *     或新增任何角色，这里立刻变红。
+ *     仍要求 SDK 多出的角色**恰好**是白名单这三个 —— 任何新角色出现立刻变红。
  */
 type AssertRoleCovered<R extends AgentMessage["role"]> = R;
 type _role0 = AssertRoleCovered<"user">;
@@ -65,7 +66,7 @@ type _role2 = AssertRoleCovered<"toolResult">;
 type _role3 = AssertRoleCovered<"custom">;
 type _role4 = AssertRoleCovered<"bashExecution">;
 /** 白名单（见上方「已归档」）：SDK 多出的角色必须恰好是这两个已知缺口。 */
-type DeliberateRoleGaps = "branchSummary" | "compactionSummary";
+type DeliberateRoleGaps = "system" | "branchSummary" | "compactionSummary";
 type ExtraRoles = Exclude<SDKAgentMessage["role"], AgentMessage["role"]>;
 type _extraRolesAreKnown = [ExtraRoles] extends [DeliberateRoleGaps]
   ? true

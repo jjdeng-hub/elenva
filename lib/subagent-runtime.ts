@@ -299,15 +299,8 @@ export function createSubagentController(
             // SDK InputSource — "rpc" = issued programmatically, not typed by a user
             // at a TUI. Same value the parent session sends (lib/agent-runtime.ts).
             source: "rpc",
-            ...(chatOnly
-              ? {
-                  preflightResult: (success: boolean) => {
-                    if (success && inner.agent.state) {
-                      inner.agent.state.systemPrompt = profile.systemPrompt;
-                    }
-                  },
-                }
-              : {}),
+            // chatOnly 的精确系统提示词由 registerSession 包装层安装的「请求前投影」负责
+            // （0.86 起 state.systemPrompt 只读，不能在此直写；见 lib/agent-runtime.ts）。
           });
           const text = inner.getLastAssistantText()?.trim();
           const aborted = stored.abortRequested && !maxTurnsReached;
