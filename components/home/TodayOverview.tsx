@@ -9,6 +9,7 @@ import type { UsageReport } from "@/lib/usage-aggregate";
 export function TodayOverview({ report, className }: { report: UsageReport; className?: string }) {
   const days = report.days.slice(-14);
   const max = Math.max(...days.map((d) => d.cost), 1e-9);
+  const hasData = days.some((d) => d.cost > 0);
   const t = report.today.tokens;
 
   return (
@@ -34,7 +35,17 @@ export function TodayOverview({ report, className }: { report: UsageReport; clas
       </div>
       {/* 柱状图区吃满剩余高度：卡片被拉到与左列等高时，增长的是图形而不是空白 */}
       <div className="mt-2.5 flex min-h-0 flex-1 flex-col justify-end">
-        <svg viewBox={`0 0 100 22`} className="h-full max-h-24 w-full" preserveAspectRatio="none">
+        {/* 全空态（2026-09-21）：14 天都无消耗时给一句说明，而不是一张看起来没加载完的空图 */}
+        {!hasData && (
+          <div className="flex flex-1 items-center justify-center pb-1 text-[12px] text-dim">
+            近 14 日暂无消耗记录
+          </div>
+        )}
+        <svg
+          viewBox={`0 0 100 22`}
+          className={cn("h-full max-h-24 w-full", !hasData && "hidden")}
+          preserveAspectRatio="none"
+        >
           {/* 底槽 + 只画有值的日：成本为 0 的日子若也画 h=1 的柱，
               在拉伸坐标系（preserveAspectRatio=none）下会变成一排误导性的虚线段 */}
           <rect x={0} y={21.4} width={100} height={0.6} fill="var(--panel-2)" />
@@ -58,7 +69,7 @@ export function TodayOverview({ report, className }: { report: UsageReport; clas
             );
           })}
         </svg>
-        <div className="mt-0.5 flex justify-between text-[11px] text-dim">
+        <div className={cn("mt-0.5 flex justify-between text-[11px] text-dim", !hasData && "hidden")}>
           <span>{days[0]?.date.slice(5)}</span>
           <span>近 14 日成本</span>
           <span>今天</span>
