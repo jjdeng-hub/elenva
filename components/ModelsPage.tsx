@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Cpu, Download, KeyRound, Loader2, RefreshCw, Save, ShieldCheck, X } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { dialogConfirm, dialogPrompt, toast } from "@/components/ui/dialog";
@@ -124,13 +125,13 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
     p.auth ? "chip-success" : p.envSet ? "chip-accent" : "";
 
   return (
-    <div className="rounded-card border border-line bg-panel" data-testid="provider-auth">
-      <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
-        <span className="text-[13px] font-semibold text-fg">厂商与密钥</span>
+    <Card testId="provider-auth">
+      <CardHeader>
+        <CardTitle>厂商与密钥</CardTitle>
         <span className="text-[12px] text-dim">
           内置 {providers.length} 个厂商 · 已配置 {configuredCount} 个 · 存放于 ~/.pi/agent/auth.json
         </span>
-      </div>
+      </CardHeader>
       {loading ? (
         <div className="flex items-center gap-2 px-4 py-5 text-[12px] text-dim">
           <Loader2 size={14} className="animate-spin" /> 加载厂商目录…
@@ -242,7 +243,7 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
           </div>
         </>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -419,9 +420,9 @@ export function ModelsPage() {
           <ModelScopeEditor />
 
         {/* 已配置 providers（models.json 自定义 Provider，高级用法） */}
-        <div className="rounded-card border border-line bg-panel">
-          <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
-            <span className="text-[13px] font-semibold text-fg">自定义 Provider（高级）</span>
+        <Card>
+          <CardHeader>
+            <CardTitle>自定义 Provider（高级）</CardTitle>
             <span className="text-[11px] text-dim">写入 models.json，用于中转站 / 自建网关；开箱即用的厂商直接在上方「厂商与密钥」输入 Key 即可</span>
             <span className="ml-auto shrink-0 text-[11px] text-dim">{providerNames.length} 个</span>
             {savedMsg && (
@@ -429,7 +430,7 @@ export function ModelsPage() {
                 {savedMsg}
               </span>
             )}
-          </div>
+          </CardHeader>
           {loading && (
             <div className="flex items-center gap-2 px-4 py-5 text-[12px] text-dim">
               <Loader2 size={14} className="animate-spin" /> 加载配置…
@@ -565,10 +566,10 @@ export function ModelsPage() {
               </div>
             );
           })}
-        </div>
+        </Card>
 
         {/* 从目录添加（自定义 Provider 的高级用法） */}
-        <div className="rounded-card border border-line bg-panel p-4">
+        <Card className="p-4">
           <div className="mb-2 text-[12px] font-semibold text-fg">从模型目录添加（models.dev · 高级）</div>
           <div className="flex gap-2">
             <input
@@ -605,7 +606,7 @@ export function ModelsPage() {
               ))}
             </div>
           )}
-          </div>
+          </Card>
         </div>
       </div>
 

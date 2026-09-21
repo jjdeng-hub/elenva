@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { FlaskConical, GitBranch, Loader2, Play, RotateCw, Trash2, Upload } from "lucide-react";
+import { PageHeader } from "@/components/ui/bits";
+import { Card, CardHeader } from "@/components/ui/card";
 import { cn } from "@/components/lib/utils";
 import { dialogConfirm, toast } from "@/components/ui/dialog";
 import type { MemoryProject } from "@/components/MemoryPage";
@@ -192,15 +194,14 @@ export function CandidatesPage({
       {/* 与其它页共用 page-col：之前它直接贴在窗口边缘（两侧 0 边距），
           与其余页的 32px 对齐不一致 */}
       <div className="page-col flex flex-col gap-3 py-6">
-        <div className="card">
-        <div className="card-hd">
-          <FlaskConical size={14} className="text-accent" />
-          <span className="sect-title">并行试验</span>
-        </div>
-        <div className="card-bd flex flex-col gap-3">
-          <p className="text-[12px] leading-relaxed text-muted">
-            同一句话同时开几个候选，各自在独立的 git 工作区里跑，跑完并排比改动。
-            <span className="text-dim">每个候选都会真实消耗 token；采用只把改动打回主工作区，不提交、不切分支。</span>
+        <PageHeader
+          icon={<FlaskConical size={16} />}
+          title="并行试验"
+          subtitle="同一句话同时开几个候选，各自在独立的 git 工作区里跑，跑完并排比改动"
+        />
+        <Card className="flex flex-col gap-3 p-4">
+          <p className="text-[11px] leading-relaxed text-dim">
+            每个候选都会真实消耗 token；采用只把改动打回主工作区，不提交、不切分支。
           </p>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -273,14 +274,13 @@ export function CandidatesPage({
               会创建 <span className="font-mono">elenva/&lt;组&gt;-N</span> 分支与对应工作区目录。
             </span>
           </div>
-        </div>
-      </div>
+        </Card>
 
       {groups.length === 0 && !loading && (
         /* 空态不该只是一行提示：这页的入口只有顶部表单，第一次进来的人既不知道
            该写什么任务，也不知道「候选数」意味着什么。把下方近千像素的空白
            换成「这页怎么用 + 可直接点选的示例任务」。 */
-        <div className="card px-6 py-10">
+        <Card className="px-6 py-10">
           <div className="mx-auto flex max-w-[620px] flex-col items-center text-center">
             <FlaskConical size={20} className="text-dim" />
             <div className="mt-3 text-[14px] font-semibold text-fg">还没有试验组</div>
@@ -304,19 +304,19 @@ export function CandidatesPage({
               </div>
             </div>
           </div>
-        </div>
+        </Card>
       )}
 
       {groups.map((group) => (
-        <div key={group.id} className="card">
-          <div className="card-hd">
+        <Card key={group.id}>
+          <CardHeader>
             <GitBranch size={12} className="text-dim" />
             <span className="truncate text-[12px] text-fg" title={group.prompt}>{group.prompt}</span>
             <span className="ml-auto shrink-0 text-[11px] text-dim">
               基线 {group.baseCommit.slice(0, 7)} · {shortTime(group.createdAt)}
             </span>
-          </div>
-          <div className="card-bd">
+          </CardHeader>
+          <div className="px-4 py-3">
             <div className={cn("grid gap-2", group.candidates.length === 2 ? "md:grid-cols-2" : "md:grid-cols-3")}>
               {group.candidates.map((candidate) => (
                 <div key={candidate.sessionId || candidate.branch} className="flex flex-col rounded-lg border border-line bg-panel-2/60 p-2.5">
@@ -378,7 +378,7 @@ export function CandidatesPage({
               ))}
             </div>
           </div>
-        </div>
+        </Card>
       ))}
       </div>
     </div>

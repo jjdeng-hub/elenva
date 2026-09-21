@@ -1,6 +1,7 @@
 "use client";
 
 import { Archive, ArchiveRestore, Download, FileText, Loader2, Plus, RefreshCw, Save, Search, Sparkles, X } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { PageHeader } from "@/components/ui/bits";
@@ -350,7 +351,7 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
 
         <div className="grid items-start gap-5 xl:grid-cols-[minmax(0,7fr)_minmax(0,3fr)]">
         {/* 从 skills.sh 安装 */}
-        <div className="rounded-card border border-line bg-panel p-4 xl:order-2 xl:sticky xl:top-6 xl:self-start">
+        <Card className="p-4 xl:order-2 xl:sticky xl:top-6 xl:self-start">
           <div className="mb-2 flex items-center gap-1.5 text-[12px] font-semibold text-fg">
             <Plus size={14} className="text-accent" />
             从 skills.sh 安装新技能
@@ -406,10 +407,10 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
               ))}
             </div>
           )}
-        </div>
+        </Card>
 
         {/* 已装技能列表 */}
-        <div className="rounded-card border border-line bg-panel xl:order-1">
+        <Card className="xl:order-1">
           {loading && (
             <div className="flex items-center gap-2 px-4 py-6 text-[12px] text-dim">
               <Loader2 size={14} className="animate-spin" /> 加载技能中…
@@ -563,7 +564,7 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
               </div>
             </div>
           )}
-          </div>
+          </Card>
         </div>
       </div>
     </div>

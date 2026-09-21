@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronRight, Download, Loader2, Package, Plug, RefreshCw, Search, Sparkles, Star, Trash2 } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { PageHeader } from "@/components/ui/bits";
@@ -232,11 +233,11 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
-      <div className="page-col-form py-6">
+      <div className="page-col py-6">
         <PageHeader icon={<Plug size={16} />} title="插件" subtitle="安装 Pi 包，扩展能力、技能、命令与主题" />
 
         {/* 安装栏 */}
-        <div className="mb-4 rounded-card border border-line bg-panel p-4">
+        <Card className="mb-4 p-4">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="text-[13px] font-semibold text-fg">安装插件</span>
             <span className="text-[11px] text-dim">从 npm、Git 仓库或本地路径安装</span>
@@ -295,10 +296,10 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
               </div>
             </div>
           </details>
-        </div>
+        </Card>
 
         {/* 发现插件（npm registry 搜索） */}
-        <div className="mb-4 rounded-card border border-line bg-panel p-4">
+        <Card className="mb-4 p-4">
           <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="flex items-center gap-1.5 text-[13px] font-semibold text-fg">
               <Sparkles size={14} className="text-accent" />
@@ -405,13 +406,13 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
               })}
             </div>
           )}
-        </div>
+        </Card>
 
-        <div className="rounded-card border border-line bg-panel">
-          <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
-            <span className="text-[13px] font-semibold text-fg">已安装</span>
+        <Card>
+          <CardHeader>
+            <CardTitle>已安装</CardTitle>
             <span className="ml-auto text-[12px] text-dim">{packages.length} 个</span>
-          </div>
+          </CardHeader>
           {loading && (
             <div className="flex items-center gap-2 px-4 py-5 text-[12px] text-dim">
               <Loader2 size={14} className="animate-spin" /> 加载中…
@@ -480,7 +481,7 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
               </div>
             ))}
           </div>
-        </div>
+        </Card>
       </div>
     </div>
   );

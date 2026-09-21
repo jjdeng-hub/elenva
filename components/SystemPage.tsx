@@ -1,6 +1,7 @@
 "use client";
 
 import { Archive, Gauge, GitCommitHorizontal, Layers, RefreshCw, Server, ShieldCheck } from "lucide-react";
+import { Card as UICard, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
@@ -25,15 +26,15 @@ function Card({
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-card border border-line bg-panel">
-      <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
+    <UICard>
+      <CardHeader>
         <span className="text-accent">{icon}</span>
-        <span className="text-[13px] font-semibold text-fg">{title}</span>
+        <CardTitle>{title}</CardTitle>
         {chip && <span className="ml-auto flex items-center gap-1 text-[11px]">{chip}</span>}
-      </div>
+      </CardHeader>
       <div className="flex flex-col gap-1.5 px-4 py-3 text-[12px]">{children}</div>
       {hint && <div className="border-t border-line-soft px-4 py-2 text-[11px] leading-relaxed text-dim">{hint}</div>}
-    </section>
+    </UICard>
   );
 }
 
@@ -157,9 +158,9 @@ export function SystemPage() {
         )}
 
         {!data && error && (
-          <div className="rounded-card border border-line bg-panel px-4 py-10 text-center text-[12px] text-warn">
+          <UICard className="px-4 py-10 text-center text-[12px] text-warn">
             读取失败：{error}
-          </div>
+          </UICard>
         )}
 
         {data && (

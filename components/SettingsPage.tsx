@@ -15,6 +15,7 @@ import {
   SunMedium,
   Wrench,
 } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/components/lib/utils";
 import { toast } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/bits";
@@ -150,10 +151,10 @@ function PiSettingsSection() {
   };
 
   return (
-    <div className="rounded-card border border-line bg-panel">
-      <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
+    <Card>
+      <CardHeader>
         <Boxes size={14} className="text-accent" />
-        <span className="text-[13px] font-semibold text-fg">Pi 行为</span>
+        <CardTitle>Pi 行为</CardTitle>
         <span className="truncate text-[11px] text-dim">{path || "~/.pi/agent/settings.json"}</span>
         <button
           onClick={() => void save()}
@@ -163,7 +164,7 @@ function PiSettingsSection() {
         >
           {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存
         </button>
-      </div>
+      </CardHeader>
       {loading ? (
         <div className="flex justify-center py-5">
           <Loader2 size={14} className="animate-spin text-dim" />
@@ -265,7 +266,7 @@ function PiSettingsSection() {
           </Field>
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -304,12 +305,12 @@ function ToolsSection() {
   };
 
   return (
-    <div className="rounded-card border border-line bg-panel">
-      <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
+    <Card>
+      <CardHeader>
         <Wrench size={14} className="text-accent" />
-        <span className="text-[13px] font-semibold text-fg">工具</span>
+        <CardTitle>工具</CardTitle>
         <span className="ml-auto text-[11px] text-dim">即时生效</span>
-      </div>
+      </CardHeader>
       <div className="flex items-center gap-3 px-4 py-3.5">
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium text-fg">PowerShell 工具</div>
@@ -346,7 +347,7 @@ function ToolsSection() {
           </button>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -373,11 +374,11 @@ function AboutSection() {
   };
 
   return (
-    <div className="rounded-card border border-line bg-panel">
-      <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
+    <Card id="settings-about">
+      <CardHeader>
         <SettingsIcon size={14} className="text-accent" />
-        <span className="text-[13px] font-semibold text-fg">关于</span>
-      </div>
+        <CardTitle>关于</CardTitle>
+      </CardHeader>
       <div className="px-4 py-4 text-[12px] text-muted">
         <div className="mb-1">
           ELENVA Web Workstation {process.env.NEXT_PUBLIC_APP_VERSION || "v0.1.0"} · 界面层独立实现，后端基于 pi-web
@@ -393,7 +394,7 @@ function AboutSection() {
         </button>
         {result && <div className="mt-2 rounded-md bg-panel-2 px-3 py-1.5 text-[12px]">{result}</div>}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -420,14 +421,14 @@ function AppearanceSection() {
   };
 
   return (
-    <div className="rounded-card border border-line bg-panel">
-      <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
+    <Card>
+      <CardHeader>
         <Palette size={14} className="text-accent" />
-        <span className="text-[13px] font-semibold text-fg">外观</span>
+        <CardTitle>外观</CardTitle>
         <span className="ml-auto text-[11px] text-dim">
           {resolved === "dark" ? "深色生效中" : "浅色生效中"}
         </span>
-      </div>
+      </CardHeader>
       <div className="px-4 py-4">
         <div className="grid grid-cols-3 gap-2" role="group" aria-label="主题外观">
           {THEME_CHOICES.map((c) => {
@@ -461,7 +462,7 @@ function AppearanceSection() {
             : `已固定为${pref === "dark" ? "深色" : "浅色"}，不随系统外观变化。`}
         </div>
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -569,12 +570,12 @@ function GuardrailsSection({ projects, defaultCwd }: {
   const ruleEntries = Object.entries(allowByProject);
 
   return (
-    <div className="rounded-card border border-line bg-panel">
-      <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
+    <Card>
+      <CardHeader>
         <ShieldCheck size={14} className="text-accent" />
-        <span className="text-[13px] font-semibold text-fg">安全确认</span>
+        <CardTitle>安全确认</CardTitle>
         <span className="ml-auto text-[11px] text-dim">即时生效</span>
-      </div>
+      </CardHeader>
       <div className="px-4 py-3.5">
         <div className="text-[13px] font-medium text-fg">危险操作审批</div>
         <p className="mt-0.5 text-[12px] text-dim">
@@ -729,7 +730,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
           </div>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
@@ -757,14 +758,14 @@ function HostPromptCard() {
   }, []);
 
   return (
-    <div className="rounded-card border border-line bg-panel">
-      <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
+    <Card>
+      <CardHeader>
         <ScrollText size={14} className="text-accent" />
-        <span className="text-[13px] font-semibold text-fg">宿主提示词</span>
+        <CardTitle>宿主提示词</CardTitle>
         {data && (
           <span className="ml-auto text-[11px] tabular-nums text-dim">{data.totalChars} 字符 · {data.sections.length} 段</span>
         )}
-      </div>
+      </CardHeader>
       <div className="px-4 py-3.5">
         <p className="text-[12px] leading-relaxed text-dim">
           每个会话都注入的一段系统提示，位于 pi 基座之后、项目 <span className="font-mono text-muted">AGENTS.md</span> 之前。
@@ -835,7 +836,7 @@ function HostPromptCard() {
           </>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
