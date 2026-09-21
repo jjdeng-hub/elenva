@@ -47,17 +47,16 @@ const _sessionFormat: 3 = CURRENT_SESSION_VERSION;
  * 加上 pi 在 `core/messages.d.ts` 里对 `CustomAgentMessages` 的**声明合并**
  * （bashExecution / custom / branchSummary / compactionSummary）。
  *
- * 断言：SDK 的**每一个**角色，本项目的 `AgentMessage` 都得建模。
+ * 断言：SDK 的**每一个**角色，本项目的 `AgentMessage` 都得建模 —— 或进显式白名单。
  * 少一个 = SDK 能产出我们渲染不了的消息。
  *
- * 已知缺口（2026-09-19 调研）：`branchSummary` / `compactionSummary` 未建模。
- *   · 目前不致命：磁盘实测 0 处以 `role` 形式出现 —— SDK 把 summary 存成独立的
- *     **条目类型**（`compaction` / `branchSummary`），而 `CompactionEntry` /
- *     `BranchSummaryEntry` 我们都建模了。
- *   · 但它**正因为 0 出现才危险**：pi 若改成塞进 `message`，我们既没有类型护栏，
- *     也没有数据演练过这条路径。
- *   → 修法：要么补两个消息类型，要么在 `lib/types.ts` 写明「刻意不建模」，
- *     把这里的断言改成显式白名单。
+ * 已归档（2026-09-21 决议）：`branchSummary` / `compactionSummary` **刻意不建模**。
+ *   · 全量会话实测（角色直方图）：两角色以 `role` 形式出现 **0 次**；实际存为独立
+ *     **条目类型**（`compaction` / `branch_summary`），两条条目路径均已建模并渲染
+ *     （lib/session-reader.ts 对应分支）。
+ *   · 不补消息类型 = 不引入无法用真实数据演练的死分支；护栏不撤：下方 ExtraRoles
+ *     仍要求 SDK 多出的角色**恰好**是白名单这两个 —— pi 若把 summary 塞进 message、
+ *     或新增任何角色，这里立刻变红。
  */
 type AssertRoleCovered<R extends AgentMessage["role"]> = R;
 type _role0 = AssertRoleCovered<"user">;
@@ -65,12 +64,10 @@ type _role1 = AssertRoleCovered<"assistant">;
 type _role2 = AssertRoleCovered<"toolResult">;
 type _role3 = AssertRoleCovered<"custom">;
 type _role4 = AssertRoleCovered<"bashExecution">;
-type _role5 = AssertRoleCovered<"branchSummary">;
-type _role6 = AssertRoleCovered<"compactionSummary">;
-
-/** 反向：SDK 多出来的角色必须恰好是那两个已知缺口；否则就是新角色，得去适配层加分支。 */
+/** 白名单（见上方「已归档」）：SDK 多出的角色必须恰好是这两个已知缺口。 */
+type DeliberateRoleGaps = "branchSummary" | "compactionSummary";
 type ExtraRoles = Exclude<SDKAgentMessage["role"], AgentMessage["role"]>;
-type _extraRolesAreKnown = [ExtraRoles] extends ["branchSummary" | "compactionSummary"]
+type _extraRolesAreKnown = [ExtraRoles] extends [DeliberateRoleGaps]
   ? true
   : "SDK 新增/删除了消息角色 —— 检查 normalize / 渲染分发 / 会话聚合是否漏了适配";
 const _extraRolesKnown: _extraRolesAreKnown = true;

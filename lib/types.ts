@@ -115,6 +115,12 @@ export interface BashExecutionMessage {
   timestamp?: number;
 }
 
+/**
+ * SDK 角色覆盖见 tools/pi-surface-check.ts 段②：「branchSummary」/「compactionSummary」
+ * **刻意不建模**（2026-09-21 决议）—— 全量会话实测两角色以 `role` 出现 0 次，
+ * 实际存为条目类型 `compaction` / `branch_summary`（均已建模，见本文件条目定义）；
+ * 探针的 ExtraRoles 白名单仍守着这条边界。
+ */
 export type AgentMessage = UserMessage | AssistantMessage | ToolResultMessage | CustomMessage | BashExecutionMessage;
 
 export type ExtensionUiRequest =
