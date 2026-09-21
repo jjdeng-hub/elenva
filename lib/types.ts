@@ -21,14 +21,17 @@ export interface TextContent {
   text: string;
 }
 
+/**
+ * 图片内容块 —— 与 SDK（@earendil-works/pi-ai 的 ImageContent）对齐的平铺形态。
+ * 磁盘与会话文件中即为 `{ type, data, mimeType }`；
+ * `url` 为客户端专有字段（tool-result 懒加载图），只存在于内存、不写盘。
+ * legacy `{ source: { ... } }` 只作旧数据兜底在读取层识别（见 lib/image-block.ts）。
+ */
 export interface ImageContent {
   type: "image";
-  source: {
-    type: "base64" | "url";
-    media_type?: string;
-    data?: string;
-    url?: string;
-  };
+  data: string;
+  mimeType: string;
+  url?: string;
 }
 
 export interface ThinkingContent {

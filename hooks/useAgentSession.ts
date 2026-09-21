@@ -1384,7 +1384,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     cancelEventStreamGrace();
     promptPendingRef.current = true;
 
-    const imageBlocks = images?.map((img) => ({ type: "image" as const, source: { type: "base64" as const, media_type: img.mimeType, data: img.data } }));
+    const imageBlocks = images?.map((img) => ({ type: "image" as const, data: img.data, mimeType: img.mimeType }));
     const userMsg: AgentMessage = {
       role: "user",
       content: imageBlocks?.length

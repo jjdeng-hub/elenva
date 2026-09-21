@@ -616,12 +616,13 @@ function deferToolResultBase64Images(
       image.bytes > 0 &&
       image.bytes <= MAX_TOOL_RESULT_IMAGE_BYTES
     ) {
-      const source: ImageContent["source"] = {
-        type: "url",
-        media_type: image.mime,
+      // 懒加载块：url 指向 tool-result-image 接口，展开时再取真实数据；data 留空占位（不写盘）。
+      return [{
+        type: "image",
+        data: "",
+        mimeType: image.mime,
         url: `/api/sessions/${encodeURIComponent(sessionId)}/entries/${encodeURIComponent(entryId)}/tool-result-image?blockIndex=${blockIndex}`,
-      };
-      return [{ type: "image", source } satisfies ImageContent];
+      } satisfies ImageContent];
     }
 
     // Retain the old bounded fallback for callers that do not have a session id.

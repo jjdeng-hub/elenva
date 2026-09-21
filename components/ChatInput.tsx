@@ -31,6 +31,7 @@ import { compactionTrigger, useCompactionSettings } from "@/hooks/useCompactionS
 import { Popover } from "@/components/ui/popover";
 import type { AttachedImage, ChatInputHandle, ThinkingLevelOption } from "@/hooks/useAgentSession";
 import { MAX_ATTACHED_IMAGE_BYTES, MAX_ATTACHED_IMAGES } from "@/lib/image-attachments";
+import { imageData } from "@/lib/image-block";
 import type { ToolPreset } from "@/lib/tool-presets";
 import type { ReactNode } from "react";
 
@@ -208,12 +209,15 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         } else if (Array.isArray(content)) {
           for (const block of content) {
             if (block.type === "text") nextText += block.text;
-            else if (block.type === "image" && block.source?.type === "base64" && block.source.data) {
-              nextImages.push({
-                data: block.source.data,
-                mimeType: block.source.media_type || "image/png",
-                previewUrl: `data:${block.source.media_type || "image/png"};base64,${block.source.data}`,
-              });
+            else if (block.type === "image") {
+              const inline = imageData(block);
+              if (inline) {
+                nextImages.push({
+                  data: inline.data,
+                  mimeType: inline.mimeType,
+                  previewUrl: `data:${inline.mimeType};base64,${inline.data}`,
+                });
+              }
             }
           }
         }

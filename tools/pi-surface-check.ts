@@ -91,20 +91,10 @@ type _extraBlocksAreKnown = [ExtraBlocks] extends [never]
 const _extraBlocksKnown: _extraBlocksAreKnown = true;
 
 /* ─────────────── ④ 图片形态 ───────────────
- * **已知漂移（活的）**：
- *   · SDK / 磁盘真实形态：`{ type: "image", data: string, mimeType: string }`（平铺）
- *   · 本项目 `lib/types.ts` 声明的：`{ type: "image", source: { type, data, media_type } }`（legacy）
- *
- * 实测：14 份会话文件里 legacy 形态 **0** 处、平铺形态 **4** 处。
- * 大多数读取点两种都认（`lib/session-reader.ts`、`lib/prompt-recovery.ts` 有平铺兜底），
- * 但 `components/MessageView.tsx` 的 `UserMessageView` 与 `components/ChatInput.tsx`
- * 的 `replaceMessage` **只认 legacy** →
- *   从界面上传图片 → 乐观回显（legacy）正常 → 刷新后走会话文件（平铺）→ 缩略图渲染成空图；
- *   编辑那条消息时图片静默丢失。
- * 目前没有历史数据踩到（磁盘上的图全是 toolResult），是**未爆的雷**。
- *
- * 修法：定一个规范取数函数（如 `imageData(block)`）全项目单点；
- * 或把 `ImageContent` 改成「平铺 | legacy」的联合并在渲染点收窄。修完后这行转绿。
+ * 已修复（2026-09-21，分支 `fix/image-shape`）：`ImageContent` 统一为 SDK 平铺形态
+ * `{ type, data, mimeType }`（`url` 为客户端专有的懒加载字段，不写盘）；
+ * legacy `{ source: { ... } }` 只在读取层兜底（`lib/image-block.ts` 单点取数：
+ * `imageData` / `imageBlockSrc`）。本段此后为**回归闸门**：形态再漂移即红。
  */
 type _imageShapeMatchesSDK = [ImageContent] extends [SDKImageContent]
   ? true

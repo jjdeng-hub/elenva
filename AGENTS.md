@@ -188,10 +188,10 @@ python tools/style-converge.py
   i18n 词条一起删除（`public/sw.js` 的 push 监听保留，重新启用时从 git 历史取回服务端即可）。
 - **中文字数区间**：Markdown 渲染链（`lib/markdown.ts`）固定 `singleTilde: false`，
   否则 GFM 会把「100~200倍」当删除线。改动该文件时别丢掉这个选项。
-- **图片形态漂移（活的雷）**：磁盘真实形态是平铺 `{type:"image",data,mimeType}`（14 份会话实测 4 处），
-  而 `lib/types.ts` 只声明 legacy `{source:{...}}`，且 `components/MessageView.tsx`（UserMessageView）与
-  `components/ChatInput.tsx`（replaceMessage）只认 legacy → 从界面上传图片、刷新后缩略图渲染成空图、编辑该消息图片静默丢失。
-  修法：抽 `imageData(block)` 单点取数。`tools/pi-surface-check.ts` 第④段转绿即算修完。
+- **图片形态（2026-09-21 已修复，分支 fix/image-shape）**：曾为活的雷——磁盘是平铺 `{type,data,mimeType}`、
+  声明是 legacy `{source:{...}}`，从界面上传的图片刷新后渲染空图、编辑时静默丢失。现 `ImageContent` 与 SDK
+  对齐（+客户端懒加载 `url`），legacy 仅读取层兜底；单点取数在 `lib/image-block.ts`（`imageData` / `imageBlockSrc`）；
+  `tools/pi-surface-check.ts` 第④段已转绿。
 - **飞书侧缺宿主层**：守护进程拉起的 `pi --mode rpc` 会话没有 ELENVA 的身份段与护栏（审批闸门/工具限制）。
   软提示入口是 `~/.pi/agent/APPEND_SYSTEM.md`（只对 CLI/飞书侧生效，不会重复注入网页会话）；硬护栏无现成入口。
 - **记忆页已支持条目级编辑**（2026-09-20）：Agent 记忆（`USER.md` / `MEMORY.md` / `failures.md` / 项目记忆）
