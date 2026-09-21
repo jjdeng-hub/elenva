@@ -13,6 +13,10 @@ import { invalidateModelsCache } from "./models-cache";
 export const DELIVERY_MODES = ["all", "one-at-a-time"] as const;
 export type DeliveryMode = (typeof DELIVERY_MODES)[number];
 
+/** 提示词缓存保温模式（0.86 内核）：off 关 / streaming 长工具期间（默认）/ idle 空闲也保温 */
+export const CACHE_WARMING_MODES = ["off", "streaming", "idle"] as const;
+export type CacheWarmingMode = (typeof CACHE_WARMING_MODES)[number];
+
 export interface PiManagedSettings {
   /** 插话（steer）默认送达模式 */
   steeringMode?: DeliveryMode;
@@ -36,6 +40,8 @@ export interface PiManagedSettings {
   defaultModel?: string;
   /** 启动默认推理强度 */
   defaultThinkingLevel?: string;
+  /** 提示词缓存保温（0.86）：off / streaming / idle */
+  cacheWarming?: CacheWarmingMode;
 }
 
 export function getPiSettingsPath(agentDir = getAgentDir()): string {
@@ -75,6 +81,7 @@ export function readManagedSettings(settingsPath = getPiSettingsPath()): {
       defaultProvider: pick<string>("defaultProvider"),
       defaultModel: pick<string>("defaultModel"),
       defaultThinkingLevel: pick<string>("defaultThinkingLevel"),
+      cacheWarming: pick<CacheWarmingMode>("cacheWarming"),
     },
   };
 }
@@ -165,6 +172,15 @@ export function validateManagedPatch(patch: unknown): Partial<PiManagedSettings>
       out[key] = v;
     } else {
       throw new Error(`${key} 必须是不含空白与路径分隔符的字符串`);
+    }
+  }
+  if (p.cacheWarming !== undefined) {
+    if (p.cacheWarming === null) {
+      out.cacheWarming = undefined;
+    } else if (typeof p.cacheWarming === "string" && (CACHE_WARMING_MODES as readonly string[]).includes(p.cacheWarming)) {
+      out.cacheWarming = p.cacheWarming as CacheWarmingMode;
+    } else {
+      throw new Error('cacheWarming 必须是 "off" / "streaming" / "idle"（或 null 重置）');
     }
   }
   if (p.defaultThinkingLevel !== undefined) {
