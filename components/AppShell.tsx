@@ -859,10 +859,26 @@ export function AppShell() {
           <button
             onClick={() => {
               setView("settings");
-              // 页脚入口的语义是「去检查更新」：跳设置后滚到「关于」区块，而不是停在页首
-              setTimeout(() => {
-                document.getElementById("settings-about")?.scrollIntoView({ block: "start", behavior: "smooth" });
-              }, 200);
+              // 页脚入口的语义是「去检查更新」：跳设置后滚到「关于」区块。
+              // 两个坑（2026-09-21 实测）：
+              //  1. 不要用 el.scrollIntoView —— 页面外还套着一层 overflow-hidden 容器，它同样可被
+              //     程序化滚动（幽灵滚动），scrollIntoView 会连它一起拖走、把整个应用顶出可视区；
+              //  2. 不要用 behavior:"smooth" —— 标签页隐藏时（后台/自动化）Chrome 会挂起平滑滚动，
+              //     调用直接静默失效。用瞬时滚动保证任何状态下都到位。
+              // 另外设置页 chunk 冷加载时元素可能还没渲染，轮询等它出现，只滚设置页自己的容器。
+              let tries = 0;
+              const seek = () => {
+                const el = document.getElementById("settings-about");
+                const sc =
+                  el?.closest<HTMLElement>("[data-page-scroll]") ?? el?.closest<HTMLElement>(".overflow-y-auto");
+                if (el && sc) {
+                  const delta = el.getBoundingClientRect().top - sc.getBoundingClientRect().top - 12;
+                  if (Math.abs(delta) > 4) sc.scrollTo({ top: sc.scrollTop + delta, behavior: "auto" });
+                  return;
+                }
+                if (tries++ < 25) setTimeout(seek, 100);
+              };
+              setTimeout(seek, 80);
             }}
             className="cursor-pointer text-accent t-fast hover:text-accent-hover"
           >

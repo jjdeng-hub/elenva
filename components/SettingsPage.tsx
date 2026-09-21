@@ -849,7 +849,7 @@ export function SettingsPage({
   defaultCwd?: string | null;
 } = {}) {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div className="min-h-0 flex-1 overflow-y-auto" data-page-scroll>
       <div className="page-col-form py-6">
         <PageHeader icon={<SettingsIcon size={16} />} title="设置" subtitle="工具开关、版本信息与其他偏好" />
 
