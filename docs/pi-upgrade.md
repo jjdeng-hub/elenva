@@ -10,6 +10,7 @@
 | **兄弟包锁步发布**。`pi-ai` / `pi-agent-core` / `pi-tui` / `pi-protocol` / `pi-server` / `pi-client` / `chord` / `pi-telemetry` 版本号永远一致（截至 0.85.1 共 45 个版本一一对应） | 必须**整组一起升**，不能只升一个。`pi-coding-agent` 还自带 `npm-shrinkwrap.json`（165 个包精确锁定），它的传递依赖是冻结的 |
 | **semver 不可信**。`0.84.3` 是补丁号，却带 `### Breaking Changes`（重命名 `GoogleThinkingLevel`）。274 个版本里 40+ 次 `Breaking Changes` / `Removed` | 不要用版本号判断风险，用 changelog + 验证 |
 | 发布节奏约**每周一版** | 见第五节触发策略 |
+| **0.86 起系统提示词「转写化」**：`agent.state.systemPrompt` 只读；提示词/工具声明由转写里的 `system` 消息承载、请求前回放。SDK 对 `forceSystemPrompt` 用「请求前投影」（`agent.transformContext`） | 别再直写 state；本项目的 `exactSystemPrompt` 已改为投影实现（`lib/agent-runtime.ts`）。角色白名单相应增加 `system`（`tools/pi-surface-check.ts` 段②、`lib/session-reader.ts` 跳过） |
 
 ## 二、查有没有新版
 
@@ -99,7 +100,7 @@ npm ls -g --depth=0 | grep pi     # 全局装了哪些
 
 对齐它用 `npm i -g @earendil-works/pi-coding-agent@<X>`。注意改完要**重启守护进程**才会生效（版本是进程启动时加载的）。
 
-截至 2026-09-19：网页内核 0.85.1、全局 CLI 0.84.4 —— **落后的是 CLI**。
+截至 2026-09-21：网页内核 **0.86.1**（本轮升级）、全局 CLI **0.86.0** —— 档位一致。
 
 ## 七、修改本手册的时机
 
