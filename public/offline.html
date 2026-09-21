@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f5f2" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#161614" />
+    <title>ELENVA · 无法连接到本地服务</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #f6f5f2;
+        --panel: #ffffff;
+        --fg: #2c2c2a;
+        --muted: #5f5e5a;
+        --dim: #6e6c66;
+        --accent: #c9302c;
+        --line: rgba(0, 0, 0, 0.1);
+        font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #161614;
+          --panel: #1e1e1c;
+          --fg: #e8e7e3;
+          --muted: #a8a6a0;
+          --dim: #a8a6a0;
+          --accent: #e05654;
+          --line: rgba(255, 255, 255, 0.1);
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        min-height: 100dvh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: 32px;
+        background: var(--bg);
+        color: var(--fg);
+      }
+
+      main {
+        width: min(100%, 420px);
+        padding: 32px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: var(--panel);
+        text-align: center;
+      }
+
+      img {
+        width: 72px;
+        height: 72px;
+        margin-bottom: 20px;
+      }
+
+      h1 {
+        margin: 0 0 8px;
+        font-size: 16px;
+        font-weight: 600;
+        letter-spacing: -0.01em;
+      }
+
+      p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      em {
+        display: block;
+        margin-top: 6px;
+        color: var(--dim);
+        font-size: 11px;
+        font-style: normal;
+      }
+
+      button {
+        margin-top: 20px;
+        height: 28px;
+        padding: 0 12px;
+        border: none;
+        border-radius: 6px;
+        background: var(--accent);
+        color: #ffffff;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: opacity 120ms ease-out;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        button {
+          color: #1a1a18;
+        }
+      }
+
+      button:hover {
+        opacity: 0.88;
+      }
+
+      button:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icons/icon-192.png" alt="" />
+      <h1>无法连接到本地服务</h1>
+      <p>ELENVA 是运行在你本机的服务，浏览器已缓存了界面但连不上后端。</p>
+      <em>请确认启动窗口仍在运行，然后重试。</em>
+      <button type="button" onclick="location.reload()">重新连接</button>
+    </main>
+  </body>
+</html>

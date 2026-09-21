@@ -1,0 +1,35 @@
+{
+  "//": "tools/ 下探针自己的类型检查配置，与主检查分开跑：tsc -p tools/tsconfig.json。为什么不并进主检查：① pi-surface-check.ts 的「故意报错」就是它的信号机制（断言 SDK 形态与预期不一致时主动失败），并进去会让主检查永远红；② rev/ 是只在本机的回归夹具，写法自由（allowImportingTsExtensions）。",
+  "compilerOptions": {
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "target": "ES2017",
+    "types": [
+      "node"
+    ],
+    "baseUrl": "..",
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    },
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "./**/*.ts"
+  ],
+  "exclude": [
+    "../node_modules",
+    "../.next"
+  ]
+}

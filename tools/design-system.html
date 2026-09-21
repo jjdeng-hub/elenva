@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN" data-page-node-id="XgW43NXMqDR5jX91CxDYTq">
+<head data-page-node-id="HuwTF0Lslvtwfn1OHiKSus">
+<meta charset="utf-8" data-page-node-id="fOn3FvrBQBOOoCFgnBdWwH" />
+<title>ELENVA · 设计系统 v1</title>
+<style>
+  :root {
+    --bg:#f6f5f2; --panel:#ffffff; --panel-2:#f1efeb; --hover:#f0eee9; --active:#fcebeb;
+    --line:rgba(0,0,0,.10); --line-soft:rgba(0,0,0,.05);
+    --fg:#2c2c2a; --muted:#5f5e5a; --dim:#888780;
+    --accent:#c9302c; --accent-hover:#a32d2d; --accent-fg:#fff; --accent-soft:#fcebeb;
+    --danger:#c9302c; --success:#3b6d11; --warn:#ba7517;
+    --r-sm:6px; --r-md:6px; --r-lg:10px; --r-card:12px;
+    --fs-micro:10px; --fs-caption:11px; --fs-small:12px; --fs-body:13px;
+    --fs-subtitle:14px; --fs-title:16px; --fs-display:20px;
+    --sans:"PingFang SC","Microsoft YaHei","Segoe UI",system-ui,sans-serif;
+    --mono:"JetBrains Mono",Consolas,"SF Mono",monospace;
+  }
+  *{box-sizing:border-box;border-color:var(--line)}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--sans);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:48px 32px 80px}
+  .hd{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:40px}
+  .hd h1{font-size:24px;font-weight:600;letter-spacing:-.02em;margin:0}
+  .hd .tag{font-family:var(--mono);font-size:var(--fs-caption);color:var(--dim)}
+  .hd p{margin:0 0 0 auto;font-size:var(--fs-small);color:var(--dim)}
+  section{margin-bottom:44px}
+  h2{font-size:var(--fs-subtitle);font-weight:600;margin:0 0 4px}
+  .sub{font-size:var(--fs-caption);color:var(--dim);margin:0 0 18px}
+  .grid{display:grid;gap:12px}
+  .g4{grid-template-columns:repeat(4,1fr)}
+  .g5{grid-template-columns:repeat(5,1fr)}
+  .g6{grid-template-columns:repeat(6,1fr)}
+  .sw{border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden;background:var(--panel)}
+  .sw i{display:block;height:56px}
+  .sw div{padding:8px 10px;font-size:var(--fs-caption);color:var(--muted)}
+  .sw b{display:block;color:var(--fg);font-weight:500;font-size:var(--fs-small)}
+  .sw u{display:block;font-family:var(--mono);font-size:var(--fs-micro);color:var(--dim);text-decoration:none}
+  .box{background:var(--panel);border:1px solid var(--line);padding:16px;border-radius:var(--r-card)}
+  .r-demo{display:flex;gap:14px;flex-wrap:wrap}
+  .r-demo div{width:96px;height:64px;background:var(--panel-2);border:1px solid var(--line);display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px;font-size:var(--fs-caption);color:var(--dim)}
+  .fs-row{display:flex;align-items:baseline;justify-content:space-between;gap:16px;padding:9px 0;border-bottom:1px solid var(--line-soft)}
+  .fs-row:last-child{border-bottom:0}
+  .fs-row span{font-size:var(--fs-caption);color:var(--dim);font-family:var(--mono)}
+  .fs-row em{font-style:normal;font-size:var(--fs-caption);color:var(--muted)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border:1px solid transparent;border-radius:var(--r-md);background:transparent;font-family:inherit;font-size:var(--fs-small);font-weight:500;line-height:1;color:var(--fg);cursor:pointer;white-space:nowrap;transition:background-color .15s,color .15s,border-color .15s}
+  .btn:disabled{opacity:.5;cursor:not-allowed}
+  .btn-sm{height:26px;padding:0 8px;font-size:var(--fs-caption)}
+  .btn-icon{width:28px;padding:0}
+  .btn-primary{background:var(--accent);color:var(--accent-fg)}
+  .btn-primary:hover:not(:disabled){background:var(--accent-hover)}
+  .btn-ghost{border-color:var(--line);color:var(--muted)}
+  .btn-ghost:hover:not(:disabled){background:var(--hover);color:var(--fg)}
+  .btn-subtle{color:var(--muted)}
+  .btn-subtle:hover:not(:disabled){background:var(--hover);color:var(--fg)}
+  .chip{display:inline-flex;align-items:center;gap:4px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--panel-2);padding:1px 6px;font-size:var(--fs-caption);line-height:1.5;color:var(--muted);white-space:nowrap}
+  .chip-accent{border-color:color-mix(in srgb,var(--accent) 30%,transparent);background:var(--accent-soft);color:var(--accent)}
+  .chip-danger{border-color:color-mix(in srgb,var(--danger) 30%,transparent);background:color-mix(in srgb,var(--danger) 10%,transparent);color:var(--danger)}
+  .chip-warn{border-color:color-mix(in srgb,var(--warn) 30%,transparent);background:color-mix(in srgb,var(--warn) 10%,transparent);color:var(--warn)}
+  .chip-success{border-color:color-mix(in srgb,var(--success) 30%,transparent);background:color-mix(in srgb,var(--success) 10%,transparent);color:var(--success)}
+  .chip-mono{font-family:var(--mono);font-size:var(--fs-caption)}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-card)}
+  .card-hd{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:13px 16px;border-bottom:1px solid var(--line-soft)}
+  .card-hd .t{font-size:var(--fs-subtitle);font-weight:600}
+  .card-hd .m{font-size:var(--fs-caption);color:var(--dim)}
+  .card-bd{padding:12px 16px}
+  .stat{display:flex;align-items:baseline;gap:6px}
+  .stat b{font-size:var(--fs-display);font-weight:600;letter-spacing:-.02em}
+  .stat span{font-size:var(--fs-caption);color:var(--dim)}
+  .note{font-size:var(--fs-caption);color:var(--dim);margin:10px 0 0}
+  .kv{font-family:var(--mono);font-size:var(--fs-caption);color:var(--muted)}
+</style>
+</head>
+<body data-page-node-id="k23LY8nilftDV9AjCAWyi4">
+<div class="wrap" data-page-node-id="ilwCMU6HihcacH9DeABICt">
+  <div class="hd" data-page-node-id="xdfbU0mDfVAnh46oG1gPnz">
+    <h1 data-page-node-id="AITpPAHB7AOe8F50Nn7R1U">ELENVA · 设计系统</h1>
+    <span class="tag" data-page-node-id="C9Kvn2qXe8fBXPDBHtzmIH">v1 · 2026-09-09</span>
+    <p data-page-node-id="XeyGpq8TDsZt1UFy7s5NvP">工作站风格：红黑白 · 克制 · 层次靠边框与留白</p>
+  </div>
+
+  <section data-page-node-id="qfxArg60rcHIqO3Ryf2Jb0">
+    <h2 data-page-node-id="AEKSJsINC25ZaFooy9vpXo">色彩</h2>
+    <p class="sub" data-page-node-id="IXVMJr8zen73Pw3hh7t52b">语义 token，禁止在组件里写死原色</p>
+    <div class="grid g6" data-page-node-id="tZmhCEKpni2p5Q03YYnGcP">
+      <div class="sw" data-page-node-id="44Dv6vBEaxXcFznrgWErhQ"><i style="background:#f6f5f2" data-page-node-id="xsAJ8QG1kdSdMtKjldPZ0B"></i><div data-page-node-id="QMKP2vHy0aREXB89nh7BQU"><b data-page-node-id="xYHxGRUHeTXCV9c61nJ278">bg</b><u data-page-node-id="9VtoGrDAt81ou9qymkHCVF">#f6f5f2</u>画布</div></div>
+      <div class="sw" data-page-node-id="cu8ck7KyNzGAovONSyj62K"><i style="background:#ffffff" data-page-node-id="hfhTobNDnoIcizNRW78Zaj"></i><div data-page-node-id="PVq4rizFXL9muAOeX5x36c"><b data-page-node-id="UgU24v3KQGa369kJN5EoP6">panel</b><u data-page-node-id="3pO0CHGqKPsBHm0k1fuJ8M">#ffffff</u>卡片</div></div>
+      <div class="sw" data-page-node-id="Dwf4sV3HljJoaDcIcQGabv"><i style="background:#f1efeb" data-page-node-id="4xZzx8DSCI4IgeFusugMNX"></i><div data-page-node-id="rYagAExxkb5UGgYJTC0d63"><b data-page-node-id="UPu37WOCPeKMPJ0fnGR8HN">panel-2</b><u data-page-node-id="6E0382W3vn1xpYXN5dAIZ5">#f1efeb</u>内嵌块</div></div>
+      <div class="sw" data-page-node-id="QNtZGtJV8Ebwy1XN0ofLL9"><i style="background:#f0eee9" data-page-node-id="eAWGuHFfGEUEoB0n7qmCIh"></i><div data-page-node-id="0rHApBoYvI1rIC0b4IJj3n"><b data-page-node-id="AsXbnDHL9BzqL85KjgZikq">hover</b><u data-page-node-id="XKhwNElr0k6Ux7WtMSCky8">#f0eee9</u>悬停</div></div>
+      <div class="sw" data-page-node-id="qaKWsOc0cbf7GxebO01Amn"><i style="background:#fcebeb" data-page-node-id="Yc2fZyfYvHgAdlLdBqJsn6"></i><div data-page-node-id="6D6ghm9zpPzeRfXjKr3Psz"><b data-page-node-id="GYUYpjbmCEPBBnS1EvuwXv">active</b><u data-page-node-id="VmbYBsqCQlPxbEPZUfUzRM">#fcebeb</u>选中</div></div>
+      <div class="sw" data-page-node-id="5aCwBPluMjHkf5j1NoDeGZ"><i style="background:#c9302c" data-page-node-id="lLLvJeyEMLFmZp4yeKFqvv"></i><div data-page-node-id="GZP7Deim6SlZoiTbMfKiB6"><b data-page-node-id="hBmG9svvqoRc306jTfWub0">accent</b><u data-page-node-id="ApGz3HCzdvEMYsVd1MY1Hp">#c9302c</u>品牌红</div></div>
+      <div class="sw" data-page-node-id="2LLvHR17tt31REO7Ymxctm"><i style="background:#2c2c2a" data-page-node-id="7eNKpQdNJkXdCREGOAzvEa"></i><div data-page-node-id="RVXH7sLRBLBtWGFDc8rT5Q"><b data-page-node-id="PLy4fXyLT8lzOuBfaysXIb">fg</b><u data-page-node-id="2dktxSfl5AsWk2knqEhHbH">#2c2c2a</u>正文</div></div>
+      <div class="sw" data-page-node-id="PKEtvxKfVRDz7u7vVHpvJT"><i style="background:#5f5e5a" data-page-node-id="8eq1S0ZEvmmQNwwW9rBysf"></i><div data-page-node-id="1YDICA5WUJY5HQBJXaNPGU"><b data-page-node-id="ZjiLLdDYAIkRrBiNfOuJXq">muted</b><u data-page-node-id="dL70wBy5u17oCZYoNRyUul">#5f5e5a</u>次要</div></div>
+      <div class="sw" data-page-node-id="FBDXyeaCRFD2I1iptLEzIq"><i style="background:#888780" data-page-node-id="yUgF3royDASyVUKUZvATmz"></i><div data-page-node-id="Qg3oxaAJxUS3cjEG2Vmu0G"><b data-page-node-id="3gomhfWTVAspUyFJ0Nljke">dim</b><u data-page-node-id="hFWFjSGzpD3NuzmNrUMrjB">#888780</u>元信息</div></div>
+      <div class="sw" data-page-node-id="Mynkd10XwcgbJyBXHYZtyD"><i style="background:#3b6d11" data-page-node-id="JIIJqbvfkJ1AglEqsPDvnk"></i><div data-page-node-id="Xrp15YhL8NpRj7gZ5dT3my"><b data-page-node-id="Q7VvD6uA6mbjZGdaIDSH5M">success</b><u data-page-node-id="cnF4JfF8YDHV6DRGLJWFkW">#3b6d11</u>成功/新增</div></div>
+      <div class="sw" data-page-node-id="cZly7vgYiDwdkABnhsssPf"><i style="background:#ba7517" data-page-node-id="XmuK2LWMDNG3TEKwEQwaVC"></i><div data-page-node-id="eZYtrkx71VUscwDxCjnevP"><b data-page-node-id="atgHYyxtyyYjkfrGYC9kKW">warn</b><u data-page-node-id="7Z4QaWQQ0AB2AoOrKRdXEm">#ba7517</u>警告</div></div>
+      <div class="sw" data-page-node-id="ClgOKHPnijKrEwadyy4ul9"><i style="background:#c9302c" data-page-node-id="6EjUIm86NwbuuTbJtk5mk4"></i><div data-page-node-id="Pu5wb1o2UttWDJfLSIGbGy"><b data-page-node-id="rj4w0LwedKz6lBH7eEMvWd">danger</b><u data-page-node-id="ImwYMZ4OCjWbQuXDJc8xDu">#c9302c</u>错误/删除</div></div>
+    </div>
+  </section>
+
+  <section data-page-node-id="uGBz452Kx1GzWiVqqeEG7C">
+    <h2 data-page-node-id="UuiWMxXmBIgL8EFsnNbcof">圆角</h2>
+    <p class="sub" data-page-node-id="6MylSOODgeDP2HcA5ZM5VH">4 档：sm 6 · md 6 · lg 10 · card 12（pill 仅用于状态点/头像）</p>
+    <div class="r-demo" data-page-node-id="Fvq8yNfZoyS78MkOQw7fWZ">
+      <div style="border-radius:var(--r-sm)" data-page-node-id="aXkSkS0ofLjoVVIwBZTwuY">sm · 6px<br data-page-node-id="ivXWrEliZ9DpyjZ1xtpsgm"><span class="kv" data-page-node-id="wP5wo9gQHDsGU4emIthvJo">chip / 徽标</span></div>
+      <div style="border-radius:var(--r-md)" data-page-node-id="Sr12YiviQQYgAY5G5T9N0S">md · 6px<br data-page-node-id="bHV2t2BxosyFlp5REcPiEw"><span class="kv" data-page-node-id="237wPTa5uVzOs9oXWXtTos">按钮 / 输入框</span></div>
+      <div style="border-radius:var(--r-lg)" data-page-node-id="X7xW2zu8xj8fO2gHra7gw3">lg · 10px<br data-page-node-id="bJqhBe6RSXSA0kqS0gtMBh"><span class="kv" data-page-node-id="6XL2t8RfrEaKqwokwPoozE">弹层 / 菜单</span></div>
+      <div style="border-radius:var(--r-card)" data-page-node-id="AGhNga2PVBl18ErHWsKGkn">card · 12px<br data-page-node-id="l09UCdU5mbk1svgNrh4VPE"><span class="kv" data-page-node-id="F8ho6CtoZMtUizguGTbIZw">卡片 / 面板</span></div>
+    </div>
+  </section>
+
+  <section data-page-node-id="YfLQhMjhXx9TTAf0DOU26B">
+    <h2 data-page-node-id="txSYscEiekFbRCYKzFUH97">字号</h2>
+    <p class="sub" data-page-node-id="ovLqgHUN3lGxGNw8Kpi59k">7 档，取消所有半像素字号</p>
+    <div class="box" data-page-node-id="F1wm5PHr20dQ5ZTnkxWRDD">
+      <div class="fs-row" data-page-node-id="1JEivvk0CsQzbE3fLWeRl0"><b style="font-size:var(--fs-display)" data-page-node-id="Z9nMdKxaLPiNXy9wrZ73gS">在确定性中寻找出口</b><span data-page-node-id="7ACjZa3jvExBX4pjM4lAQU">20 display</span><em data-page-node-id="iCbyL0o5jjh2Phnobh3WWQ">统计卡数值 / 空态标题</em></div>
+      <div class="fs-row" data-page-node-id="4FX1SHNAxwpzZyZShAzfY2"><b style="font-size:var(--fs-title)" data-page-node-id="Y8cOC4Bhr03s20xdJxPTpb">区块标题</b><span data-page-node-id="DhhFkXYJCSwdZH6wcaYOwA">16 title</span><em data-page-node-id="mFssxaW4ayHUpwKMMFiy9a">页面级标题</em></div>
+      <div class="fs-row" data-page-node-id="w7YBHQ6etIcHDvuvz11VRP"><b style="font-size:var(--fs-subtitle)" data-page-node-id="wlJTSoM1kh9Pi7vni1ThVm">小节标题</b><span data-page-node-id="OQbhvKmKhVPxpgiuTEfPio">14 subtitle</span><em data-page-node-id="BdsoO9xfCmW5aA7terxujB">卡片标题 sect-title</em></div>
+      <div class="fs-row" data-page-node-id="vGD5rBLkmZDFaWfUvw2GoP"><span style="font-size:var(--fs-body);color:var(--fg)" data-page-node-id="h5bhH81CMFsn8SN51vFoCg">正文内容，用于表格与主要文本</span><span data-page-node-id="zLto3wAnHmOiCxXT3ZfKZn">13 body</span><em data-page-node-id="EXVbn7LqkfqHFXWRlt8ry2">表格 / 正文</em></div>
+      <div class="fs-row" data-page-node-id="c6ZrN3FJ7KWOZNHPagbitJ"><span style="font-size:var(--fs-small);color:var(--fg)" data-page-node-id="ueCltFRTEFQWZg2xezH8uE">次要文本与按钮文字</span><span data-page-node-id="SiQp1W6RJDRdA1jxgPFlIL">12 small</span><em data-page-node-id="Lj4xlERPSzXbXjrDAFhEM0">按钮 / 列表项</em></div>
+      <div class="fs-row" data-page-node-id="5T6ocngEQZdHSOPAuPunbI"><span style="font-size:var(--fs-caption);color:var(--fg)" data-page-node-id="km5eUpUPwgNpmFwODrMXVE">元信息、时间、路径</span><span data-page-node-id="fsa3s9KuJ7JzD95ETGTBYB">11 caption</span><em data-page-node-id="HEJEu0XNxCKXRIlZKdgey8">元信息 / chip</em></div>
+      <div class="fs-row" data-page-node-id="AQBCRTCittl0GkTH2nFVj0"><span style="font-size:var(--fs-micro);color:var(--fg)" data-page-node-id="6xZgbUJcThJFyt9FufUyw7">角标 / 徽标</span><span data-page-node-id="ugTQV4y3vYoThjNQYOPzMK">10 micro</span><em data-page-node-id="A4DVlhAEelA4D0eu8ryMB6">角标 / mono 标签</em></div>
+    </div>
+  </section>
+
+  <section data-page-node-id="RX42NOtG83BfTtYXNnZlC8">
+    <h2 data-page-node-id="h8TamTpnn1LGFc01JjRIOU">图标</h2>
+    <p class="sub" data-page-node-id="0lXFv2Gcs9YMvWGM7DhTIq">5 档：10 内嵌 · 12 行内 · 14 导航标题 · 16 强调 · 20 空态</p>
+    <div class="box row" data-page-node-id="B3oAwaAGD6wPYib0RwuuTl">
+      <div style="text-align:center" data-page-node-id="5u5C1jKHkGhkfYdx7W8Yms"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#2c2c2a" stroke-width="2" data-page-node-id="tFrNOKRaVqicBJLcKTrANO"><circle cx="12" cy="12" r="9" data-page-node-id="gSWZmNpL23EYRjADw1bXPZ"/></svg><div class="kv" data-page-node-id="86qQk4LsKoVGHGUtk4MmvH">10</div></div>
+      <div style="text-align:center" data-page-node-id="WO7CMuO4cGX30HsSb2yz6m"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#2c2c2a" stroke-width="2" data-page-node-id="KPRodGBydPRTGamuAqJlAD"><circle cx="12" cy="12" r="9" data-page-node-id="6Q3EGBhVy1rGEifDoFSRho"/></svg><div class="kv" data-page-node-id="HfMOUUhbUn2TMmsnKEYhV3">12</div></div>
+      <div style="text-align:center" data-page-node-id="vyt2BCJ92pkGrRDOUl3Ph8"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2c2c2a" stroke-width="2" data-page-node-id="3AxpIwkgHddLNNm1kysMZj"><circle cx="12" cy="12" r="9" data-page-node-id="yPlbaXdJJf1rMKNqpI6R9l"/></svg><div class="kv" data-page-node-id="qSQpKZZtxC1DCmbtU9Lem6">14</div></div>
+      <div style="text-align:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2c2c2a" stroke-width="2"><circle cx="12" cy="12" r="9"/></svg><div class="kv">16</div></div>
+      <div style="text-align:center" data-page-node-id="HxRP3UZbsOCHI36zopSG6D"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2c2c2a" stroke-width="2" data-page-node-id="jKhVONSbgSNGkbmOfTHLAw"><circle cx="12" cy="12" r="9" data-page-node-id="HLfyMjzuDHNx2dJg6vq915"/></svg><div class="kv" data-page-node-id="pgrpizi0POOTdgFyXtZnYP">20</div></div>
+    </div>
+  </section>
+
+  <section data-page-node-id="paBLphARXCYYJvHbq6GzVV">
+    <h2 data-page-node-id="jpIuiMgkWWuvva9xYYdLuy">按钮</h2>
+    <p class="sub" data-page-node-id="wSqy20DyqGJ2vGgnEEgQ5F">唯一形态：高 28（小号 26）· 圆角 6 · 字重 500</p>
+    <div class="box row" data-page-node-id="FoOsdNkxguN4CUbG1YlZQ6">
+      <button class="btn btn-primary" data-page-node-id="gjnluwVHKBLayHDM3QcjOq">主要操作</button>
+      <button class="btn btn-primary btn-sm" data-page-node-id="soWW0Q9tjGXreCXPYQymF7">小号</button>
+      <button class="btn btn-ghost" data-page-node-id="AcyV87GthSM6wFDdCI4LQB">次要</button>
+      <button class="btn btn-subtle" data-page-node-id="tN2zzRabZ3syxUrzzTCHNS">文字</button>
+      <button class="btn btn-primary" disabled data-page-node-id="wfKxDvZ0GreAfvn5BKjGTI">禁用</button>
+    </div>
+  </section>
+
+  <section data-page-node-id="aOYM1Zs91apmAUU1PkWLvo">
+    <h2 data-page-node-id="nJiqUeQUdJpsBOpruaJHaz">Chip</h2>
+    <p class="sub" data-page-node-id="XVBye95XPlceN5VO66lxoT">唯一标签形态：6px 圆角 · 11px 字 · 1px 描边</p>
+    <div class="box row" data-page-node-id="QDcCktyDQVlJgHZD7cLbSm">
+      <span class="chip" data-page-node-id="EV6pzkSG95CzYApSJhHoOB">默认</span>
+      <span class="chip chip-accent" data-page-node-id="FMldHcYNuQDGXyrXU4n38l">品牌</span>
+      <span class="chip chip-danger" data-page-node-id="P68NeWaPiMdBhyAfvlipMJ">错误</span>
+      <span class="chip chip-warn" data-page-node-id="Ns086kyRvhzZJPKcdTNZAX">警告</span>
+      <span class="chip chip-success" data-page-node-id="DVbA4Rs7rZRsIXW8FnDdul">成功</span>
+      <span class="chip chip-mono" data-page-node-id="KCYrzWpoRojpG5qEsigIWY">mono/path</span>
+    </div>
+  </section>
+
+  <section data-page-node-id="VEYHIpVqqErWVW0Qu8YCJ6">
+    <h2 data-page-node-id="CyJ4bWsuNQGVdbxkn2psku">卡片</h2>
+    <p class="sub" data-page-node-id="Ic7rrPpDoGXkbfVgTUKLKl">card-hd 统一 13/16 头部内边距，card-bd 统一 12/16</p>
+    <div class="grid g4" data-page-node-id="LOVzENMhi4icT9iscVniV2">
+      <div class="card" data-page-node-id="dkJnKg6GN7NFawrYiPJnwB">
+        <div class="card-hd" data-page-node-id="UnWwB5oLg1ZeBPUVnswgVp"><span class="t" data-page-node-id="pmMFMxySneJ1pSlZkVs6Y0">今日 Token</span><span class="m" data-page-node-id="pGyhmza2Im5GAM1teSRCa7">累计 53.8k</span></div>
+        <div class="card-bd" data-page-node-id="4C5Tov1wejMbNz13xOGMWm"><div class="stat" data-page-node-id="ZlBwb4LeuY0II7dwsZ6VzX"><b data-page-node-id="JddQhwFRBZFra5uliAEz4O">51.8k</b><span data-page-node-id="mNbQaVzoRsWETSAVDtH3mE">tokens</span></div></div>
+      </div>
+      <div class="card" data-page-node-id="aUURtt13CLt9XUsk3CmQjK">
+        <div class="card-hd" data-page-node-id="AMextHimkZHJwS576HGwbD"><span class="t" data-page-node-id="Ykgy82E85pcFXk78oTIHV5">运行中</span><span class="m" data-page-node-id="k7sxGLCRH25vetP1kPE4It">共 3 会话</span></div>
+        <div class="card-bd" data-page-node-id="7jZnDVJjv9u7O83PSREt9X"><div class="stat" data-page-node-id="c3zQqfYAYEQNnseTjZCiU5"><b data-page-node-id="qsBzR9yI5PS84GTUgkhHVU">1</b><span data-page-node-id="x5TMU7UZQepuMGkDa9o3yD">个 agent</span></div></div>
+      </div>
+      <div class="card" data-page-node-id="bG9VS3pZDXTfqOkd66mGTg">
+        <div class="card-hd" data-page-node-id="sOH9Uj9aSb0H0FOKS3WAGW"><span class="t" data-page-node-id="isbUz96wHlpUJMaUbEqzaZ">今日成本</span><span class="m" data-page-node-id="TxWOBjyvbsjCcvfe1AakYZ">$0.03</span></div>
+        <div class="card-bd" data-page-node-id="LM24mE7g1DQgmN64HRx0GN"><div class="stat" data-page-node-id="G6zDWHSZO80siWALHRGHaz"><b data-page-node-id="AHdDIoh5SbCD2VOYeV3XEh">$0.02</b><span data-page-node-id="BwGvf4nQNQlcd7nHdxFZTP">cost</span></div></div>
+      </div>
+      <div class="card" data-page-node-id="6cnxb2Y2rUMIVkLEFt4MLH">
+        <div class="card-hd" data-page-node-id="OGGvDoJhRSEKOETNYJrIE3"><span class="t" data-page-node-id="m33xvbpmGu7XAVaFLSQjck">需关注</span><span class="m" data-page-node-id="vyJ4fEPofmEtrg0XlT3A2T">中断/报错</span></div>
+        <div class="card-bd" data-page-node-id="Nh9LKH1g7OzCkMpCGoMxlZ"><div class="stat" data-page-node-id="n7iRAQfkY9TZ1dOiYRHV1s"><b data-page-node-id="xhqCTBaZCJnFlvbRWSYwBB">0</b><span data-page-node-id="5A4Pi2QwDOAG9nfDv2c1dX">待处理</span></div></div>
+      </div>
+    </div>
+    <p class="note" data-page-node-id="0VDkbMM0yK6S4i5r554Q1W">原则：层次靠 1px 描边 + 背景灰阶推进，不使用渐变、大阴影与装饰色。</p>
+  </section>
+
+  <section>
+    <h2>动效与主题</h2>
+    <p class="sub">动效 3 档（越频繁越短）· 焦点环 2px · 深色由 [data-theme=dark] 重映射变量</p>
+    <div class="box row">
+      <span class="chip chip-mono">t-fast 120ms</span>
+      <span class="chip chip-mono">t-base 160ms</span>
+      <span class="chip chip-mono">t-slow 200ms</span>
+      <span class="chip chip-accent">focus 2px</span>
+      <span class="chip">浅色 / 深色 / 跟随系统</span>
+    </div>
+    <p class="note">t-fast 用于 hover 与颜色切换；t-base 用于 Toast 与 Popover；t-slow 用于侧栏收缩与抽屉滑入。禁止装饰性循环动画，prefers-reduced-motion 命中时全部归零。焦点环仅 focus-visible 触发（键盘可见、鼠标不打扰）。深色模式下红色的唯一改动是整体提亮，组件层零改动。11px 元信息统一 #6e6c66（5.1:1 达 AA）。</p>
+  </section>
+</div>
+</body>
+</html>

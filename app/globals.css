@@ -1,0 +1,625 @@
+@import "tailwindcss";
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-raised: var(--raised);
+  --color-hover: var(--hover);
+  --color-active: var(--active);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-fg: var(--fg);
+  --color-muted: var(--muted);
+  --color-dim: var(--dim);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-bubble: var(--bubble);
+  --color-danger: var(--danger);
+  --color-success: var(--success);
+  --color-warn: var(--warn);
+  --color-overlay: var(--overlay);
+  --radius-card: 12px;
+  /* 圆角三档：sm=chip/图标按钮 · md=按钮/输入框 · lg=弹层 · card=面板/卡片 */
+  --radius-sm: 6px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --font-sans: var(--font-app-sans);
+  --font-mono: var(--font-app-mono);
+}
+
+/* ================= 排版尺度（7 档，全站唯一来源） =================
+   10 徽标/角标 · 11 元信息 · 12 正文小 · 13 正文 · 14 小节标题 · 16 区块标题 · 20 数据大字 */
+:root {
+  --fs-micro: 10px;
+  --fs-caption: 11px;
+  --fs-small: 12px;
+  --fs-body: 13px;
+  --fs-subtitle: 14px;
+  --fs-title: 16px;
+  --fs-display: 20px;
+  --fs-hero: 32px;
+  /* 图标五档：10 内嵌 · 12 行内 · 14 导航/标题 · 16 强调 · 20 空态/特征 */
+  --icon-xs: 10px;
+  --icon-sm: 12px;
+  --icon-md: 14px;
+  --icon-emph: 16px;
+  --icon-lg: 20px;
+
+  /* 聊天列宽：消息区与输入框共用的唯一来源（两者不一致会看起来错位）。
+     横向由 .chat-col 统一负责：左右各 --chat-pad，内容居中，
+     所以两侧边距**永远相等**。
+     2026-09-14 从 1400 提到 1720（为了 2560 屏少留白），当天回收到 1200：
+     1720 下正文行长约 92 汉字/行，超出阅读舒适区（中文 40~60 字/行），
+     “看着满”不等于“读着顺”。1200 是折中：表格/代码/工具块够用，
+     正文不至于长到需要用手指标记行。空间冲突交给可拖拽的观测栏。 */
+  --chat-col: 1200px;
+  /* 边距：宽屏 40（实测偏窄，加倍），窄屏收回 20 免得内容被挤太窄 */
+  --chat-pad: 20px;
+
+  /* 页面内容容器（唯一来源，.page-col / .page-col-form 消费）。
+     旧的各页自写 max-w-[1480px]/[1200px] 在 2560 屏上左右各留 400~600px 空白，
+     且八个页面五种宽度、页面之间宽度来回跳。现收敛为两档：
+     · page-col      数据/仪表盘/网格页 —— 铺满可用宽度，上限 2400 只约束超宽屏
+     · page-col-form 表单/阅读页 —— 限宽保行长可读
+     注意与 --chat-col 的分工：聊天列有独立节奏，不并入此档。 */
+  --page-col: 2400px;
+  --page-col-form: 1800px;
+  --page-pad: 32px;
+}
+
+/* 宽屏把边距加倍。注意：这条 media 必须在 --chat-pad 定义之后 ——
+   早先的一次替换把它连带删掉了，导致 40px 静默不生效（实测踩到）。 */
+@media (min-width: 1024px) {
+  :root {
+    --chat-pad: 40px;
+  }
+}
+
+/* ================= ELENVA 工作站 · 红黑白 / 浅色 ================= */
+:root {
+  color-scheme: light;
+  --bg: #f6f5f2;
+  --panel: #ffffff;
+  --panel-2: #f1efeb;
+  --raised: #ffffff;
+  --hover: #f0eee9;
+  --active: #fcebeb;
+  --line: rgba(0, 0, 0, 0.1);
+  --line-soft: rgba(0, 0, 0, 0.05);
+  /* 背景网格线：比 --line-soft 再淡一档。背景纹理属于「几乎看不见但能感知」的层级，
+     和分隔线不是一个用途 —— 复用 --line-soft 会让网格在文字底下显得吵。 */
+  --grid-line: rgba(0, 0, 0, 0.028);
+  --fg: #2c2c2a;
+  --muted: #5f5e5a;
+  /* 元信息灰：承载信息的小字需达 AA（4.5:1）。#888780 仅 3.4:1，故取 #6e6c66（5.1:1）。
+     纯装饰性文字如需更浅，用 --dim-soft。 */
+  --dim: #6e6c66;
+  --dim-soft: #888780;
+  --accent: #c9302c;
+  --accent-hover: #a32d2d;
+  --accent-fg: #ffffff;
+  --accent-soft: #fcebeb;
+  --bubble: #fcebeb;
+  --danger: #c9302c;
+  --success: #3b6d11;
+  --warn: #ba7517;
+  /* 浮层遮罩：深色下基底本来就暗，需更重的不透明度才有压暗效果 */
+  --overlay: rgba(0, 0, 0, 0.32);
+  --scrollbar: rgba(0, 0, 0, 0.14);
+  --scrollbar-hover: rgba(0, 0, 0, 0.26);
+  --font-app-sans: "PingFang SC", "Microsoft YaHei", "Segoe UI", system-ui, sans-serif;
+  --font-app-mono: "JetBrains Mono", Consolas, "SF Mono", monospace;
+}
+
+/* ================= 深色模式（跟随 data-theme="dark"） =================
+   仅重映射语义变量，组件层零改动。红色系在深底上整体提亮，保证可读性。 */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #161614;
+  --panel: #1e1e1c;
+  --panel-2: #262624;
+  --raised: #262624;
+  --hover: #2b2b28;
+  --active: #3a2221;
+  --line: rgba(255, 255, 255, 0.1);
+  --line-soft: rgba(255, 255, 255, 0.06);
+  --grid-line: rgba(255, 255, 255, 0.035);
+  --fg: #e8e7e3;
+  --muted: #a8a6a0;
+  --dim: #a8a6a0;
+  --dim-soft: #7a7872;
+  --accent: #e87b78;
+  --accent-hover: #ef938f;
+  --accent-fg: #1a1a18;
+  --accent-soft: #3a2221;
+  --bubble: #3a2221;
+  --danger: #e05654;
+  --success: #7fb75b;
+  --warn: #d9a24a;
+  --overlay: rgba(0, 0, 0, 0.62);
+  --scrollbar: rgba(255, 255, 255, 0.16);
+  --scrollbar-hover: rgba(255, 255, 255, 0.3);
+}
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-app-sans);
+  font-size: 14px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+* {
+  border-color: var(--line);
+}
+
+::selection {
+  background: var(--accent-soft);
+}
+
+/* ================= 焦点环（键盘可达性） =================
+   仅 focus-visible 触发：键盘 Tab / 快捷键跳转可见，鼠标点击不打扰。
+   输入框与文本域除外——它们已有容器边框高亮 + 光标作为焦点指示，再套环会双重描边。 */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+input:focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
+
+/* 工作站风格滚动条 */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-hover);
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+/* ================= 卡片 / 面板 ================= */
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+}
+
+/* 卡片头部：统一「标题 + 右侧元信息」节奏，避免各页自定 padding */
+.card-hd {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.card-hd-tight {
+  padding: 11px 16px 9px;
+  border-bottom: none;
+}
+.card-bd {
+  padding: 12px 16px;
+}
+.card-bd-flush {
+  padding: 0;
+}
+
+/* 区块标题：卡片内的 14px/600，卡片外的 16px/600 */
+.sect-title {
+  font-size: var(--fs-subtitle);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+.page-title {
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--fg);
+}
+
+/* 按钮：全站唯一的按钮形态（高度 28 / 小号 26，圆角 6px，字重 500） */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  font-size: var(--fs-small);
+  font-weight: 500;
+  line-height: 1;
+  color: var(--fg);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    border-color 120ms ease-out;
+}
+/* 禁用态统一：一律「灰底灰字 + 全不透明」。
+   项目里有 34 处内联的 `disabled:opacity-50`（搜索 / 保存 / 安装 / 开候选…），
+   半透明会让白字压红底掉到 1.1:1 —— 按钮视觉上等于消失，用户不知道那里有东西。
+   WCAG 豁免 inactive 控件，但"看不见的按钮"不是豁免能解释的体验问题。
+   放在这里用 !important 压过内联工具类，避免 34 处逐个改、以后又长回来。 */
+button:disabled,
+button[aria-disabled="true"] {
+  opacity: 1 !important;
+  background: var(--panel-2) !important;
+  border-color: var(--line) !important;
+  color: var(--dim) !important;
+  cursor: not-allowed;
+}
+
+.btn:disabled {
+  /* 不用 opacity：白字压红底再叠 50% 透明，对比度只剩 1.1:1，按钮视觉上等于消失
+     （detect 在 5 个页面报到过）。改成灰底灰字 —— 仍然明确「不可用」，但看得见。 */
+  background: var(--panel-2);
+  border-color: var(--line);
+  color: var(--dim);
+  opacity: 1;
+  cursor: not-allowed;
+}
+.btn-sm {
+  height: 26px;
+  padding: 0 8px;
+  font-size: var(--fs-caption);
+}
+.btn-icon {
+  width: 28px;
+  padding: 0;
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+.btn-ghost {
+  border-color: var(--line);
+  color: var(--muted);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--fg);
+}
+.btn-subtle {
+  color: var(--muted);
+}
+.btn-subtle:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+/* Chip：全站唯一的标签形态（6px 圆角 / 11px 字 / 1px 描边） */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+  padding: 1px 6px;
+  font-size: var(--fs-caption);
+  line-height: 1.5;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.chip-accent {
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.chip-danger {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+  color: var(--danger);
+}
+.chip-warn {
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+  background: color-mix(in srgb, var(--warn) 10%, transparent);
+  color: var(--warn);
+}
+.chip-success {
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+}
+.chip-mono {
+  font-family: var(--font-mono);
+  /* 11px 而非 micro：mono 标签装的是模型名/命令这类**要读的内容**，
+     微字号（10px）留给纯角标。此前它比同排的 chip 小一号，表格里看着发虚。 */
+  font-size: var(--fs-caption);
+}
+
+/* ================= 品牌空态底纹 =================
+   28px 细网格 + 径向遮罩（从中心向外淡出），让 logo / 标语 / 输入框浮于其上。
+   **静态**纹理，不是装饰性动画。
+   注意：聊天区**不铺**这个纹理（曾经铺过，显得吵）；仅用于新建会话的空态。*/
+.chat-hero {
+  position: relative;
+}
+.chat-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 28px 28px;
+  -webkit-mask-image: radial-gradient(ellipse 62% 58% at 50% 46%, black, transparent 76%);
+  mask-image: radial-gradient(ellipse 62% 58% at 50% 46%, black, transparent 76%);
+}
+.chat-hero > * {
+  position: relative;
+}
+
+/* 聊天列：消息区与输入框共用的对称边距容器。
+   绝对不要各写一份 px-*：一旦不一致，两者就会错位。 */
+.chat-col {
+  width: 100%;
+  max-width: var(--chat-col);
+  margin-inline: auto;
+  padding-inline: var(--chat-pad);
+}
+
+/* 页面列：各页唯一的内容容器。横向边距也由它负责，
+   页面里只补 py-*，不要再各写一份 px-*（写法一散，各页左右就错开）。 */
+.page-col {
+  width: 100%;
+  max-width: var(--page-col);
+  margin-inline: auto;
+  padding-inline: var(--page-pad);
+}
+.page-col-form {
+  width: 100%;
+  max-width: var(--page-col-form);
+  margin-inline: auto;
+  padding-inline: var(--page-pad);
+}
+
+/* 等高卡片网格：同行卡片一律拉伸到该行最高者。
+   flex/grid 默认就是 stretch，这里显式声明是为了**压过** items-start ——
+   各页原先写 items-start 是为了避免“内容少的卡被拉高”，但结果是一排里
+   卡片高低不齐 + 列尾参差，比卡内留白难看。整排对齐优先。 */
+.card-row {
+  align-items: stretch;
+}
+
+/* ================= 聊天 markdown ================= */
+.md-body > *:first-child {
+  margin-top: 0;
+}
+.md-body > *:last-child {
+  margin-bottom: 0;
+}
+.md-body p {
+  margin: 0.55em 0;
+}
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+  margin: 1em 0 0.4em;
+  font-weight: 650;
+  line-height: 1.35;
+}
+.md-body h1 {
+  font-size: 1.25em;
+}
+.md-body h2 {
+  font-size: 1.15em;
+}
+.md-body h3 {
+  font-size: 1.05em;
+}
+.md-body ul,
+.md-body ol {
+  margin: 0.5em 0;
+  padding-left: 1.4em;
+}
+.md-body ul {
+  list-style: disc;
+}
+.md-body ol {
+  list-style: decimal;
+}
+.md-body li {
+  margin: 0.2em 0;
+}
+.md-body code {
+  font-family: var(--font-app-mono);
+  font-size: 0.88em;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.08em 0.35em;
+}
+.md-body pre {
+  margin: 0.6em 0;
+  padding: 0.75em 1em;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow-x: auto;
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+.md-body pre code {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+}
+.md-body blockquote {
+  margin: 0.6em 0;
+  padding: 0.1em 0 0.1em 0.9em;
+  border-left: 3px solid var(--accent);
+  color: var(--muted);
+}
+.md-body a {
+  color: var(--accent);
+  text-decoration: none;
+}
+.md-body a:hover {
+  text-decoration: underline;
+}
+.md-body table {
+  margin: 0.6em 0;
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+.md-body th,
+.md-body td {
+  border: 1px solid var(--line);
+  padding: 0.35em 0.7em;
+}
+.md-body th {
+  background: var(--panel-2);
+  font-weight: 600;
+}
+.md-body hr {
+  margin: 1em 0;
+  border: none;
+  border-top: 1px solid var(--line);
+}
+
+/* ================= 动画 ================= */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.anim-fade-up {
+  animation: fade-up 0.22s ease-out both;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.anim-pulse-dot {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+/* 骨架屏呼吸 */
+.anim-pulse {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.anim-spin {
+  animation: spin 0.9s linear infinite;
+}
+
+/* ================= 动效节奏（3 档，全站唯一来源） =================
+   原则：越频繁出现的动效越短。禁止装饰性循环动画（持续位移/缩放/呼吸）。
+   · t-fast 120ms — hover 反馈、色块与文字色切换（最高频）
+   · t-base 160ms — Toast 进出、Popover 弹入、面板淡入（默认档）
+   · t-slow 200ms — 侧栏收缩/展开、抽屉滑入（最低频） */
+.t-fast {
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out,
+    border-color 120ms ease-out,
+    opacity 120ms ease-out;
+}
+.t-base {
+  transition:
+    background-color 160ms ease-out,
+    color 160ms ease-out,
+    border-color 160ms ease-out,
+    opacity 160ms ease-out,
+    transform 160ms ease-out;
+}
+/* 通用档：只动合成层（transform/opacity），尺寸变化不做动画。
+   2026-09-14 拆出：原先它含 width/height，任何元素挂上都会让尺寸变化触发布局动画，
+   detect 在 9 个页面各报 2 条 layout-transition。 */
+.t-slow {
+  transition:
+    transform 200ms ease-in-out,
+    opacity 200ms ease-in-out;
+}
+/* 栏位收展专用：只有「挤压式侧栏」需要宽度动画（实测布局开销 12.3ms/200ms，可接受）。
+   刻意单独一个类，不让通用档背这个代价。 */
+.t-pane {
+  transition:
+    width 200ms ease-in-out,
+    opacity 200ms ease-in-out;
+}
+
+/* 拖拽调整栏宽期间：全局禁用过渡。
+   容器上若带 width 过渡（.t-slow 等），拖拽时每次宽度变化都会重新触发一次过渡，
+   宽度永远追不上鼠标（实测拖 200px 只跟 80px，偏差 124px）。
+   类由 components/ui/Resizer.tsx 在 pointerdown / pointerup 时切换。 */
+body.is-resizing *,
+body.is-resizing *::before,
+body.is-resizing *::after {
+  transition: none !important;
+}
+
+/* 长过程时间线的离屏跳过。
+   折叠展开时一步一个原样渲染的 MessageView，一个回合可能上百步：
+   全部参与布局时实测展开一次要 192ms（用户可感知的卡顿）。
+   content-visibility 让屏外步骤跳过布局与绘制，只算看得见的部分。
+   contain-intrinsic-size 的 `auto` 会记住真实高度，所以滚动条只在首次有估值跳变。
+   代价：屏外内容不参与浏览器 Ctrl+F（对本场景可接受）。 */
+.timeline-step {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 56px;
+}
+
+/* 尊重系统「减弱动态效果」设置：动效全部归零，只保留终态 */
+@media (prefers-reduced-motion: reduce) {
+  .t-fast,
+  .t-base,
+  .t-slow {
+    transition: none;
+  }
+  .anim-fade-up,
+  .anim-pulse,
+  .anim-pulse-dot,
+  .anim-spin {
+    animation: none;
+  }
+}
