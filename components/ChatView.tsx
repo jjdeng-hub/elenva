@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelLeftClose, PanelLeftOpen, PanelRight, CircleDot, FileCode2, GitBranch, Loader2, Menu, Search, X } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, PanelRight, FileCode2, GitBranch, Menu, Search, X } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentStatusBar } from "@/components/AgentStatusBar";
@@ -14,7 +14,6 @@ import { TurnFooter } from "@/components/TurnFooter";
 import { ExtensionStrip } from "@/components/ExtensionStrip";
 import { ModelPicker } from "@/components/ModelPicker";
 import { ProjectTrustDialog } from "@/components/ProjectTrustDialog";
-import { SessionMenu } from "@/components/SessionMenu";
 import { SessionTitle } from "@/components/SessionTitle";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { TreePanel } from "@/components/TreePanel";
@@ -248,8 +247,8 @@ export function ChatView({
   /** /session 要把最新统计读出来做 Toast，用 ref 避免闭包拿到过期值 */
   const sessionStatsRef = useRef(sessionStats);
   sessionStatsRef.current = sessionStats;
-  /* 会话级写操作的单一实现：标题内联重命名、标题旁删除/AI 命名、
-     菜单里的克隆、观测栏的压缩与导出，都走这一份。 */
+  /* 会话级写操作（重命名 / 删除 / 压缩 / 克隆 / 导出 / AI 命名）—— 标题内联重命名、
+     观测栏的压缩 / 导出 / 克隆，都走这一份。 */
   const sessionActions = useSessionActions({
     sessionId: session?.id ?? "",
     sessionName: isNew ? "新会话" : session?.name || session?.firstMessage || "会话",
@@ -744,19 +743,8 @@ export function ChatView({
                 <GitBranch size={14} />
               </button>
             )}
-            <span
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg border px-2 py-0.5 text-[12px]",
-                agentRunning ? "border-accent/30 bg-active text-accent" : "border-line bg-panel-2 text-dim",
-              )}
-            >
-              {agentRunning ? (
-                <Loader2 size={10} className="anim-spin" />
-              ) : (
-                <CircleDot size={10} />
-              )}
-              {agentRunning ? "运行中" : "空闲"}
-            </span>
+            {/* 状态胶囊（运行中/空闲）已移除（2026-09-21）：运行态在输入框（停止按钮）、
+                输入框上方状态条、页脚、会话列表圆点四处都有信号；常驻的空闲胶囊只是噪音。 */}
             {/* 观测栏开关：宽屏才有意义，窄屏隐藏以免挤掉聊天区 */}
             <button
               onClick={toggleRail}
@@ -772,7 +760,6 @@ export function ChatView({
               <PanelRight size={14} />
             </button>
             <ThemeToggle />
-            {!isNew && session && <SessionMenu actions={sessionActions} />}
           </div>
         </div>
 
