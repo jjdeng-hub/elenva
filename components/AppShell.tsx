@@ -857,7 +857,13 @@ export function AppShell() {
           </span>
           <span className="ml-auto">{port ? `端口 ${port}` : null}</span>
           <button
-            onClick={() => setView("settings")}
+            onClick={() => {
+              setView("settings");
+              // 页脚入口的语义是「去检查更新」：跳设置后滚到「关于」区块，而不是停在页首
+              setTimeout(() => {
+                document.getElementById("settings-about")?.scrollIntoView({ block: "start", behavior: "smooth" });
+              }, 200);
+            }}
             className="cursor-pointer text-accent t-fast hover:text-accent-hover"
           >
             检查更新

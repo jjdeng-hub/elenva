@@ -1,6 +1,7 @@
 "use client";
 
 import { Bot, Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { dialogConfirm, toast } from "@/components/ui/dialog";
@@ -326,13 +327,13 @@ export function SubagentsPage({ defaultCwd }: { defaultCwd: string | null }) {
             右卡只有 103px、左卡 335px，同排一高一矮；现在右卡拉伸后
             内容两端分布（标题顶、目录与按钮底），中间留白而不是短一截。 */}
         <div className="grid gap-5 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-        <div className="flex flex-col rounded-card border border-line bg-panel xl:order-2">
-          <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-4 py-3">
-            <span className="text-[13px] font-semibold text-fg">内置子代理</span>
+        <Card className="flex flex-col xl:order-2">
+          <CardHeader className="flex-wrap">
+            <CardTitle>内置子代理</CardTitle>
             <span className="text-[11px] text-dim">general / code-reviewer 等 Pi 预设</span>            <div className="ml-auto">
               <BuiltinToggle enabled={builtinEnabled} saving={togglingBuiltin} onChange={() => void toggleBuiltin()} />
             </div>
-          </div>
+          </CardHeader>
           <div className="mt-auto flex items-center gap-2 px-4 py-2.5 text-[12px] text-dim">
             <span className="min-w-0 truncate font-mono">目录：{defaultCwd ?? "（未设置默认工作目录，无法读取项目级 Profile）"}</span>
             <button
@@ -344,13 +345,13 @@ export function SubagentsPage({ defaultCwd }: { defaultCwd: string | null }) {
               <Plus size={12} /> 新建子代理
             </button>
           </div>
-        </div>
+        </Card>
 
-        <div className="rounded-card border border-line bg-panel xl:order-1">
-          <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
-            <span className="text-[13px] font-semibold text-fg">子代理配置</span>
+        <Card className="xl:order-1">
+          <CardHeader>
+            <CardTitle>子代理配置</CardTitle>
             <span className="text-[11px] text-dim">{profiles.length} 个</span>
-          </div>
+          </CardHeader>
           {loading && (
             <div className="flex items-center gap-2 px-4 py-5 text-[12px] text-dim">
               <Loader2 size={14} className="animate-spin" /> 加载 Profiles…
@@ -420,7 +421,7 @@ export function SubagentsPage({ defaultCwd }: { defaultCwd: string | null }) {
               onCancel={() => setEditing(null)}
             />
           )}
-          </div>
+          </Card>
         </div>
       </div>
     </div>

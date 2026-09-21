@@ -1,6 +1,7 @@
 "use client";
 
 import { Ban, Bot, ChevronRight, CornerDownRight, Loader2, RefreshCw } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { toast } from "@/components/ui/dialog";
@@ -99,9 +100,9 @@ export function SubagentRunMonitor() {
   const finished = runs?.filter((r) => r.status !== "running" && r.status !== "starting") ?? [];
 
   return (
-    <div className="mb-5 rounded-card border border-line bg-panel" data-testid="run-monitor">
-      <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-4 py-3">
-        <span className="text-[13px] font-semibold text-fg">运行监控</span>
+    <Card className="mb-5" testId="run-monitor">
+      <CardHeader className="flex-wrap">
+        <CardTitle>运行监控</CardTitle>
         <span className="text-[11px] text-dim">
           {active.length > 0 ? `${active.length} 个进行中` : "当前空闲"} · 最多 {MAX_CONCURRENT} 个并发
         </span>
@@ -112,7 +113,7 @@ export function SubagentRunMonitor() {
         >
           <RefreshCw size={10} /> 刷新
         </button>
-      </div>
+      </CardHeader>
 
       {runs === null && (
         <div className="flex items-center gap-2 px-4 py-4 text-[12px] text-dim">
@@ -213,6 +214,6 @@ export function SubagentRunMonitor() {
           </div>
         </div>
       )}
-    </div>
+    </Card>
   );
 }

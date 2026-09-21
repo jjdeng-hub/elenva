@@ -1,6 +1,7 @@
 "use client";
 
 import { ArrowUp, Check, Folder, FolderPlus, HardDrive, Home, Loader2, Sparkles, X } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { toast } from "@/components/ui/dialog";
@@ -164,9 +165,9 @@ export function DirPicker({
         data-testid="dir-picker"
       >
         {/* 标题 */}
-        <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
+        <CardHeader>
           <Folder size={14} className="text-accent" />
-          <span className="text-[13px] font-semibold text-fg">选择工作区目录</span>
+          <CardTitle>选择工作区目录</CardTitle>
           <span className="text-[11px] text-dim">Agent 将以此为工作目录读写文件</span>
           <button
             onClick={onClose}
@@ -175,7 +176,7 @@ export function DirPicker({
           >
             <X size={14} />
           </button>
-        </div>
+        </CardHeader>
 
         {/* 手输路径 */}
         <div className="flex gap-2 border-b border-line-soft px-4 py-2.5">

@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronRight, Loader2, RefreshCw, ScrollText } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { MemoryProject } from "@/components/MemoryPage";
 import { cn } from "@/components/lib/utils";
@@ -146,7 +147,7 @@ export function SystemPromptPage({
               </div>
             </div>
 
-            <div className="rounded-card border border-line bg-panel">
+            <Card>
               <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-4 py-2.5">
                 {data && (
                   <span
@@ -182,7 +183,7 @@ export function SystemPromptPage({
                   </pre>
                 ) : null}
               </div>
-            </div>
+            </Card>
           </div>
         )}
       </div>

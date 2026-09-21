@@ -1,6 +1,7 @@
 "use client";
 
 import { Check, Loader2, Plus, RefreshCw, Save, Search, X } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { toast } from "@/components/ui/dialog";
@@ -210,9 +211,9 @@ export function ModelScopeEditor() {
     "flex h-7 cursor-pointer items-center gap-1.5 rounded-md border border-line px-2.5 text-[12px] text-muted t-fast hover:text-fg disabled:cursor-not-allowed disabled:opacity-50";
 
   return (
-    <div className="rounded-card border border-line bg-panel" data-testid="model-scope-editor">
-      <div className="flex items-center gap-2 border-b border-line-soft px-4 py-3">
-        <span className="text-[13px] font-semibold text-fg">模型列表</span>
+    <Card testId="model-scope-editor">
+      <CardHeader>
+        <CardTitle>模型列表</CardTitle>
         <span className="text-[11px] text-dim">
           {loading ? "加载中…" : scoped ? `已选 ${selectedRefs.size} / 共 ${models.length}` : `全部 ${models.length} 个 · 未过滤`}
           {" · "}
@@ -231,7 +232,7 @@ export function ModelScopeEditor() {
             {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />} 保存
           </button>
         </div>
-      </div>
+      </CardHeader>
 
       <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
         <div className="relative min-w-48 flex-1">
@@ -403,6 +404,6 @@ export function ModelScopeEditor() {
           </div>
         )}
       </div>
-    </div>
+    </Card>
   );
 }

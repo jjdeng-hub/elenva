@@ -1,6 +1,7 @@
 "use client";
 
 import { AlertTriangle, Brain, CalendarDays, FileText, Info, Loader2, Pencil, Plus, RefreshCw, Save, Trash2, User } from "lucide-react";
+import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { EmptyState, PageHeader } from "@/components/ui/bits";
@@ -245,11 +246,11 @@ function AgentMemoryView() {
       </div>
 
       {loading && !index ? (
-        <div className="flex items-center gap-2 rounded-card border border-line bg-panel px-4 py-10 text-[12px] text-dim">
+        <Card className="flex items-center gap-2 px-4 py-10 text-[12px] text-dim">
           <Loader2 size={14} className="anim-spin" /> 读取记忆目录…
-        </div>
+        </Card>
       ) : !index ? null : nothingSaved ? (
-        <div className="rounded-card border border-line bg-panel">
+        <Card>
           <EmptyState
             icon={<Brain size={20} />}
             title="这里还没有内容"
@@ -263,11 +264,11 @@ function AgentMemoryView() {
               </>
             }
           />
-        </div>
+        </Card>
       ) : (
-        <div className="rounded-card border border-line bg-panel">
-          <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-4 py-3">
-            <span className="text-[13px] font-semibold text-fg">Agent 记忆</span>
+        <Card>
+          <CardHeader className="flex-wrap">
+            <CardTitle>Agent 记忆</CardTitle>
             {index.installed ? (
               <span className="chip chip-accent">pi-hermes-memory 已启用</span>
             ) : (
@@ -284,7 +285,7 @@ function AgentMemoryView() {
             >
               <RefreshCw size={12} className={cn(loading && "anim-spin")} /> 刷新
             </button>
-          </div>
+          </CardHeader>
 
           <div className="flex flex-col md:flex-row">
             {/* 文件清单 */}
@@ -487,7 +488,7 @@ function AgentMemoryView() {
               </div>
             </section>
           </div>
-        </div>
+        </Card>
       )}
     </div>
   );
@@ -625,9 +626,9 @@ function InstructionFilesView({ projects }: { projects: MemoryProject[] }) {
         进 git、可随项目共享。Agent 自己积累的经历不在这里 —— 切到上面的「Agent 记忆」看。
       </div>
 
-      <div className="rounded-card border border-line bg-panel">
+      <Card>
         {/* 作用域 + 项目选择 */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-4 py-3">
+        <CardHeader className="flex-wrap">
           <div className="flex items-center rounded-lg border border-line bg-panel-2 p-0.5">
             <button
               onClick={() => setScope("global")}
@@ -669,7 +670,7 @@ function InstructionFilesView({ projects }: { projects: MemoryProject[] }) {
               {active.path}
             </span>
           )}
-        </div>
+        </CardHeader>
 
         {/* 文件切换：用下划线式页签与上方「全局/项目」分段控件拉开层级，
             否则两层长得一样，用户分不清哪层在切作用域、哪层在切文件 */}
@@ -737,7 +738,7 @@ function InstructionFilesView({ projects }: { projects: MemoryProject[] }) {
             </span>
           </div>
         </div>
-      </div>
+      </Card>
     </div>
   );
 }

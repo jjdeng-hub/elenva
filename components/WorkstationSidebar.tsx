@@ -180,7 +180,7 @@ export function WorkstationSidebar({
           <NavItem collapsed={isCollapsed} icon={<Bot size={14} />} label="子代理" active={view === "subagents"} onClick={() => onViewChange("subagents")} />
           <NavItem collapsed={isCollapsed} icon={<FlaskConical size={14} />} label="并行试验" active={view === "candidates"} onClick={() => onViewChange("candidates")} />
 
-      <div className={groupCls}>系统</div>
+      <div className={groupCls}>本机</div>
           <NavItem collapsed={isCollapsed} icon={<Server size={14} />} label="系统" active={view === "system"} onClick={() => onViewChange("system")} />
           <NavItem collapsed={isCollapsed} icon={<Settings size={14} />} label="设置" active={view === "settings"} onClick={() => onViewChange("settings")} />
 
