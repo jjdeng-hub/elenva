@@ -18,6 +18,7 @@ import { formatClock, formatDuration } from "@/lib/format";
 import { stripControlSequences } from "@/lib/tool-execution-progress";
 import { toolTiming } from "@/lib/tool-timing";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, CustomMessage, TextContent, ToolCallContent, ToolResultMessage, UserMessage } from "@/lib/types";
+import { imageBlockSrc } from "@/lib/image-block";
 import { isEditToolName, isWriteToolName } from "@/lib/tool-names";
 
 /* ---------------- content block renderers ---------------- */
@@ -460,7 +461,7 @@ export function UserMessageView({ message, onRemember }: {
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
                   key={i}
-                  src={img.source?.url || `data:${img.source?.media_type || "image/png"};base64,${img.source?.data || ""}`}
+                  src={imageBlockSrc(img)}
                   alt=""
                   className="max-h-40 rounded-md border border-line"
                 />
