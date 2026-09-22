@@ -769,7 +769,7 @@ export function ChatView({
           <div className="chat-hero flex min-h-0 flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10">
             <LogoMark size={64} />
             <div className="mt-6 text-[14px] font-semibold tracking-[0.06em] text-fg">在确定性中寻找出口</div>
-            <div className="mt-8 h-[3px] w-10 rounded-full bg-accent" />
+            <div className="mt-3 h-[3px] w-10 rounded-full bg-accent" />
             <div className="relative mt-9 w-full max-w-[var(--chat-col)]">
               {statusBar}
               {chatInputEl}
