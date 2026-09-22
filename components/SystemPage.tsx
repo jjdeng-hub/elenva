@@ -83,7 +83,7 @@ const okDot = <span className="inline-block size-1.5 rounded-full bg-success ali
 
 /**
  * 系统页：本机「发动机舱」的只读快照 —— 服务 / 门禁 / 备份 / 版本 / 部署 / 资源。
- * 同时服务两个视角：作者 一眼看系统健康；维护者不再只靠终端。
+ * 同时服务两个视角：用户一眼看系统健康；维护者不再只靠终端。
  * 只读设计：不触发任何维护动作（跑门禁/备份/更新都走 cron 或终端，避免页面变成万能开关）。
  */
 export function SystemPage() {
@@ -213,7 +213,7 @@ export function SystemPage() {
             </Card>
 
             {/* 部署 */}
-            <Card icon={<GitCommitHorizontal size={14} />} title="部署" hint="生产 = main 最新构建；更新走 部署脚本。">
+            <Card icon={<GitCommitHorizontal size={14} />} title="部署" hint="生产 = main 最新构建；更新走部署脚本（elenva-update.sh）。">
               <Row label="提交" mono title={data.deploy.commitSubject ?? undefined}>{data.deploy.commit ?? "—"}</Row>
               <Row label="提交时间">{data.deploy.commitTime ? relTime(data.deploy.commitTime) : "—"}</Row>
               <Row label="最近构建">{data.deploy.buildTime ? relTime(data.deploy.buildTime) : "—"}</Row>

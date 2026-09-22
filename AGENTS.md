@@ -17,6 +17,7 @@ ELENVA Web —— [pi coding agent](https://pi.dev) 的 Web 工作台。Next.js 
 - 为「陌生人第一次打开」服务的能力（便携包 / 局域网密码 / 更新提示 / 首用引导）是**旁支**，可搁置，不因它们的存在而约束主线。
 - **安装可靠性**（纯 JS、免编译）仍是硬约束：换台机器部署时自己同样不想装编译工具链（见下方「禁止引入原生模块」）。
 - **素材是副产品**（项目过程会用于自媒体）—— 不要为了「能写一篇文章」而做功能。
+- **开源为展示式**（2026-09-21 定，见 `docs/roadmap.md`）：源码公开、欢迎 fork 与 issue/PR；不承诺上手支持、不做多用户 / i18n。发布通道（便携包 / npm）按需维护。
 
 ## 技术栈
 
@@ -77,7 +78,7 @@ PATH="$TEMP/nodestub:$PATH" cmd //c "$(cygpath -w "$(pwd)/开发模式.cmd")"
 | 图标 | 10 / 12 / 14 / 16（强调）/ 20 |
 | 动效 | `.t-fast` 120ms / `.t-base` 160ms / `.t-slow` 200ms |
 
-语义类优先：`.card` / `.card-hd` / `.card-bd` / `.chip` / `.btn` / `.sect-title`。
+语义类优先：`.card` / `.chip` / `.btn`；页面卡片结构统一走 `components/ui/card.tsx`（`Card` / `CardHeader` / `CardTitle`，2026-09-21 收编——勿再手写卡片壳 / 卡片头）。
 
 聊天列宽由 `--chat-col`（`app/globals.css`）单独控制：**消息区与输入框必须共用它**，
 各写一个 `max-w-*` 会让两者宽度不齐、看起来错位。
@@ -114,17 +115,22 @@ ELENVA 的 agent 开发以 **《深入理解 AI Agent》（李博杰 著）为�
 
 ## 提交前必须验证
 
-本项目**未接入 ESLint**（`npm run lint` 无效），用这两条兜底：
+本项目**未接入 ESLint**，用**三道门**兜底（CI 同款）：
 
 ```bash
-# 1) 类型检查：0 输出即通过
+# 1) 类型门：0 输出即通过
 node ./node_modules/typescript/bin/tsc --noEmit
 
-# 2) 设计系统收敛：0 改动即通过（幂等）
+# 2) 用法面探针：内核 API 形态检查（应全绿；白名单见 tools/pi-surface-check.ts）
+node ./node_modules/typescript/bin/tsc -p tools/tsconfig.json
+
+# 3) 设计系统收敛：0 改动即通过（幂等）
 python tools/style-converge.py
 ```
 
-改过 UI 后**两条都要跑**。`style-converge.py` 会自动修正越档的字号 / 圆角 / 图标 / 硬编码色 / 动效写法。
+改过 UI 后三道都要跑。`style-converge.py` 会自动修正越档的字号 / 圆角 / 图标 / 硬编码色 / 动效写法。
+
+CI（`.github/workflows/gates.yml`）在 push / PR 时跑同样三道门 + 生产构建；本机 cron（`elenva-gates`）继续巡检 main。
 
 ## 架构要点
 
@@ -185,7 +191,7 @@ python tools/style-converge.py
 ## 已知待办
 
 - **界面截图待用演示数据重拍**：原 6 张（`docs/screenshots/`）里有本机技能路径与用户名路径，已移出仓库；开源前需在干净环境重拍后放回
-- 更新提示已指向 `elenva-web`，但**包尚未发布到 npm** → 发布后自动生效；发布仓库确定后填 `RELEASE_REPOSITORY`（`lib/app-update.ts`）即可出现跳转链接。**新定位下这条是旁支**：自用不依赖它，别为它做额外工作
+- 更新提示已指向 `elenva-web`，但**包尚未发布到 npm** → 发布后自动生效；发布仓库确定后填 `RELEASE_REPOSITORY`（`lib/app-update.ts`）即可出现跳转链接。**展示式开源下按需处理**：发布 npm 后自动生效；不为它做额外工作（README 已标注「尚未发布」）
 - **故意保留**的 `pi-web:*` 标识：`lib/subagents.ts`、`lib/session-tool-selection.ts`、`lib/subagent-runtime.ts` 里的消息类型 —— 它们会被**写入会话文件**，改名会破坏已有会话的向后兼容
 - **推送通知链路已移除**：`/api/push/*` + `lib/web-push.ts` 在界面侧从未接入，已连同上未启用的
   i18n 词条一起删除（`public/sw.js` 的 push 监听保留，重新启用时从 git 历史取回服务端即可）。

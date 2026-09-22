@@ -51,8 +51,6 @@ ELENVA Web 就是为这件事做的：一个**信息密度高、但一眼能看�
 
 **离线用量聚合** — 直接读取本地会话文件，统计今日 / 累计 / 近 14 日的 token 与成本，并按模型排行。不上传任何数据。
 
-**技能调用排行** — 从会话文件里统计每个 skill 的实际调用次数。装了哪些能力不难知道，难的是知道**哪些真的被用上了**。
-
 **插件市场** — 直接搜索 npm 上的 `pi-package` 目录并一键安装，不必回到终端敲 `pi install`。
 
 **一套设计系统** — 红 / 墨黑 / 白的克制配色，7 档字号、4 档圆角、5 档图标、3 档动效全部收敛为语义类，并有幂等脚本自动对齐。深浅色主题零组件改动即可切换。
@@ -66,7 +64,7 @@ ELENVA Web 就是为这件事做的：一个**信息密度高、但一眼能看�
 
 | | 关系 |
 |---|---|
-| **pi 内核** [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | **运行时依赖**。会话、工具、扩展、模型调用全部由它提供。版本锁定在 `0.85.1`。 |
+| **pi 内核** [`@earendil-works/pi-coding-agent`](https://www.npmjs.com/package/@earendil-works/pi-coding-agent) | **运行时依赖**。会话、工具、扩展、模型调用全部由它提供。版本锁定在 `0.86.1`（升级记录见 `docs/pi-upgrade.md`）。 |
 | **pi CLI** | **无需安装**。内核随本项目分发，不依赖你机器上的 `pi` 命令。 |
 | **pi-web** [`@agegr/pi-web`](https://github.com/agegr/pi-web) | 后端逻辑的 **fork 来源**（MIT）。数据层、会话扫描、供应商凭据等大量实现源自它，界面与交互层为独立实现。 |
 | **数据目录** | 与 pi 共用 `~/.pi/agent/`。所以**装了 pi 的用户可以直接继承**已有的会话、API key 与设置，无需重新配置。 |
@@ -74,6 +72,8 @@ ELENVA Web 就是为这件事做的：一个**信息密度高、但一眼能看�
 > 换句话说：pi 是引擎，ELENVA 是仪表盘。同一个引擎可以驱动多个界面，本项目只是其中之一。
 
 ## 快速开始
+
+> **发布状态（2026-09）**：源码方式可用；便携包与 npm 包**尚未发布**（构建脚本已就绪，发布后此处会更新）。
 
 ### 方式一：Windows 便携包（解压即用，不需要 Node 与终端）
 
@@ -91,8 +91,8 @@ elenva-web
 ### 方式三：源码
 
 ```bash
-git clone <repo>
-cd elenva-web
+git clone https://github.com/jjdeng-hub/elenva.git
+cd elenva
 npm install
 npm run dev          # 开发模式，热更新，http://127.0.0.1:30200
 ```
@@ -133,12 +133,15 @@ npm run release        # 版本号自增 + 构建 + 发布
 
 ### 提交前检查
 
-本项目未接入 ESLint，改动后用这两条兜底：
+本项目未接入 ESLint，改动后跑**三道门**（与 CI 相同）：
 
 ```bash
-npx tsc --noEmit                      # 类型检查
-python tools/style-converge.py       # 设计系统收敛（幂等，0 改动即通过）
+npx tsc --noEmit                      # 1) 类型门
+npx tsc -p tools/tsconfig.json        # 2) 用法面探针（内核 API 形态检查）
+python tools/style-converge.py        # 3) 设计系统收敛（幂等，0 改动即通过）
 ```
+
+CI（`.github/workflows/gates.yml`）在 push / PR 时跑同样的三道门 + 生产构建。
 
 ## 架构
 
@@ -186,7 +189,9 @@ tools/              设计系统规范页与收敛脚本（开发用）
 
 ## 项目状态
 
-`v0.1.0` — 个人工作台阶段：**自用优先**，先把每天的使用体验做顺，再谈对外。功能都在真实使用中长出来，欢迎 issue 与 PR。
+`v0.1.0` — 个人工作台阶段：**自用优先**，先把每天的使用体验做顺，再谈对外。功能都在真实使用中长出来。
+
+**开源为展示式**：源码公开（MIT）、欢迎 fork 与 issue/PR；不承诺上手支持、不做多用户与 i18n——以「想跑就自己跑」为准。
 
 ## 许可
 
