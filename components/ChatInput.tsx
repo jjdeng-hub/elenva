@@ -628,8 +628,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 placeholder={
                   placeholder ||
                   (running
-                    ? "Agent 工作中：Enter 插话纠偏 · Alt+Enter 排队跟发"
-                    : "让 agent 做点什么…（/ 命令 · @ 文件 · ! shell · Enter 发送）")
+                    ? "Elen 工作中：Enter 插话纠偏 · Alt+Enter 排队跟发"
+                    : "让 Elen 做点什么…（/ 命令 · @ 文件 · ! shell · Enter 发送）")
                 }
                 className="max-h-[220px] w-full resize-none bg-transparent py-0.5 text-[13px] leading-relaxed text-fg outline-none placeholder:text-dim"
               />

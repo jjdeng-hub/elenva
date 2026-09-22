@@ -543,7 +543,10 @@ export function AssistantMessageView({
     .join("\n\n");
   return (
     <div className="group flex gap-2.5 anim-fade-up">
-      <div className="mt-0.5 flex size-6.5 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent">
+      <div
+        className="mt-0.5 flex size-6.5 shrink-0 items-center justify-center rounded-md bg-accent-soft text-accent"
+        title="Elen"
+      >
         <Bot size={14} />
       </div>
       <div className="min-w-0 flex-1">
