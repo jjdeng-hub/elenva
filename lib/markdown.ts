@@ -1,4 +1,5 @@
 import { defaultUrlTransform, type Options as ReactMarkdownOptions } from "react-markdown";
+import rehypeHighlight from "rehype-highlight";
 import rehypeKatex from "rehype-katex";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
@@ -359,14 +360,22 @@ export const markdownPreviewRemarkPlugins: ReactMarkdownOptions["remarkPlugins"]
   remarkMath,
 ];
 
+// 代码块着色（rehype-highlight / highlight.js）：只对带语言标注的围栏代码块生效
+// —— detect:false 不让 hljs 猜语言（猜错比不着色更糟）；ignoreMissing 让未注册的
+// 语言静默跳过。必须排在 rehypeSanitize 之后：sanitize 的 schema 只放行 code 上的
+// language-* 类，hljs 生成的类与 token span 若先于 sanitize 会被剥掉。
+const rehypeHighlightOptions = { detect: false, ignoreMissing: true };
+
 export const markdownRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],
   [rehypeKatex, { throwOnError: false, strict: false }],
+  [rehypeHighlight, rehypeHighlightOptions],
 ];
 
 export const markdownPreviewRehypePlugins: ReactMarkdownOptions["rehypePlugins"] = [
   rehypeRaw,
   [rehypeSanitize, markdownSanitizeSchema],
   [rehypeKatex, { throwOnError: false, strict: false }],
+  [rehypeHighlight, rehypeHighlightOptions],
 ];

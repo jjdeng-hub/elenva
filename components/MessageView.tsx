@@ -1,8 +1,8 @@
 "use client";
 
 import { AlertTriangle, Bookmark, Bot, ChevronDown, Copy, Download, FileCode2, History, Loader2, Search, Square, Terminal, User, Wrench } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { Children, isValidElement, useCallback, useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
+import ReactMarkdown, { type Components } from "react-markdown";
 import { cn } from "@/components/lib/utils";
 import { CopyButton } from "@/components/ui/widgets";
 import { Popover } from "@/components/ui/popover";
@@ -19,6 +19,7 @@ import { stripControlSequences } from "@/lib/tool-execution-progress";
 import { toolTiming } from "@/lib/tool-timing";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, CustomMessage, TextContent, ToolCallContent, ToolResultMessage, UserMessage } from "@/lib/types";
 import { imageBlockSrc } from "@/lib/image-block";
+import { lineDiff, parseSdkDiff, type ParsedDiffLine } from "@/lib/line-diff";
 import { isEditToolName, isWriteToolName } from "@/lib/tool-names";
 
 /* ---------------- content block renderers ---------------- */
@@ -126,6 +127,93 @@ function planTextOf(input: Record<string, unknown> | undefined): string {
   return typeof plan === "string" ? plan.trim() : "";
 }
 
+/* ---------------- write/edit 工具卡：改动视图 ---------------- */
+
+/** diff 行渲染上限（防御性；正常编辑远小于此） */
+const DIFF_RENDER_CAP = 600;
+
+/**
+ * write/edit 工具卡「改动」区的数据源，优先级：
+ *  1. 内核 edit 结果 details.diff —— pi 生成的展示 diff（带行号与上下文，含模糊匹配后的真实结果）；
+ *  2. input.edits / oldText,newText —— 运行中预览或 MCP 变体（无 details 时）；
+ *  3. write 的 content —— 全部按新增行渲染。
+ * 拿不到就返回 null，调用方回退到原始 JSON。
+ */
+function buildToolDiff(block: ToolCallContent, result?: ToolResultMessage): ParsedDiffLine[] | null {
+  const isEdit = isEditToolName(block.toolName);
+  const isWrite = isWriteToolName(block.toolName);
+  if (!isEdit && !isWrite) return null;
+
+  const sdkDiff = (result?.details as { diff?: unknown } | undefined)?.diff;
+  if (typeof sdkDiff === "string" && sdkDiff.trim() !== "") return parseSdkDiff(sdkDiff);
+
+  const input = block.input;
+  if (!input) return null;
+
+  if (isEdit) {
+    const pairs: Array<{ oldText: string; newText: string }> = [];
+    const addPair = (oldText: unknown, newText: unknown) => {
+      if (typeof oldText === "string" && typeof newText === "string") pairs.push({ oldText, newText });
+    };
+    if (Array.isArray(input.edits)) {
+      for (const entry of input.edits) {
+        const edit = entry as Record<string, unknown> | null;
+        if (edit) addPair(edit.oldText ?? edit.old_string, edit.newText ?? edit.new_string);
+      }
+    } else {
+      addPair(input.oldText ?? input.old_string, input.newText ?? input.new_string);
+    }
+    if (pairs.length === 0) return null;
+    const lines: ParsedDiffLine[] = [];
+    pairs.forEach((pair, index) => {
+      if (pairs.length > 1) lines.push({ kind: "gap", text: `改动 ${index + 1}/${pairs.length}` });
+      for (const line of lineDiff(pair.oldText, pair.newText)) lines.push(line);
+    });
+    return lines;
+  }
+
+  const content = typeof input.content === "string" ? input.content : null;
+  if (content === null) return null;
+  const body = content.replace(/\n$/, "");
+  return body === "" ? [] : body.split("\n").map((text) => ({ kind: "add" as const, text }));
+}
+
+function DiffBlock({ lines }: { lines: ParsedDiffLine[] }) {
+  const adds = lines.filter((line) => line.kind === "add").length;
+  const dels = lines.filter((line) => line.kind === "del").length;
+  const shown = lines.length > DIFF_RENDER_CAP ? lines.slice(0, DIFF_RENDER_CAP) : lines;
+  return (
+    <div className="md-diff">
+      <div className="md-diff-bar">
+        {adds > 0 && <span className="text-success">+{adds}</span>}
+        {dels > 0 && <span className="text-danger">-{dels}</span>}
+        {adds === 0 && dels === 0 && <span className="text-dim">无内容变化</span>}
+      </div>
+      <div className="md-diff-body">
+        {shown.map((line, index) =>
+          line.kind === "gap" ? (
+            <div key={index} className="md-diff-gap">
+              {line.text}
+            </div>
+          ) : (
+            <div
+              key={index}
+              className={cn("md-diff-line", line.kind === "add" && "is-add", line.kind === "del" && "is-del")}
+            >
+              {line.num !== undefined && <span className="md-diff-num">{line.num}</span>}
+              <span className="md-diff-sign">{line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}</span>
+              <span className="md-diff-text">{line.text}</span>
+            </div>
+          ),
+        )}
+        {lines.length > DIFF_RENDER_CAP && (
+          <div className="md-diff-gap">… 其余 {lines.length - DIFF_RENDER_CAP} 行未显示</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function ToolCallCard({
   block,
   result,
@@ -149,6 +237,8 @@ function ToolCallCard({
     ? stripControlSequences(planText.split("\n").find((line) => line.trim()) ?? "")
     : stripControlSequences(toolInputSummary(block.input, block.rawInput));
   const planStatus = isPlan ? planStatusLabel((result?.details as { status?: unknown } | undefined)?.status) : null;
+  /* write/edit 的「改动」区：内核 details.diff 优先，input 兜底（见 buildToolDiff） */
+  const diffLines = buildToolDiff(block, result);
   /* write/edit 工具且成功返回：路径可点击，唤起右侧文件预览 */
   const rawPath = block.input ? (block.input.file_path ?? block.input.path) : undefined;
   const previewPath =
@@ -221,10 +311,14 @@ function ToolCallCard({
             )
           ) : (
             <>
-              {Object.keys(block.input || {}).length > 0 && (
-                <pre className="max-h-40 overflow-auto border-b border-line/60 px-3 py-2 font-mono text-[12px] whitespace-pre-wrap text-muted">
-                  {JSON.stringify(block.input, null, 2)}
-                </pre>
+              {diffLines ? (
+                <DiffBlock lines={diffLines} />
+              ) : (
+                Object.keys(block.input || {}).length > 0 && (
+                  <pre className="max-h-40 overflow-auto border-b border-line/60 px-3 py-2 font-mono text-[12px] whitespace-pre-wrap text-muted">
+                    {JSON.stringify(block.input, null, 2)}
+                  </pre>
+                )
               )}
               {result && (
                 <div className="max-h-64 overflow-auto px-3 py-2 font-mono text-[12px] whitespace-pre-wrap">
@@ -349,6 +443,73 @@ function resultText(result: ToolResultMessage): string {
   ).slice(0, 4000);
 }
 
+/* ---------------- 代码块：语言标签 / 复制 / 超长折叠 ---------------- */
+
+/** 超过这个行数默认折叠，只露出前 ~360px */
+const CODE_COLLAPSE_LINES = 32;
+
+/** 递归取 React 子树的纯文本（hljs 着色后 code 里是 span 树，复制要拿原文） */
+function textOf(node: ReactNode): string {
+  if (typeof node === "string") return node;
+  if (typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (isValidElement(node)) return textOf((node.props as { children?: ReactNode }).children);
+  return "";
+}
+
+/**
+ * 围栏代码块外壳。react-markdown 默认渲染 `<pre><code>`；这里在 pre 外补一层
+ * 工具栏（语言标签 + 复制），并按行数折叠超长块。样式走 globals.css 的 .md-code 系列。
+ */
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const [expanded, setExpanded] = useState(false);
+  const codeEl = Children.toArray(children).find(
+    (child) => isValidElement(child) && child.type === "code",
+  ) as ReactElement<{ className?: string; children?: ReactNode }> | undefined;
+  if (!codeEl) return <pre>{children}</pre>;
+
+  const raw = textOf(codeEl.props.children).replace(/\n$/, "");
+  const lang = /language-([\w+#.-]+)/.exec(codeEl.props.className ?? "")?.[1] ?? "";
+  const lineCount = raw === "" ? 0 : raw.split("\n").length;
+  const collapsible = lineCount > CODE_COLLAPSE_LINES;
+  const collapsed = collapsible && !expanded;
+
+  return (
+    <div className="md-code">
+      <div className="md-code-bar">
+        <span className="md-code-lang">{lang || "text"}</span>
+        <CopyButton text={raw} />
+      </div>
+      <pre className={collapsed ? "is-collapsed" : undefined}>
+        <code className={codeEl.props.className}>{codeEl.props.children}</code>
+      </pre>
+      {collapsible && (
+        <button type="button" className="md-code-toggle" onClick={() => setExpanded((v) => !v)}>
+          <ChevronDown size={12} className={cn("t-fast", expanded && "rotate-180")} />
+          {expanded ? "收起" : `展开全部（${lineCount} 行）`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 聊天 Markdown 的组件覆盖：
+ *  · a —— 外链一律新窗口（同窗跳转会丢掉当前会话上下文；file: 链接保持原样）；
+ *  · pre —— 代码块走 CodeBlock（语言标签 / 复制 / 超长折叠）。
+ */
+const markdownComponents: Components = {
+  a: ({ href, children }) => {
+    const external = typeof href === "string" && /^https?:/i.test(href);
+    return (
+      <a href={href} {...(external ? { target: "_blank", rel: "noreferrer" } : {})}>
+        {children}
+      </a>
+    );
+  },
+  pre: CodeBlock,
+};
+
 /**
  * 聊天消息的 Markdown 渲染。
  *
@@ -365,6 +526,7 @@ function Markdown({ text }: { text: string }) {
         remarkPlugins={markdownRemarkPlugins}
         rehypePlugins={markdownRehypePlugins}
         urlTransform={markdownUrlTransform}
+        components={markdownComponents}
       >
         {normalizeDisplayMath(text)}
       </ReactMarkdown>

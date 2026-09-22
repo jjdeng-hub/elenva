@@ -462,6 +462,147 @@ button[aria-disabled="true"] {
   padding: 0;
   font-size: inherit;
 }
+/* ---- 代码块外壳（语言标签 / 复制 / 超长折叠）---- */
+.md-body .md-code {
+  margin: 0.6em 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  overflow: hidden;
+}
+.md-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1px 6px 1px 12px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.md-code-lang {
+  font-family: var(--font-app-mono);
+  font-size: 11px;
+  color: var(--dim);
+}
+.md-body .md-code pre {
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+}
+.md-body .md-code pre.is-collapsed {
+  max-height: 360px;
+  overflow: hidden;
+}
+.md-code-toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 5px 0;
+  border-top: 1px solid var(--line-soft);
+  font-size: 11px;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color 120ms, background-color 120ms;
+}
+.md-code-toggle:hover {
+  color: var(--fg);
+  background: var(--hover);
+}
+/* 语法着色：暖色系（keywords=terracotta / strings=green / numbers=amber / comments=灰），
+   不用红色 —— 红色保留给动作、警示与选中态。 */
+.md-code .hljs-comment,
+.md-code .hljs-quote {
+  color: var(--dim);
+  font-style: italic;
+}
+.md-code .hljs-keyword,
+.md-code .hljs-selector-tag,
+.md-code .hljs-literal,
+.md-code .hljs-built_in,
+.md-code .hljs-name,
+.md-code .hljs-tag,
+.md-code .hljs-attr,
+.md-code .hljs-selector-class,
+.md-code .hljs-selector-id {
+  color: var(--viz-2);
+}
+.md-code .hljs-string,
+.md-code .hljs-regexp,
+.md-code .hljs-template-tag,
+.md-code .hljs-addition {
+  color: var(--success);
+}
+.md-code .hljs-number,
+.md-code .hljs-symbol,
+.md-code .hljs-bullet,
+.md-code .hljs-meta {
+  color: var(--warn);
+}
+.md-code .hljs-title,
+.md-code .hljs-section {
+  font-weight: 600;
+}
+.md-code .hljs-emphasis {
+  font-style: italic;
+}
+.md-code .hljs-strong {
+  font-weight: 700;
+}
+
+/* ---- 工具卡「改动」区（write/edit 的 diff 视图）---- */
+.md-diff {
+  border-bottom: 1px solid var(--line-soft);
+}
+.md-diff-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  font-family: var(--font-app-mono);
+  font-size: 11px;
+}
+.md-diff-body {
+  max-height: 320px;
+  overflow: auto;
+  padding: 4px 0;
+  font-family: var(--font-app-mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.md-diff-line {
+  display: flex;
+  padding: 0 12px;
+  white-space: pre;
+}
+.md-diff-line.is-add {
+  background: color-mix(in srgb, var(--success) 10%, transparent);
+  color: var(--success);
+}
+.md-diff-line.is-del {
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+  color: var(--danger);
+}
+.md-diff-num {
+  min-width: 3ch;
+  margin-right: 8px;
+  text-align: right;
+  color: var(--dim-soft);
+  user-select: none;
+}
+.md-diff-sign {
+  width: 1ch;
+  margin-right: 8px;
+  user-select: none;
+}
+.md-diff-gap {
+  padding: 2px 12px;
+  color: var(--dim);
+  font-size: 11px;
+  font-style: italic;
+}
+
 .md-body blockquote {
   margin: 0.6em 0;
   padding: 0.1em 0 0.1em 0.9em;

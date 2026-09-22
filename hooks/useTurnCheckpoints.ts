@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { dialogConfirm, toast } from "@/components/ui/dialog";
 
 /**
@@ -39,14 +39,61 @@ export interface TurnCheckpoint {
   files: TurnFile[];
 }
 
+export interface TurnRound {
+  /** 本轮的子轮次，新 → 旧（内核的 turn 是「一次 LLM 往返」，一轮用户消息常含多个） */
+  checkpoints: TurnCheckpoint[];
+  /** 合并去重后的文件：同一文件被多个子轮次改动只出现一次，保留最早一次的语义 */
+  files: TurnFile[];
+  /** 按时间顺序合并的命令 */
+  commands: TurnCommand[];
+  fileCount: number;
+  createdCount: number;
+  restorableCount: number;
+}
+
 export interface TurnCheckpointsState {
   /** 最新的在最前 */
   checkpoints: TurnCheckpoint[];
-  /** 最近一轮 */
-  latest: TurnCheckpoint | null;
+  /** 最近一轮：已把「子轮次」合并成用户轮（见 mergeRound） */
+  latestRound: TurnRound | null;
   restoring: boolean;
   restore: (turnId?: string) => Promise<void>;
   reload: () => void;
+}
+
+/**
+ * 把「子轮次」聚合成「用户轮」。
+ *
+ * 内核的 turn = 一次 LLM 往返（一次工具调用就是一轮），一轮用户消息通常包含多个
+ * 子轮次，且**终答子轮次几乎没有文件/命令** —— 只取最后一个子轮次会让「本轮」在
+ * 真实工作轮里几乎永远显示为空。turnIndex 每轮用户消息从 0 重新开始，用它做分界：
+ * 从最新往回收集，直到（含）第一个 turnIndex === 0 的子轮次。
+ */
+export function mergeRound(checkpoints: readonly TurnCheckpoint[]): TurnRound | null {
+  if (checkpoints.length === 0) return null;
+  const round: TurnCheckpoint[] = [];
+  for (const checkpoint of checkpoints) {
+    round.push(checkpoint);
+    if (checkpoint.turnIndex === 0) break;
+  }
+  // 旧 → 新遍历，每个路径保留第一次出现（即最早一次触碰）的 existed/restorable
+  const filesByPath = new Map<string, TurnFile>();
+  const commands: TurnCommand[] = [];
+  for (let i = round.length - 1; i >= 0; i--) {
+    for (const file of round[i].files) {
+      if (!filesByPath.has(file.path)) filesByPath.set(file.path, file);
+    }
+    commands.push(...round[i].commands);
+  }
+  const files = [...filesByPath.values()];
+  return {
+    checkpoints: round,
+    files,
+    commands,
+    fileCount: files.length,
+    createdCount: files.filter((file) => !file.existed).length,
+    restorableCount: files.filter((file) => file.restorable).length,
+  };
 }
 
 export function useTurnCheckpoints(
@@ -77,17 +124,23 @@ export function useTurnCheckpoints(
   }, [sessionId, refreshKey, reloadKey, load]);
 
   const restore = useCallback(async (turnId?: string) => {
-    const target = turnId ?? checkpoints[0]?.id;
-    if (!sessionId || !target) return;
-    const checkpoint = checkpoints.find((item) => item.id === target);
-    if (!checkpoint) return;
+    const round = mergeRound(checkpoints);
+    // 无 turnId = 「回滚本轮」：整轮（全部子轮次）一起还原，新 → 旧
+    const targets = turnId
+      ? checkpoints.filter((item) => item.id === turnId)
+      : (round?.checkpoints ?? []);
+    if (!sessionId || targets.length === 0) return;
 
-    const shellWarning = checkpoint.commands.length > 0
-      ? `\n\n注意：本轮还执行过 ${checkpoint.commands.length} 条命令，命令的副作用（生成物、安装、提交）不在回滚范围内。`
+    const fileCount = turnId ? (targets[0]?.fileCount ?? 0) : (round?.fileCount ?? 0);
+    const restorableCount = turnId ? (targets[0]?.restorableCount ?? 0) : (round?.restorableCount ?? 0);
+    const commandCount = targets.reduce((sum, item) => sum + item.commands.length, 0);
+
+    const shellWarning = commandCount > 0
+      ? `\n\n注意：本轮还执行过 ${commandCount} 条命令，命令的副作用（生成物、安装、提交）不在回滚范围内。`
       : "";
     const ok = await dialogConfirm({
       title: "回滚本轮改动",
-      message: `将还原本轮写入的 ${checkpoint.fileCount} 个文件（其中 ${checkpoint.restorableCount} 个可还原）。`
+      message: `将还原本轮写入的 ${fileCount} 个文件（其中 ${restorableCount} 个可还原）。`
         + `本轮新建的文件会被删除，改动过的文件恢复原内容。${shellWarning}`,
       confirmText: "回滚",
       danger: true,
@@ -96,26 +149,36 @@ export function useTurnCheckpoints(
 
     setRestoring(true);
     try {
-      const res = await fetch(
-        `/api/sessions/${encodeURIComponent(sessionId)}/checkpoints/restore`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ turnId: target }),
-        },
-      );
-      const data = (await res.json().catch(() => ({}))) as {
-        restored?: string[];
-        deleted?: string[];
-        skipped?: Array<{ path: string; reason: string }>;
-        error?: string;
-      };
-      if (!res.ok) throw new Error(data.error || `回滚失败（HTTP ${res.status}）`);
-      const parts = [`已还原 ${data.restored?.length ?? 0} 个文件`];
-      if (data.deleted?.length) parts.push(`删除 ${data.deleted.length} 个新建文件`);
-      if (data.skipped?.length) parts.push(`${data.skipped.length} 个跳过`);
+      const restored: string[] = [];
+      const deleted: string[] = [];
+      const skipped: Array<{ path: string; reason: string }> = [];
+      // 新 → 旧逐个子轮次还原：同一文件被多次改动时，先还原后发生的改动，才能让
+      // 「新建文件删除」的校验（当前内容 == 该子轮次写入结果）成立，回到最早的原始状态。
+      for (const target of targets) {
+        const res = await fetch(
+          `/api/sessions/${encodeURIComponent(sessionId)}/checkpoints/restore`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ turnId: target.id }),
+          },
+        );
+        const data = (await res.json().catch(() => ({}))) as {
+          restored?: string[];
+          deleted?: string[];
+          skipped?: Array<{ path: string; reason: string }>;
+          error?: string;
+        };
+        if (!res.ok) throw new Error(data.error || `回滚失败（HTTP ${res.status}）`);
+        restored.push(...(data.restored ?? []));
+        deleted.push(...(data.deleted ?? []));
+        skipped.push(...(data.skipped ?? []));
+      }
+      const parts = [`已还原 ${restored.length} 个文件`];
+      if (deleted.length) parts.push(`删除 ${deleted.length} 个新建文件`);
+      if (skipped.length) parts.push(`${skipped.length} 个跳过`);
       toast(parts.join("，"));
-      for (const item of (data.skipped ?? []).slice(0, 2)) {
+      for (const item of skipped.slice(0, 2)) {
         if (item.path) toast(`跳过 ${item.path}：${item.reason}`);
       }
       await load(sessionId);
@@ -126,9 +189,11 @@ export function useTurnCheckpoints(
     }
   }, [sessionId, checkpoints, load]);
 
+  const latestRound = useMemo(() => mergeRound(checkpoints), [checkpoints]);
+
   return {
     checkpoints,
-    latest: checkpoints[0] ?? null,
+    latestRound,
     restoring,
     restore,
     reload: () => setReloadKey((value) => value + 1),
