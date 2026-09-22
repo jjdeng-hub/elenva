@@ -32,15 +32,15 @@ export function TurnFooter({
   canOpenRail?: boolean;
   onOpenRail?: () => void;
 }) {
-  const latest = turn.latest;
-  // 纯问答轮没有快照：不占用输入框上方的空间
-  if (running || !latest) return null;
+  // 「本轮」= 合并后的用户轮。内核的 turn 是「一次 LLM 往返」，一轮用户消息常含多个
+  // 子轮次，且终答子轮次几乎没有文件/命令 —— 只取最后一个子轮次会让这行在真实工作
+  // 轮里几乎永远显示为空（详见 useTurnCheckpoints.mergeRound）。
+  const round = turn.latestRound;
+  // 纯问答轮（没有文件也没有命令）不占用输入框上方的空间
+  if (running || !round) return null;
+  if (round.fileCount === 0 && round.commands.length === 0) return null;
 
-  const summary = summarizeTurn(
-    latest.fileCount,
-    latest.files.filter((file) => !file.existed).length,
-    latest.commands,
-  );
+  const summary = summarizeTurn(round.fileCount, round.createdCount, round.commands);
   const hasWrites = summary.files > 0;
 
   return (
@@ -92,7 +92,7 @@ export function TurnFooter({
           {hasWrites && (
             <button
               onClick={() => void turn.restore()}
-              disabled={turn.restoring || latest.restorableCount === 0}
+              disabled={turn.restoring || round.restorableCount === 0}
               className="flex h-6 cursor-pointer items-center gap-1 rounded-md border border-line bg-panel px-1.5 text-[11px] text-muted t-fast hover:border-danger/40 hover:text-danger disabled:opacity-50"
               title="把本轮写入的文件恢复原状"
               data-testid="rollback-turn"

@@ -239,9 +239,10 @@ function TurnSection({
   cwd: string;
   onOpenFile: (path: string) => void;
 }) {
-  const latest = turn.latest;
+  // 「本轮」= 合并后的用户轮（子轮次语义见 useTurnCheckpoints.mergeRound）
+  const latest = turn.latestRound;
   const summary = latest
-    ? summarizeTurn(latest.fileCount, latest.files.filter((file) => !file.existed).length, latest.commands)
+    ? summarizeTurn(latest.fileCount, latest.createdCount, latest.commands)
     : null;
   /** 命令 → 它作为验证的种类，挂 chip 用 */
   const checkByCommand = new Map(summary?.checks.map((check) => [check.command, check]) ?? []);
