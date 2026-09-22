@@ -4,6 +4,10 @@
   "description": "ELENVA Web —— pi coding agent 的 Web 工作台（个人控制台，自用优先，非 IDE 前端）",
   "license": "MIT",
   "author": "ELENVA",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jjdeng-hub/elenva.git"
+  },
   "keywords": [
     "pi",
     "pi-package",
@@ -35,7 +39,6 @@
     "dev:lan": "next dev -H 0.0.0.0 -p 30200",
     "build": "next build --webpack",
     "start": "next start -H 127.0.0.1 -p 30200",
-    "lint": "eslint .",
     "pack:tarball": "npm run build && npm pack",
     "release": "npm version patch --no-git-tag-version && npm run build && npm publish"
   },

@@ -1,0 +1,35 @@
+name: gates
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      NODE_OPTIONS: --max-old-space-size=2048
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - name: 安装依赖
+        run: npm ci
+      - name: 类型门（tsc）
+        run: node ./node_modules/typescript/bin/tsc --noEmit
+      - name: 用法面探针
+        run: node ./node_modules/typescript/bin/tsc -p tools/tsconfig.json
+      - name: 样式收敛（应 0 改动）
+        run: |
+          python3 tools/style-converge.py
+          git diff --exit-code
+      - name: 生产构建
+        run: npm run build
