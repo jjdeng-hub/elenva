@@ -26,6 +26,7 @@ import { resolveLocalFilePath } from "@/lib/file-links";
 import type { SessionInfo, ToolResultMessage } from "@/lib/types";
 import { cn } from "@/components/lib/utils";
 import { basename, formatCost, formatTokens } from "@/lib/format";
+import { centerElementInContainer } from "@/lib/scroll";
 import { toast, dialogPrompt } from "@/components/ui/dialog";
 
 const SIDEBAR_COLLAPSED_KEY = "elenva-chat-sidebar-collapsed";
@@ -228,9 +229,10 @@ export function ChatView({
    */
   const handleJumpToMessage = useCallback(
     (index: number) => {
-      const el = scrollContainerRef.current?.querySelector<HTMLElement>(`[data-idx="${index}"]`);
-      if (!el) return;
-      el.scrollIntoView({ block: "center", behavior: "smooth" });
+      const sc = scrollContainerRef.current;
+      const el = sc?.querySelector<HTMLElement>(`[data-idx="${index}"]`);
+      if (!sc || !el) return;
+      centerElementInContainer(sc, el);
       el.classList.add("ring-1", "ring-accent", "rounded-lg");
       setTimeout(() => el.classList.remove("ring-1", "ring-accent", "rounded-lg"), 1600);
     },
