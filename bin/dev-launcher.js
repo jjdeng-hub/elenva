@@ -17,6 +17,14 @@ const { spawn } = require("child_process");
 const fs = require("fs");
 const http = require("http");
 const path = require("path");
+const { getUnsupportedNodeVersionMessage, isNodeVersionSupported } = require("./node-version");
+
+// 双击入口没有 npm 层做检查，这里先守一道：Node 太老时给可行动的提示，
+// 而不是让 Next 抛一串费解的报错。
+if (!isNodeVersionSupported(process.versions.node)) {
+  process.stderr.write(`${getUnsupportedNodeVersionMessage(process.versions.node)}\n`);
+  process.exit(1);
+}
 
 const projectDir = path.resolve(__dirname, "..");
 const nextBin = path.join(projectDir, "node_modules", "next", "dist", "bin", "next");
@@ -68,7 +76,7 @@ function waitUntilReady(deadline, callback) {
 
 function startDev() {
   if (!fs.existsSync(nextBin)) {
-    say("找不到 next —— 请先在项目目录运行：npm install");
+    say("找不到 next —— 请先在项目目录运行：npm run setup");
     process.exitCode = 1;
     return;
   }

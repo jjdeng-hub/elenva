@@ -90,17 +90,19 @@ elenva-web
 
 ### 方式三：源码
 
+需要 Node ≥ 22.19（[nodejs.org](https://nodejs.org/)）。
+
 ```bash
 git clone https://github.com/jjdeng-hub/elenva.git
 cd elenva
-npm install
+npm run setup        # 检查 Node 版本 → 安装依赖
 npm run dev          # 开发模式，热更新，http://127.0.0.1:30200
 ```
 
-生产构建：
+生产运行（`--build` 会在装完依赖后顺手做生产构建）：
 
 ```bash
-npm run build
+npm run setup -- --build
 npm run start
 ```
 
@@ -123,6 +125,7 @@ npm run start
 ## 开发
 
 ```bash
+npm run setup          # 首次准备：检查 Node 版本 + 安装依赖
 npm run dev            # 开发服务器（Turbopack，热更新约 70ms）
 npm run build          # 生产构建
 npm run pack:tarball   # 构建并打出 npm 包
