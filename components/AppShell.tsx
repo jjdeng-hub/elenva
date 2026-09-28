@@ -70,7 +70,7 @@ export function AppShell() {
   const [view, setView] = useState<View>("home");
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set());
-  /** 会话默认工作区（~/pi-cwd-<date>，非项目语义；仅由 /api/default-cwd 初始化，勿他写） */
+  /** 会话默认工作区（~/pi-workspace，非项目语义；仅由 /api/default-cwd 初始化，勿他写） */
   const [defaultCwd, setDefaultCwd] = useState<string | null>(null);
   /** Git 视图当前定位的项目（会话顶栏分支 chip 跳转时设置；与 defaultCwd 分离，防污染新会话落点） */
   const [gitCwd, setGitCwd] = useState<string | null>(null);
@@ -586,12 +586,17 @@ export function AppShell() {
     }
   };
 
-  const projectCount = useMemo(() => new Set(sessions.map((s) => s.cwd)).size, [sessions]);
+  // 「项目」口径 = 会话涉及的去重目录数（历史日期工作区 ~/pi-cwd-<date> 不计，
+  // 与 browseRoots 的过滤保持一致 —— 2026-09-28 反馈）。
+  const projectCount = useMemo(
+    () => new Set(sessions.map((s) => s.cwd).filter((cwd) => !/pi-cwd-\d{8}\/?$/.test(cwd))).size,
+    [sessions],
+  );
   const projects = useMemo(() => [...new Set(sessions.map((s) => s.cwd))], [sessions]);
   /**
    * 文件浏览器 / 目录选择器用的目录列表：按**最近活跃**排序，项目根优先。
    *
-   * 之前文件浏览器固定打开 defaultCwd（~/pi-cwd-<date> 临时工作区），
+   * 之前文件浏览器固定打开 defaultCwd（~/pi-workspace 默认工作区），
    * 实测进去只能看到「目录为空」—— 这是它「看起来没用」的真正原因。
    */
   const browseRoots = useMemo(() => {
@@ -599,6 +604,9 @@ export function AppShell() {
     for (const s of sessions) {
       const root = (s.isProject && s.repoRoot) || s.cwd;
       if (!root || root === "unknown") continue;
+      // 旧默认工作区（~/pi-cwd-<date>）不进目录列表：它们只是历史日期容器，
+      // 排在列表前部很扎眼（2026-09-28 反馈「三个工作区都是默认会话创建的」）。
+      if (/pi-cwd-\d{8}\/?$/.test(root)) continue;
       const prev = latest.get(root);
       if (prev === undefined || (s.modified || "") > prev) latest.set(root, s.modified || "");
     }
@@ -607,7 +615,7 @@ export function AppShell() {
 
   /**
    * Git 视图的项目列表：首选真实项目（isProject 的 repoRoot）。
-   * 直接拿全部 cwd 会把默认工作区（~/pi-cwd-<date> 这类临时目录）也当成项目，
+   * 直接拿全部 cwd 会把默认工作区（~/pi-workspace 这类非项目目录）也当成项目，
    * 一进「Git 变更」就选中它 → 恒显「该目录不是 Git 仓库」。
    */
   const gitProjects = useMemo(() => {

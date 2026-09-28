@@ -31,10 +31,11 @@ export async function getAllowedFileRoots(): Promise<Set<string>> {
     if (s.projectRoot) roots.add(normalizeSlashes(s.projectRoot));
   }
 
-  // Also allow ~/pi-cwd-* directories created by the default-cwd endpoint.
+  // Also allow the default workspace (~/pi-workspace) and legacy dated
+  // workspaces created by the old default-cwd endpoint (~/pi-cwd-<date>).
   try {
     for (const name of readdirSync(homedir())) {
-      if (/^pi-cwd-\d{8}$/.test(name)) {
+      if (name === "pi-workspace" || /^pi-cwd-\d{8}$/.test(name)) {
         roots.add(normalizeSlashes(path.join(homedir(), name)));
       }
     }

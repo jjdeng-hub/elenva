@@ -1,6 +1,8 @@
 export interface ModelsData {
   models: Record<string, string>;
   modelList: { id: string; name: string; provider: string; input?: string[] }[];
+  /** 未经过 enabledModels 过滤的完整模型清单（模型列表编辑器用；选择器仍用 modelList）。 */
+  allModelList: { id: string; name: string; provider: string; input?: string[] }[];
   defaultModel: { provider: string; modelId: string } | null;
   thinkingLevels: Record<string, string[]>;
   thinkingLevelMaps: Record<string, Record<string, string | null>>;

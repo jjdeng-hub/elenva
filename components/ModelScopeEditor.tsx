@@ -9,6 +9,8 @@ import { toast } from "@/components/ui/dialog";
 type ModelEntry = { id: string; name: string; provider: string };
 type ModelsPayload = {
   modelList?: ModelEntry[];
+  /** 未过滤的完整清单（编辑器用它，保证白名单外的模型也可见可勾选） */
+  allModelList?: ModelEntry[];
   defaultModel?: { provider: string; modelId: string } | null;
   catalogCheckedAt?: number;
   error?: string;
@@ -74,7 +76,10 @@ export function ModelScopeEditor() {
   const loadModels = useCallback(async () => {
     try {
       const d = (await fetch("/api/models", { cache: "no-store" }).then((r) => r.json())) as ModelsPayload;
-      setModels(Array.isArray(d.modelList) ? d.modelList : []);
+      // 白名单（enabledModels）会让内核侧只返回"可见"模型；编辑器必须用未过滤的
+      // 全量清单，否则收窄后看不见被移出的模型、无法再勾回来（2026-09-28 反馈）。
+      const list = Array.isArray(d.allModelList) ? d.allModelList : d.modelList;
+      setModels(Array.isArray(list) ? list : []);
       setCheckedAt(d.catalogCheckedAt);
       setDefaultRef(d.defaultModel ? `${d.defaultModel.provider}/${d.defaultModel.modelId}` : null);
     } catch {
