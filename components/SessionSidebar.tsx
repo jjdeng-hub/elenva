@@ -355,7 +355,45 @@ export function SessionSidebar({
 
   const defaultExpanded = isExpanded(DEFAULT_GROUP_KEY, false);
   const defaultSessions = groups.defaultGroup?.sessions ?? [];
-  const defaultHidden = defaultSessions.length - GROUP_PREVIEW_COUNT;
+
+  /**
+   * 「展开全部」状态：每组独立、内存态（刷新后回到预览态）。
+   * 与组头的折叠/展开分工不同 —— 组头管整组进出；这里管「预览 5 条 ↔ 全部」，
+   * 两者用同一颗按钮配对切换（用户反馈：原来的「收起」= 整组收起，和点组头重复）。
+   */
+  const [showAllGroups, setShowAllGroups] = useState<Record<string, boolean>>({});
+  const toggleShowAll = (key: string) =>
+    setShowAllGroups((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  /** 组内列表：默认只列最近 GROUP_PREVIEW_COUNT 条，展开后全部。 */
+  const renderGroupBody = (list: SessionInfo[], key: string) => {
+    const showAll = !!showAllGroups[key];
+    const hidden = Math.max(0, list.length - GROUP_PREVIEW_COUNT);
+    return (
+      <>
+        {(showAll ? list : list.slice(0, GROUP_PREVIEW_COUNT)).map(renderSession)}
+        {hidden > 0 && (
+          <button
+            onClick={() => toggleShowAll(key)}
+            data-testid="session-group-toggle"
+            className="btn btn-subtle mt-0.5 w-full"
+          >
+            {showAll ? (
+              <>
+                <ChevronDown size={12} className="rotate-180" />
+                收起
+              </>
+            ) : (
+              <>
+                <ChevronDown size={12} />
+                展开全部（还有 {hidden} 条）
+              </>
+            )}
+          </button>
+        )}
+      </>
+    );
+  };
 
   const pane = (
     <div
@@ -457,23 +495,7 @@ export function SessionSidebar({
                 </button>
               )}
             </div>
-            {defaultExpanded && (
-              <>
-                {defaultSessions.map(renderSession)}
-                {defaultHidden > 0 && (
-                  <button onClick={() => toggleGroup(DEFAULT_GROUP_KEY)} className="btn btn-subtle mt-0.5 w-full">
-                    <ChevronDown size={12} className="rotate-180" />
-                    收起
-                  </button>
-                )}
-              </>
-            )}
-            {!defaultExpanded && defaultHidden > 0 && (
-              <button onClick={() => toggleGroup(DEFAULT_GROUP_KEY)} className="btn btn-subtle mt-0.5 w-full">
-                <ChevronDown size={12} />
-                展开更多（还有 {defaultHidden} 条）
-              </button>
-            )}
+            {defaultExpanded && renderGroupBody(defaultSessions, DEFAULT_GROUP_KEY)}
           </div>
         )}
 
@@ -515,7 +537,7 @@ export function SessionSidebar({
                         </button>
                       )}
                     </div>
-                    {expanded && g.sessions.map(renderSession)}
+                    {expanded && renderGroupBody(g.sessions, g.key)}
                   </div>
                 );
               })}

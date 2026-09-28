@@ -52,6 +52,7 @@ function readCatalogCheckedAt(agentDir: string): number | undefined {
 async function loadModels(cwd: string): Promise<ModelsData> {
   const nameMap = new Map<string, string>();
   let modelList: { id: string; name: string; provider: string }[] = [];
+  let allModelList: { id: string; name: string; provider: string }[] = [];
   let defaultModel: { provider: string; modelId: string } | null = null;
   const thinkingLevels: Record<string, string[]> = {};
   const thinkingLevelMaps: Record<string, Record<string, string | null>> = {};
@@ -81,6 +82,14 @@ async function loadModels(cwd: string): Promise<ModelsData> {
     provider: m.provider,
     input: m.input,
   })).sort(compareModelEntries);
+  // 全量清单：模型列表编辑器要让白名单外的模型也可见可勾选（否则一旦收窄
+  // 白名单，被移出的模型就再也勾不回来了 —— 2026-09-28 反馈）。
+  allModelList = scope.available.map((m) => ({
+    id: m.id,
+    name: m.name,
+    provider: m.provider,
+    input: m.input,
+  })).sort(compareModelEntries);
   for (const m of visible) {
     const key = `${m.provider}:${m.id}`;
     nameMap.set(key, m.name);
@@ -105,6 +114,7 @@ async function loadModels(cwd: string): Promise<ModelsData> {
     {
       models: Object.fromEntries(nameMap),
       modelList,
+      allModelList,
       defaultModel,
       thinkingLevels,
       thinkingLevelMaps,
@@ -119,6 +129,7 @@ async function loadModels(cwd: string): Promise<ModelsData> {
 const EMPTY_MODELS: ModelsData = {
   models: {},
   modelList: [],
+  allModelList: [],
   defaultModel: null,
   thinkingLevels: {},
   thinkingLevelMaps: {},

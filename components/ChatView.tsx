@@ -274,6 +274,7 @@ export function ChatView({
       const root = (s.isProject && s.repoRoot) || s.cwd;
       if (!root || root === "unknown") continue;
       if (defaultCwd && normPath(root) === normPath(defaultCwd)) continue; // 默认工作区单独展示
+      if (/pi-(cwd-\d{8}|workspace)$/.test(normPath(root))) continue; // 默认工作区（固定/旧日期形态）不占「最近」名额
       const prev = map.get(normPath(root));
       if (!prev || (s.modified || "") > prev.latest) {
         map.set(normPath(root), { name: basename(root), path: root, latest: s.modified || "" });

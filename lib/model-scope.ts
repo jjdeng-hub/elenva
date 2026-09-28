@@ -30,6 +30,8 @@ const THINKING_LEVEL_SUFFIXES = new Set<ThinkingLevel>([
 export interface ModelScopeResult {
   /** Models the UI should offer, in resolver order (all available when unscoped). */
   visible: readonly Model<Api>[];
+  /** Every available model before `enabledModels` filtering — scope editors need the full list. */
+  available: readonly Model<Api>[];
   /** SDK-native scope retained for AgentSession model cycling and extensions. */
   scopedModels: readonly ScopedModel[];
   /** `provider/modelId` → thinking level pinned with a `:level` pattern suffix. */
@@ -111,8 +113,10 @@ export async function resolveVisibleModels(
 ): Promise<ModelScopeResult> {
   const cleaned = (patterns ?? []).map((pattern) => pattern.trim()).filter(Boolean);
   if (cleaned.length === 0) {
+    const all = await modelRuntime.getAvailable();
     return {
-      visible: await modelRuntime.getAvailable(),
+      visible: all,
+      available: all,
       scopedModels: [],
       thinkingLevelPins: {},
       warnings: [],
@@ -129,6 +133,7 @@ export async function resolveVisibleModels(
   if (scopedModels.length === 0) {
     return {
       visible: available,
+      available,
       scopedModels: [],
       thinkingLevelPins: {},
       warnings,
@@ -146,6 +151,7 @@ export async function resolveVisibleModels(
   }
   return {
     visible: scopedModels.map((scoped) => scoped.model),
+    available,
     scopedModels,
     thinkingLevelPins,
     warnings,

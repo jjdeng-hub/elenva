@@ -57,10 +57,9 @@ export function parseImportContent(content: string): ParsedImport {
   return { sessionId, headerCwd, lineCount: lines.length };
 }
 
-/** 回退 cwd：~/pi-cwd-<YYYYMMDD>（与 /api/default-cwd 一致） */
+/** 回退 cwd：~/pi-workspace（与 /api/default-cwd 一致；旧日期形态已弃用） */
 export function fallbackImportCwd(): string {
-  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  return join(homedir(), `pi-cwd-${date}`);
+  return join(homedir(), "pi-workspace");
 }
 
 /** 把已校验的 JSONL 内容写入会话目录，返回目标文件路径 */
