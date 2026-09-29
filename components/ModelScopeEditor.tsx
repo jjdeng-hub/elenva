@@ -253,23 +253,16 @@ export function ModelScopeEditor() {
           onClick={() => applySelection(new Set(models.map(refOf)))}
           disabled={loading || models.length === 0}
           className={btn}
+          title="勾选当前全部模型（白名单保持开启）＝「全都要 + 冻结」：此后厂商上新模型不会自动出现，需回这里手动勾选；点「保存」生效。"
         >
           全选
         </button>
         <button
-          onClick={() => {
-            if (!defaultRef) {
-              toast("还没有默认模型，先在对话栏的模型选择器里设一个");
-              return;
-            }
-            applySelection(new Set([defaultRef]));
-          }}
-          disabled={loading || !defaultRef || (scoped && selectedRefs.size === 1)}
+          onClick={() => setPatterns([])}
+          disabled={loading || !scoped}
           className={btn}
+          title="清掉白名单、取消筛选：全部模型立即显示，且此后厂商上新模型会自动出现；点「保存」生效。"
         >
-          仅留默认
-        </button>
-        <button onClick={() => setPatterns([])} disabled={loading || !scoped} className={btn}>
           恢复显示全部
         </button>
       </div>
