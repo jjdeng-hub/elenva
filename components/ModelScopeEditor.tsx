@@ -53,11 +53,11 @@ function formatAgo(ms: number | undefined): string {
 }
 
 /**
- * 模型列表编辑器。
+ * 模型库编辑器。
  *
- * pi 只提供白名单（`enabledModels`，glob 模式），没有黑名单机制，所以"删掉用不到的模型"
- * 在实现上就是"只把要用的登记进白名单"。取舍要说清楚：一旦启用白名单，
- * 厂商上新模型不会自动出现，需要回到这里勾选（界面会提示有多少可用模型不在列表内）。
+ * 交互只讲一件事：勾选 = 这个模型出现在对话的模型选择器里；未勾选的保留在库中。
+ * 实现上，勾选集合就是 pi 的 `enabledModels` 白名单（glob 模式；pi 没有黑名单）。
+ * 未做选择时全部可用；保存过选择后，厂商上新模型默认留在库里，勾选后才进选择器。
  */
 export function ModelScopeEditor() {
   const [models, setModels] = useState<ModelEntry[]>([]);
@@ -128,7 +128,6 @@ export function ModelScopeEditor() {
   }, [models, patterns]);
 
   const scoped = patterns.length > 0;
-  const missingCount = scoped ? models.filter((m) => !selectedRefs.has(refOf(m))).length : 0;
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -152,7 +151,7 @@ export function ModelScopeEditor() {
   const applySelection = (nextRefs: Set<string>) => {
     // 空列表在内核语义里等于"不过滤 = 显示全部"，与用户"全部取消"的预期相反，直接拦下。
     if (nextRefs.size === 0) {
-      toast("至少保留一个模型；要恢复全部请点「恢复显示全部」");
+      toast("至少选一个模型——它会出现在对话的模型选择器里");
       return;
     }
     if (globPatterns.length > 0 && !materialized) {
@@ -181,7 +180,7 @@ export function ModelScopeEditor() {
       });
       const d = (await res.json()) as { error?: string };
       if (!res.ok) throw new Error(d.error || `保存失败（HTTP ${res.status}）`);
-      toast(patterns.length === 0 ? "已恢复显示全部模型，新会话生效" : `已保存 ${patterns.length} 个模型，新会话生效`);
+      toast(patterns.length === 0 ? "当前未做选择：全部模型都会出现在对话选择器里" : `已保存 ${patterns.length} 个模型，新会话生效`);
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e));
     } finally {
@@ -218,9 +217,9 @@ export function ModelScopeEditor() {
   return (
     <Card testId="model-scope-editor">
       <CardHeader>
-        <CardTitle>模型列表</CardTitle>
+        <CardTitle>模型库</CardTitle>
         <span className="text-[11px] text-dim">
-          {loading ? "加载中…" : scoped ? `已选 ${selectedRefs.size} / 共 ${models.length}` : `全部 ${models.length} 个 · 未过滤`}
+          {loading ? "加载中…" : scoped ? `已选 ${selectedRefs.size} / 共 ${models.length}` : `全部 ${models.length} 个`}
           {" · "}
           {formatAgo(checkedAt)}
         </span>
@@ -239,7 +238,11 @@ export function ModelScopeEditor() {
         </div>
       </CardHeader>
 
-      <div className="flex flex-wrap items-center gap-2 px-4 pt-3">
+      <div className="px-4 pt-3 text-[11px] leading-relaxed text-dim">
+        勾选的模型会出现在对话的模型选择器里；未勾选的保留在库中，不用管。
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 px-4 pt-2">
         <div className="relative min-w-48 flex-1">
           <Search size={12} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-dim" />
           <input
@@ -253,24 +256,16 @@ export function ModelScopeEditor() {
           onClick={() => applySelection(new Set(models.map(refOf)))}
           disabled={loading || models.length === 0}
           className={btn}
-          title="勾选当前全部模型（白名单保持开启）＝「全都要 + 冻结」：此后厂商上新模型不会自动出现，需回这里手动勾选；点「保存」生效。"
+          title="勾选全部模型；保存后它们都会出现在对话的模型选择器里。"
         >
           全选
-        </button>
-        <button
-          onClick={() => setPatterns([])}
-          disabled={loading || !scoped}
-          className={btn}
-          title="清掉白名单、取消筛选：全部模型立即显示，且此后厂商上新模型会自动出现；点「保存」生效。"
-        >
-          恢复显示全部
         </button>
       </div>
 
       <div className="max-h-[22rem] overflow-y-auto px-4 py-3">
         {loading && (
           <div className="flex items-center gap-2 py-4 text-[12px] text-dim">
-            <Loader2 size={14} className="animate-spin" /> 加载模型列表…
+            <Loader2 size={14} className="animate-spin" /> 加载模型库…
           </div>
         )}
         {!loading && groups.length === 0 && (
@@ -331,14 +326,9 @@ export function ModelScopeEditor() {
       </div>
 
       <div className="space-y-2 border-t border-line-soft px-4 py-3">
-        {scoped && missingCount > 0 && (
-          <div className="rounded-md bg-warn/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-warn">
-            有 {missingCount} 个可用模型不在列表内。白名单模式下，厂商上新模型不会自动出现，需要回到这里勾选。
-          </div>
-        )}
         {scoped && defaultRef && !selectedRefs.has(defaultRef) && (
           <div className="rounded-md bg-danger/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-danger">
-            当前默认模型（{defaultRef}）不在列表内，新会话会落到列表里的第一个模型。
+            当前默认模型（{defaultRef}）不在已选模型里，新会话会落到已选模型中的第一个。
           </div>
         )}
 
