@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { resolveSessionPath, buildSessionContext } from "@/lib/session-reader";
 import { getAgentSession } from "@/lib/agent-runtime";
+import { latestSessionTodo } from "@/lib/session-todo";
 
 export async function GET(
   req: Request,
@@ -43,7 +44,10 @@ export async function GET(
       sessionId: id,
     });
 
-    return NextResponse.json({ context, tail, before: before ?? null });
+    // 任务清单摘要（最后一条成功的 todo_write）：运行中卡片等处以 5s 轮询顺带消费
+    const todo = latestSessionTodo(sm.getEntries() as unknown[]);
+
+    return NextResponse.json({ context, tail, before: before ?? null, todo });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }

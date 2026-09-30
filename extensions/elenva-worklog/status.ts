@@ -35,9 +35,16 @@ const STATUS_MARK: Record<WorklogEntry["status"], string> = {
   blocked: "⛔",
 };
 
-/** 注入内容的识别标记：下一轮替换旧状态时靠它找到自己上轮注入的那条消息。 */
+/**
+ * 注入内容的识别标记 —— 下一轮替换旧状态时靠它找到自己上轮注入的那条消息。
+ *
+ * 判据必须是「整条消息就是注入块」：trim 后以 `<agent_status>` 开头、以
+ * `</agent_status>` 结尾。includes() 写法会把**引用了标记的真实用户消息**误删——
+ * 同一陷阱在 elenva-todo 侧已实测到过（探针消息被静默吃掉）。
+ */
 export function isStatusText(text: string): boolean {
-  return text.includes(MARK_OPEN);
+  const trimmed = text.trim();
+  return trimmed.startsWith(MARK_OPEN) && trimmed.endsWith(MARK_CLOSE);
 }
 
 /**
@@ -51,10 +58,10 @@ export function stripStatusMessages<T>(messages: readonly T[]): T[] {
     const content = candidate.content;
     if (typeof content === "string") return !isStatusText(content);
     if (Array.isArray(content)) {
-      return !content.some((part) => {
-        const text = (part as { text?: unknown } | null)?.text;
-        return typeof text === "string" && isStatusText(text);
-      });
+      const textParts = content.filter((part) => (part as { type?: unknown } | null)?.type === "text");
+      if (textParts.length !== 1) return true;
+      const text = (textParts[0] as { text?: unknown } | null)?.text;
+      return !(typeof text === "string" && isStatusText(text));
     }
     return true;
   });
