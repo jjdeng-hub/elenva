@@ -1,14 +1,16 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { ListTodo, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { cn } from "@/components/lib/utils";
 import { basename, formatCost, formatTokens } from "@/lib/format";
 import type { SessionInfo } from "@/lib/types";
+import type { SessionTodoSummary } from "@/lib/session-todo";
 import type { UsageReport } from "@/lib/usage-aggregate";
 
 /**
  * 运行中会话的实时卡（置于会话流顶部）。
- * 最新动态每 5 秒轮询一次会话 tail；空闲时组件不渲染。
+ * 最新动态与任务进度每 5 秒轮询一次（/context 的 tail 与 todo）；空闲时组件不渲染。
  */
 export function RunningCards({
   running,
@@ -20,6 +22,7 @@ export function RunningCards({
   onOpenSession: (s: SessionInfo) => void;
 }) {
   const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [todos, setTodos] = useState<Record<string, SessionTodoSummary | null>>({});
   const runningKey = running.map((s) => s.id).join(",");
 
   useEffect(() => {
@@ -28,18 +31,23 @@ export function RunningCards({
     const ids = runningKey.split(",");
     const fetchAll = async () => {
       const next: Record<string, string> = {};
+      const nextTodos: Record<string, SessionTodoSummary | null> = {};
       await Promise.all(
         ids.map(async (id) => {
           try {
             const r = await fetch(`/api/sessions/${encodeURIComponent(id)}/context?tail=8&deferThinking=1&deferMedia=1`, { cache: "no-store" });
             if (!r.ok) return;
-            const data = (await r.json()) as { context?: { messages?: unknown } };
+            const data = (await r.json()) as { context?: { messages?: unknown }; todo?: SessionTodoSummary | null };
             const text = lastReadableText(data.context?.messages);
             if (text) next[id] = text;
+            nextTodos[id] = data.todo ?? null;
           } catch { /* ignore */ }
         }),
       );
-      if (!cancelled) setPreviews((prev) => ({ ...prev, ...next }));
+      if (!cancelled) {
+        setPreviews((prev) => ({ ...prev, ...next }));
+        setTodos((prev) => ({ ...prev, ...nextTodos }));
+      }
     };
     fetchAll();
     const timer = setInterval(fetchAll, 5000);
@@ -55,6 +63,7 @@ export function RunningCards({
     <div className="space-y-2 px-4 pb-1 pt-3">
       {running.map((s) => {
         const u = usage?.sessions[s.id];
+        const t = todos[s.id];
         return (
           <button
             key={s.id}
@@ -67,6 +76,15 @@ export function RunningCards({
               <span className="shrink-0 rounded-sm bg-panel-2 px-1.5 py-0.5 font-mono text-[11px] text-dim">{basename(s.cwd)}</span>
             </div>
             <div className="mt-1 truncate text-[12px] text-muted">{previews[s.id] ?? "正在获取最新动态…"}</div>
+            {t && (
+              <div className="mt-0.5 flex items-center gap-1.5 text-[12px]" data-testid="running-card-todo">
+                <ListTodo size={12} className={cn("shrink-0", t.done === t.total ? "text-success" : "text-accent")} />
+                <span className="shrink-0 tabular-nums text-fg">{t.done}/{t.total}</span>
+                <span className="min-w-0 truncate text-muted">
+                  {t.active ? `进行中：${t.active}` : t.done === t.total ? "全部完成" : "待推进"}
+                </span>
+              </div>
+            )}
             <div className="mt-1.5 flex items-center gap-2 text-[12px] text-dim">
               <span className="inline-flex items-center gap-1 font-medium text-accent">
                 <span className="size-1.5 rounded-full bg-accent anim-pulse-dot" /> 运行中

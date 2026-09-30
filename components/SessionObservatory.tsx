@@ -504,10 +504,7 @@ export function SessionObservatory({
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {/* ---------- 本轮证据 ---------- */}
-        {turn && <TurnSection turn={turn} cwd={cwd} onOpenFile={onOpenFile} />}
-
-        {/* ---------- 任务（任务拆解清单）---------- */}
+        {/* ---------- 任务（任务拆解清单 · 实时，置顶）---------- */}
         {todos && todoStats && (
           <Section
             title="任务"
@@ -522,6 +519,9 @@ export function SessionObservatory({
             <TodoList items={todos.items} />
           </Section>
         )}
+
+        {/* ---------- 本轮证据 ---------- */}
+        {turn && <TurnSection turn={turn} cwd={cwd} onOpenFile={onOpenFile} />}
 
         {/* ---------- 工具调用（会话级聚合）---------- */}
         <Section
