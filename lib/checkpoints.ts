@@ -24,8 +24,9 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
  *
  *  · 只覆盖 write/edit 工具的改动。bash 的副作用（重定向、安装、生成物）只
  *    记录命令原文，还原时不假装能回滚它们。
- *  · 还原时「删除新建文件」必须当前内容哈希与本轮写入后的哈希一致 —— 否则
- *    说明人在之后又改过，宁可跳过也不覆盖。
+ *  · 还原前先校验：文件当前内容必须仍等于「本轮写入后的哈希」——不一致说明
+ *    在本轮之后又被改过（用户手改、其他会话、任何来源），宁可跳过也不覆盖。
+ *    写回旧内容与删除新建文件都走同一道校验。
  *  · 单文件超过 2 MB、单轮超过 32 MB 的文件记为不可还原，不静默丢数据。
  */
 
@@ -313,8 +314,9 @@ export function pruneCheckpoints(sessionId: string, keep = 20, agentDir?: string
 /**
  * 还原一轮的改动。
  *
- * 删除「本轮新建的文件」是最危险的一步，所以要求当前内容与本轮写入后的哈希
- * 完全一致；不一致说明有人在本轮之后又动过它，跳过并如实报告。
+ * 最危险的一步是覆盖/删除 —— 所以两类操作都要求「当前内容 == 本轮写入后的
+ * 哈希」；不一致说明在本轮之后又被改过（用户手改、其他会话、任何来源），
+ * 跳过并如实报告，绝不覆盖。
  */
 export function restoreCheckpoint(options: {
   sessionId: string;
@@ -337,8 +339,19 @@ export function restoreCheckpoint(options: {
           continue;
         }
         try {
-          copyFileSync(join(dir, entry.preImage), entry.path);
-          result.restored.push(entry.path);
+          if (!existsSync(entry.path)) {
+            result.skipped.push({ path: entry.path, reason: "文件在本轮之后被删除，未还原" });
+            continue;
+          }
+          const currentHash = hashContent(readFileSync(entry.path));
+          if (entry.postHash && currentHash === entry.postHash) {
+            copyFileSync(join(dir, entry.preImage), entry.path);
+            result.restored.push(entry.path);
+          } else if (!entry.postHash && currentHash === entry.preHash) {
+            result.skipped.push({ path: entry.path, reason: "内容与改动前一致，无需还原" });
+          } else {
+            result.skipped.push({ path: entry.path, reason: "本轮之后内容又被改动，未覆盖" });
+          }
         } catch (error) {
           result.skipped.push({
             path: entry.path,
@@ -368,6 +381,24 @@ export function restoreCheckpoint(options: {
     writeManifest(checkpoint, agentDir);
     return result;
   });
+}
+
+/**
+ * 文件在本轮之后是否又被改动过（供回滚前预告与观测栏提示）。
+ * 判不准时按「已改动」保守处理 —— 预告宁可多报，回滚宁可跳过。
+ */
+export function checkpointFileDrift(entry: CheckpointFileEntry): boolean {
+  try {
+    if (!existsSync(entry.path)) return true;
+    const current = hashContent(readFileSync(entry.path));
+    if (entry.existed) {
+      if (entry.postHash) return current !== entry.postHash;
+      return current !== entry.preHash;
+    }
+    return !entry.postHash || current !== entry.postHash;
+  } catch {
+    return true;
+  }
 }
 
 /** 会话被删除时清掉它的快照目录 */

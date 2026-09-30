@@ -6,9 +6,9 @@ export const dynamic = "force-dynamic";
 /**
  * POST /api/sessions/[id]/checkpoints/restore —— 把某一轮的改动整轮还原。
  *
- * 还原规则见 lib/checkpoints.ts：有备份的文件写回原件；本轮新建的文件只在
- * 「当前内容仍等于本轮写入结果」时删除，否则跳过并如实报告，绝不覆盖用户
- * 在这之后的手工改动。
+ * 还原规则见 lib/checkpoints.ts：写回旧内容与删除新建文件都要求「当前内容
+ * 仍等于本轮写入结果」；本轮之后被任何人（用户手改、其他会话等）动过的
+ * 文件一律跳过并如实报告 —— 绝不覆盖本轮之后发生的改动。
  */
 export async function POST(
   req: Request,

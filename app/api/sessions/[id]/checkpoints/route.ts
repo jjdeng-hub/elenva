@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { listCheckpoints } from "@/lib/checkpoints";
+import { checkpointFileDrift, listCheckpoints } from "@/lib/checkpoints";
 
 export const dynamic = "force-dynamic";
 
@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
  * GET /api/sessions/[id]/checkpoints —— 该会话每轮的改动快照。
  *
  * 前端在每轮 agent 结束、以及用户主动刷新时拉一次，用于显示「本轮改了 N 个
- * 文件 / 可回滚」。只读，不触发任何还原。
+ * 文件 / 可回滚」。只读，不触发任何还原。changedSince 供「回滚会跳过」预告。
  */
 export async function GET(
   _req: Request,
@@ -32,6 +32,8 @@ export async function GET(
         restorable: Boolean(file.preImage) || !file.existed,
         skippedReason: file.skippedReason ?? null,
         bytes: file.bytes ?? null,
+        /* 本轮之后又被改过（手改 / 其他会话）——回滚会跳过、不覆盖；前端做预告用 */
+        changedSince: checkpointFileDrift(file),
       })),
     }));
     return NextResponse.json({ checkpoints }, { headers: { "Cache-Control": "no-store" } });
