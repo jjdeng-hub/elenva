@@ -98,18 +98,21 @@ function Section({
   meta,
   /** 在双列里时不画自己的下边框（边框由 SectionPair 统一给） */
   flush = false,
+  /** 左右分栏里内容较窄时收一档内边距（双列实测每列仅 ~200px） */
+  tight = false,
   children,
 }: {
   title: string;
   icon: React.ReactNode;
   meta?: React.ReactNode;
   flush?: boolean;
+  tight?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div
       data-section={title}
-      className={cn("min-w-0 px-3.5 py-3", !flush && "border-b border-line-soft")}
+      className={cn("min-w-0 py-3", tight ? "px-2.5" : "px-3.5", !flush && "border-b border-line-soft")}
     >
       <div className="flex items-center gap-1.5">
         <span className="shrink-0 text-dim">{icon}</span>
@@ -124,10 +127,11 @@ function Section({
 /**
  * 双列区块对。
  *
- * 为什么需要：观测栏里大部分区块内容很短（累计几行数字、上下文一条进度条），
+ * 为什么需要：观测栏里大部分区块内容很短（累计几行数字、上下文一条进度条、工具聚合几行），
  * 一条占一行的排版会把面板拉得很长，得频繁滚动——“两个短区块并排”比“拉长”好读。
- * 只给**确实短**的区块用（比如会话累计 + 上下文、Git + 运行环境）；
- * 列表型（工具调用、本会话文件）与带长文案的保持通栏。
+ * 用在哪：「本轮 + 工具调用」「运行统计 + 上下文窗口/Git」两组短区块；
+ * 带长命令、长文案、多行清单的（任务、计划模式、会话产物）保持通栏 ——
+ * 分半宽会把命令路径全截成 `cd /home/demo-…`，反而读不了。
  */
 function SectionPair({ left, right }: { left: React.ReactNode; right: React.ReactNode }) {
   return (
@@ -238,10 +242,13 @@ function TurnSection({
   turn,
   cwd,
   onOpenFile,
+  tools,
 }: {
   turn: TurnCheckpointsState;
   cwd: string;
   onOpenFile: (path: string) => void;
+  /** 会话级工具聚合。与「本轮」同栏并排（用户反馈：两行白占一屏，合成一行） */
+  tools?: React.ReactNode;
 }) {
   // 「本轮」= 合并后的用户轮（子轮次语义见 useTurnCheckpoints.mergeRound）
   const latest = turn.latestRound;
@@ -252,7 +259,11 @@ function TurnSection({
   const checkByCommand = new Map(summary?.checks.map((check) => [check.command, check]) ?? []);
 
   return (
+    <SectionPair
+      left={
     <Section
+      flush
+      tight
       title="本轮"
       icon={<History size={12} />}
       meta={
@@ -352,6 +363,9 @@ function TurnSection({
         </div>
       )}
     </Section>
+      }
+      right={tools}
+    />
   );
 }
 
@@ -453,6 +467,45 @@ export function SessionObservatory({
     return { rows, failures, totalCalls, totalFailed, thinking };
   }, [messages, results]);
 
+  /** 工具聚合面板（并排进「本轮」右栏；没有 turn 数据的会话由兜底分支原样渲染） */
+  const toolsJx =
+    toolStats.totalCalls > 0 ? (
+      <div className="flex flex-col" data-testid="rail-tools">
+        {toolStats.rows.slice(0, MAX_VISIBLE_TOOLS).map((row) => {
+          /* 失败详情直接缩进挂在对应工具行下面，而不是另开一个「失败调用」区块 ——
+             两者本来就描述同一件事，分成两块会多占一行标题、还要来回对照。 */
+          const firstFailure = toolStats.failures.find((f) => f.tool === row.name);
+          return (
+            <div key={row.name}>
+              <div className="flex items-center gap-2 py-0.5" data-testid="rail-tool">
+                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg">{row.name}</span>
+                {row.failed > 0 && <span className="shrink-0 text-[10px] text-danger">{row.failed} 失败</span>}
+                <span className="shrink-0 text-[11px] tabular-nums text-muted">{row.count}</span>
+              </div>
+              {firstFailure && onJumpToMessage && (
+                <button
+                  onClick={() => onJumpToMessage(firstFailure.index)}
+                  title={`跳转到失败的那条消息：${firstFailure.detail}`}
+                  data-testid="rail-failure"
+                  className="mb-0.5 flex w-full cursor-pointer items-center gap-1.5 rounded-md bg-danger/5 px-1.5 py-0.5 text-left t-fast hover:bg-danger/10"
+                >
+                  <CornerDownRight size={10} className="shrink-0 text-danger/70" />
+                  <span className="min-w-0 flex-1 truncate text-[10px] text-danger">{firstFailure.detail}</span>
+                </button>
+              )}
+            </div>
+          );
+        })}
+        {toolStats.rows.length > MAX_VISIBLE_TOOLS && (
+          <div className="pt-0.5 text-[11px] text-dim">
+            另有 {toolStats.rows.length - MAX_VISIBLE_TOOLS} 种工具
+          </div>
+        )}
+      </div>
+    ) : (
+      <Empty>本会话还没有调用过工具。</Empty>
+    );
+
   /** 当前任务清单（与输入框上方面板同一推导；成功的 todo_write 才更新） */
   const todos = useMemo(() => latestTodoState(messages, results), [messages, results]);
   const todoStats = todos && todos.items.length > 0 ? todoProgress(todos.items) : null;
@@ -520,10 +573,11 @@ export function SessionObservatory({
           </Section>
         )}
 
-        {/* ---------- 本轮证据 ---------- */}
-        {turn && <TurnSection turn={turn} cwd={cwd} onOpenFile={onOpenFile} />}
+        {/* ---------- 本轮证据 + 工具调用（并排一行，竖线分隔；反馈：两行白占一屏）---------- */}
+        {turn && <TurnSection turn={turn} cwd={cwd} onOpenFile={onOpenFile} tools={toolsJx} />}
 
-        {/* ---------- 工具调用（会话级聚合）---------- */}
+        {/* 工具聚合挂到「本轮」右栏；没有 turn 数据的会话由这里兜底原样渲染 */}
+        {!turn && (
         <Section
           title="工具调用"
           icon={<Wrench size={12} />}
@@ -581,6 +635,7 @@ export function SessionObservatory({
             </>
           )}
         </Section>
+        )}
 
         {/* 本会话文件区已移除：
             ① 聊天区工具栏的「📄 N」按钮本来就能列出同一份文件（右侧预览面板可比
