@@ -303,6 +303,9 @@ function TurnSection({
                       {!file.restorable && (
                         <span className="chip chip-warn shrink-0" title={file.skippedReason ?? undefined}>未备份</span>
                       )}
+                      {file.changedSince && (
+                        <span className="chip chip-warn shrink-0" title="本轮之后又被改动：回滚会跳过，不会覆盖">被改过</span>
+                      )}
                     </div>
                   );
                 })}

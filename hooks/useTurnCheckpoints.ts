@@ -18,6 +18,8 @@ export interface TurnFile {
   restorable: boolean;
   skippedReason: string | null;
   bytes: number | null;
+  /** 本轮之后文件又被改动过（手改 / 其他会话）：回滚会跳过、不覆盖 */
+  changedSince?: boolean;
 }
 
 export interface TurnCommand {
@@ -104,14 +106,17 @@ export function useTurnCheckpoints(
   const [restoring, setRestoring] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
-  const load = useCallback(async (sid: string) => {
+  const load = useCallback(async (sid: string): Promise<TurnCheckpoint[] | null> => {
     try {
       const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/checkpoints`, { cache: "no-store" });
-      if (!res.ok) return;
+      if (!res.ok) return null;
       const data = (await res.json()) as { checkpoints?: TurnCheckpoint[] };
-      setCheckpoints(Array.isArray(data.checkpoints) ? data.checkpoints : []);
+      const list = Array.isArray(data.checkpoints) ? data.checkpoints : [];
+      setCheckpoints(list);
+      return list;
     } catch {
       /* 拿不到就不显示，不打扰 */
+      return null;
     }
   }, []);
 
@@ -123,11 +128,22 @@ export function useTurnCheckpoints(
     void load(sessionId);
   }, [sessionId, refreshKey, reloadKey, load]);
 
+  /* 回到窗口时刷一次：文件可能刚在编辑器里被改过（「被改过」标签要跟上） */
+  useEffect(() => {
+    if (!sessionId) return;
+    const onFocus = () => void load(sessionId);
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [sessionId, load]);
+
   const restore = useCallback(async (turnId?: string) => {
-    const round = mergeRound(checkpoints);
+    // 先取一次最新快照：文件可能在页面打开之后被改过（编辑器 / 其他会话），
+    // 预告与目标都要按「现在的磁盘状态」算，不能拿旧缓存。
+    const fresh = sessionId ? ((await load(sessionId)) ?? checkpoints) : checkpoints;
+    const round = mergeRound(fresh);
     // 无 turnId = 「回滚本轮」：整轮（全部子轮次）一起还原，新 → 旧
     const targets = turnId
-      ? checkpoints.filter((item) => item.id === turnId)
+      ? fresh.filter((item) => item.id === turnId)
       : (round?.checkpoints ?? []);
     if (!sessionId || targets.length === 0) return;
 
@@ -135,13 +151,18 @@ export function useTurnCheckpoints(
     const restorableCount = turnId ? (targets[0]?.restorableCount ?? 0) : (round?.restorableCount ?? 0);
     const commandCount = targets.reduce((sum, item) => sum + item.commands.length, 0);
 
+    const roundFiles = turnId ? (targets[0]?.files ?? []) : (round?.files ?? []);
+    const driftedCount = roundFiles.filter((file) => file.changedSince).length;
+    const driftWarning = driftedCount > 0
+      ? `\n\n注意：其中 ${driftedCount} 个文件在本轮之后又被改动（手动编辑或其他会话），回滚会跳过它们、不会覆盖。`
+      : "";
     const shellWarning = commandCount > 0
       ? `\n\n注意：本轮还执行过 ${commandCount} 条命令，命令的副作用（生成物、安装、提交）不在回滚范围内。`
       : "";
     const ok = await dialogConfirm({
       title: "回滚本轮改动",
       message: `将还原本轮写入的 ${fileCount} 个文件（其中 ${restorableCount} 个可还原）。`
-        + `本轮新建的文件会被删除，改动过的文件恢复原内容。${shellWarning}`,
+        + `本轮新建的文件会被删除，改动过的文件恢复原内容。${driftWarning}${shellWarning}`,
       confirmText: "回滚",
       danger: true,
     });
