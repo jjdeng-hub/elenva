@@ -73,10 +73,15 @@ const messages = [
   { role: "assistant", content: [{ type: "text", text: "回答" }] },
   { role: "user", content: "<agent_status>\n旧状态\n</agent_status>" },
   { role: "user", content: [{ type: "text", text: "<agent_status>数组形态</agent_status>" }] },
+  { role: "user", content: "这条消息引用了 <agent_status> 标记，不应被删" },
 ];
 const stripped = statusMod.stripStatusMessages(messages);
-check("摘掉旧状态（字符串与数组两种形态）", stripped.length === 2, `(剩 ${stripped.length})`);
-check("保留真实用户消息与助手消息", stripped[0].content === "真实提问" && stripped[1].role === "assistant");
+check("摘掉旧状态（字符串与数组两种形态）", stripped.length === 3, `(剩 ${stripped.length})`);
+check(
+  "保留真实用户消息与助手消息",
+  stripped[0].content === "真实提问" && stripped[1].role === "assistant" &&
+    stripped.some((m) => String(m.content).includes("引用")),
+);
 
 // ── 4. 写入与滚动窗口（临时目录，不碰真实工作记录）─────────────────────────
 const tmp = mkdtempSync(join(tmpdir(), "elenva-worklog-"));

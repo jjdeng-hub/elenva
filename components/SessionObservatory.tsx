@@ -15,6 +15,7 @@ import {
   Layers,
   Loader2,
   ListChecks,
+  ListTodo,
   Share,
   Wrench,
   X,
@@ -31,6 +32,9 @@ import { verificationKindLabel } from "@/lib/verification-kind";
 import type { TurnCheckpointsState } from "@/hooks/useTurnCheckpoints";
 import type { AgentMessage, ToolResultMessage } from "@/lib/types";
 import type { SessionStatsInfo } from "@/lib/pi-types";
+import { TodoList } from "@/components/TodoList";
+import { latestTodoState } from "@/lib/todo-view";
+import { todoProgress } from "@/extensions/elenva-todo/state";
 
 /**
  * 右侧观察栏 —— 把「这次会话到底动过什么」变成一眼可见的数据。
@@ -449,6 +453,10 @@ export function SessionObservatory({
     return { rows, failures, totalCalls, totalFailed, thinking };
   }, [messages, results]);
 
+  /** 当前任务清单（与输入框上方面板同一推导；成功的 todo_write 才更新） */
+  const todos = useMemo(() => latestTodoState(messages, results), [messages, results]);
+  const todoStats = todos && todos.items.length > 0 ? todoProgress(todos.items) : null;
+
   const tokens = sessionStats?.tokens;
   // percent 是浮点（433.4k/1.00M → 43.3375），展示层必须取整
   const pct = contextUsage?.percent != null ? Math.round(contextUsage.percent) : null;
@@ -498,6 +506,22 @@ export function SessionObservatory({
       <div className="min-h-0 flex-1 overflow-y-auto">
         {/* ---------- 本轮证据 ---------- */}
         {turn && <TurnSection turn={turn} cwd={cwd} onOpenFile={onOpenFile} />}
+
+        {/* ---------- 任务（任务拆解清单）---------- */}
+        {todos && todoStats && (
+          <Section
+            title="任务"
+            icon={<ListTodo size={12} />}
+            meta={
+              <span>
+                {todoStats.done}/{todoStats.total}
+                {todoStats.active ? " · 进行中" : todoStats.done === todoStats.total ? " · 全部完成" : ""}
+              </span>
+            }
+          >
+            <TodoList items={todos.items} />
+          </Section>
+        )}
 
         {/* ---------- 工具调用（会话级聚合）---------- */}
         <Section

@@ -11,6 +11,7 @@ import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { LogoMark } from "@/components/Logo";
 import { SessionObservatory } from "@/components/SessionObservatory";
 import { TurnFooter } from "@/components/TurnFooter";
+import { TodoPanel } from "@/components/TodoPanel";
 import { ExtensionStrip } from "@/components/ExtensionStrip";
 import { ModelPicker } from "@/components/ModelPicker";
 import { ProjectTrustDialog } from "@/components/ProjectTrustDialog";
@@ -22,6 +23,7 @@ import { useAgentSession, type AttachedImage, type ChatInputHandle } from "@/hoo
 import { useSessionActions } from "@/hooks/useSessionActions";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
 import { useTurnCheckpoints } from "@/hooks/useTurnCheckpoints";
+import { latestTodoState } from "@/lib/todo-view";
 import { resolveLocalFilePath } from "@/lib/file-links";
 import type { SessionInfo, ToolResultMessage } from "@/lib/types";
 import { cn } from "@/components/lib/utils";
@@ -482,6 +484,8 @@ export function ChatView({
   }, [agentRunning, planSessionId]);
   /** 本轮证据的唯一数据源：输入框上方一行与观测栏明细共用它 */
   const turn = useTurnCheckpoints(planSessionId, checkpointRefreshKey);
+  /** 当前任务清单（最后一条成功的 todo_write 参数；消息流一变即重算，回滚 / 切分支自动正确） */
+  const todos = useMemo(() => latestTodoState(messages, toolResults), [messages, toolResults]);
   /* 右侧只有一个槽位，打开观测栏要先腾位（与工具栏里的逻辑一致） */
   const openRail = useCallback(() => {
     setTreeOpen(false);
@@ -565,6 +569,7 @@ export function ChatView({
       slashCommands={slashCommands}
       cwd={cwd || null}
       draftKey={draftKey}
+      polishSessionId={planSessionId}
       toolPreset={toolPreset}
       onToolPresetChange={(p) => void handleToolPresetChange(p)}
       planMode={planMode}
@@ -803,6 +808,7 @@ export function ChatView({
             onRemember={(text, scope) => void rememberInstruction(text, scope)}
           />
         )}
+        {!isEmpty && <TodoPanel todos={todos} />}
         {!isEmpty && (
           <TurnFooter
             turn={turn}

@@ -10,10 +10,13 @@ import {
   Gauge,
   Layers,
   ListChecks,
+  Loader2,
   Paperclip,
+  RotateCcw,
   Slash,
   Square,
   Undo2,
+  WandSparkles,
   Wrench,
   X,
 } from "lucide-react";
@@ -91,12 +94,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     extensionBelow,
     draftKey: draftKeyProp,
     footerLeft,
+    polishSessionId,
   },
   ref,
 ) {
   const [text, setText] = useState("");
   const [images, setImages] = useState<AttachedImage[]>([]);
   const [dragOver, setDragOver] = useState(false);
+  /* 提示词优化（发送键旁）：执行中标志 + 一键还原（优化前原文） */
+  const [polishing, setPolishing] = useState(false);
+  const [polishUndo, setPolishUndo] = useState<string | null>(null);
   const areaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -111,6 +118,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   // 草稿恢复：draftKey 变化（即会话切换重挂载）时读取
   useEffect(() => {
     if (!draftKey) return;
+    setPolishUndo(null);
     try {
       setText(localStorage.getItem(`elenva-draft:${draftKey}`) ?? "");
     } catch { /* ignore */ }
@@ -291,10 +299,61 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     }
     updateText("");
     clearImages();
+    setPolishUndo(null);
   };
 
   const hasQueue = (queuedMessages?.steering.length ?? 0) + (queuedMessages?.followUp.length ?? 0) > 0;
   const canSend = (text.trim().length > 0 || images.length > 0) && !disabled;
+  const canPolish = text.trim().length > 0 && !!polishSessionId && !polishing && !disabled;
+
+  /* ---------- 提示词优化（发送键旁）----------
+     草稿交给 /api/prompt-polish（会话同款模型）按「目标 / 背景 / 约束 / 期望产出」补齐歧义；
+     不自动发送；优化前的原文留一次「还原」机会。（依据 ch2 L606 / L682-684，见 lib/prompt-polish.ts） */
+  const handlePolish = async () => {
+    const draft = text.trim();
+    if (!draft || polishing) return;
+    if (!polishSessionId) {
+      onNotice?.("会话建立之后才能优化提示词");
+      return;
+    }
+    setPolishing(true);
+    try {
+      const res = await fetch("/api/prompt-polish", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionId: polishSessionId, text: draft }),
+      });
+      const data = (await res.json().catch(() => null)) as { polished?: unknown; error?: unknown } | null;
+      if (!res.ok) {
+        throw new Error(typeof data?.error === "string" ? data.error : `请求失败（HTTP ${res.status}）`);
+      }
+      const polished = typeof data?.polished === "string" ? data.polished.trim() : "";
+      if (!polished) throw new Error("模型没有返回可用的优化结果");
+      if (polished === draft) {
+        onNotice?.("这段提示词已经足够清晰，无需修改");
+        return;
+      }
+      setPolishUndo(text);
+      updateText(polished);
+      requestAnimationFrame(() => {
+        const el = areaRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(el.value.length, el.value.length);
+        }
+      });
+    } catch (error) {
+      onNotice?.(`提示词优化失败：${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setPolishing(false);
+    }
+  };
+  const restorePolish = () => {
+    if (polishUndo === null) return;
+    updateText(polishUndo);
+    setPolishUndo(null);
+    requestAnimationFrame(() => areaRef.current?.focus());
+  };
 
   /* ---------- slash 菜单状态 ---------- */
   const [slashOpen, setSlashOpen] = useState(false);
@@ -694,6 +753,33 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                     onChange={onThinkingLevelChange}
                   />
                 )}
+                {polishUndo !== null && (
+                  <button
+                    onClick={restorePolish}
+                    className="flex h-6 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-line bg-panel-2 px-1.5 text-[11px] text-muted t-fast hover:text-fg"
+                    title="恢复优化前的提示词"
+                    data-testid="polish-restore"
+                  >
+                    <RotateCcw size={12} />
+                    还原
+                  </button>
+                )}
+                <button
+                  onClick={() => void handlePolish()}
+                  disabled={!canPolish}
+                  className={cn(
+                    "flex size-8 shrink-0 items-center justify-center rounded-full transition-all",
+                    canPolish ? "cursor-pointer text-dim hover:bg-hover hover:text-fg" : "text-dim/50",
+                  )}
+                  title={
+                    polishSessionId
+                      ? "优化提示词：把草稿按「目标 / 背景 / 约束 / 期望产出」补齐歧义（不自动发送）"
+                      : "会话建立之后才能优化提示词"
+                  }
+                  data-testid="polish-prompt"
+                >
+                  {polishing ? <Loader2 size={14} className="anim-spin" /> : <WandSparkles size={14} />}
+                </button>
                 {running && (
                   <button
                     onClick={() => submit("steer")}
@@ -802,6 +888,8 @@ interface ChatInputProps {
   draftKey?: string;
   /** 输入卡片底部左侧插槽（新会话的工作区选择器；空 = 不渲染该行） */
   footerLeft?: ReactNode;
+  /** 提示词优化借用的会话 id（新会话未落库前为 null，按钮禁用） */
+  polishSessionId?: string | null;
 }
 
 /**

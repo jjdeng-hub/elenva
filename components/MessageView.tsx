@@ -21,6 +21,8 @@ import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecuti
 import { imageBlockSrc } from "@/lib/image-block";
 import { lineDiff, parseSdkDiff, type ParsedDiffLine } from "@/lib/line-diff";
 import { isEditToolName, isWriteToolName } from "@/lib/tool-names";
+import { TodoList } from "@/components/TodoList";
+import { coerceTodoItems, todoProgress, type TodoItem } from "@/extensions/elenva-todo/state";
 
 /* ---------------- content block renderers ---------------- */
 
@@ -119,7 +121,15 @@ function toolInputSummary(input: Record<string, unknown> | undefined, rawInput?:
 /** 宿主自带工具的展示名（原始名字是英文标识符，直接摆出来不好认） */
 const HOST_TOOL_LABELS: Record<string, string> = {
   present_plan: "计划",
+  todo_write: "任务清单",
 };
+
+/** todo_write 工具卡的一行摘要（清单本体在展开区渲染） */
+function todoSummaryText(items: TodoItem[] | null): string {
+  if (!items) return "";
+  const { done, total, active } = todoProgress(items);
+  return active ? `${done}/${total} 完成 · 进行中：${active.text}` : `${done}/${total} 完成`;
+}
 
 /** 计划工具的参数就是计划正文（markdown），单独渲染，不当作普通参数摘要 */
 function planTextOf(input: Record<string, unknown> | undefined): string {
@@ -229,13 +239,17 @@ function ToolCallCard({
 }) {
   const isPlan = block.toolName === "present_plan";
   const planText = isPlan ? planTextOf(block.input) : "";
+  const isTodo = block.toolName === "todo_write";
+  const todoItems = isTodo ? coerceTodoItems((block.input as { todos?: unknown } | undefined)?.todos) : null;
   // 计划是「决策文档」：默认展开，且不再把 JSON 参数倒一遍（倒出来的就是同一段正文）
   const [open, setOpen] = useState(isPlan && planText.length > 0);
   const running = !result;
   const timing = toolTiming(startedAt, result);
   const summary = isPlan
     ? stripControlSequences(planText.split("\n").find((line) => line.trim()) ?? "")
-    : stripControlSequences(toolInputSummary(block.input, block.rawInput));
+    : isTodo
+      ? stripControlSequences(todoSummaryText(todoItems))
+      : stripControlSequences(toolInputSummary(block.input, block.rawInput));
   const planStatus = isPlan ? planStatusLabel((result?.details as { status?: unknown } | undefined)?.status) : null;
   /* write/edit 的「改动」区：内核 details.diff 优先，input 兜底（见 buildToolDiff） */
   const diffLines = buildToolDiff(block, result);
@@ -309,6 +323,19 @@ function ToolCallCard({
                 <Markdown text={planText} />
               </div>
             )
+          ) : isTodo ? (
+            <div className="max-h-72 overflow-auto px-3 py-2">
+              {todoItems && todoItems.length > 0 ? (
+                <TodoList items={todoItems} />
+              ) : (
+                <div className="text-[12px] text-dim">任务清单已清空</div>
+              )}
+              {result?.isError && (
+                <div className="mt-1.5 font-mono text-[12px] whitespace-pre-wrap text-danger">
+                  {resultText(result)}
+                </div>
+              )}
+            </div>
           ) : (
             <>
               {diffLines ? (
