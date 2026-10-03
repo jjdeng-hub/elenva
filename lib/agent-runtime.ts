@@ -689,12 +689,12 @@ export class AgentSessionWrapper {
               source: "rpc",
               // InputSource, same as above. Also mirrors pi's RPC-mode ack semantics:
               // acknowledge the prompt only after synchronous validation and extension
-              // preflight have accepted the submission.
-              preflightResult: (success) => {
-                if (success) {
-                  this.applyExactSystemPrompt();
-                  acceptPreflight();
-                }
+              // preflight have accepted the submission. 1.0 passes a disposition
+              // ("handled" | "queued" | "started") and only calls this on acceptance —
+              // so any invocation means accepted; ack here.
+              preflightResult: () => {
+                this.applyExactSystemPrompt();
+                acceptPreflight();
               },
             });
           } catch (error) {

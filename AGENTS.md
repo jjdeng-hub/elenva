@@ -102,6 +102,7 @@ PATH="$TEMP/nodestub:$PATH" cmd //c "$(cygpath -w "$(pwd)/开发模式.cmd")"
 | 项目文档（`AGENTS.md` / `README.md` / `docs/*.md`） | **本机夹具与截图**：`tools/rev/`、`tools/shots/`、`public/_shots/` |
 | | **个人数据**：真名 / 账号 / 卡号 / 手机号 / 本机绝对路径 / 提交信息里的个人决策 |
 
+- 顶层 `skills/` = **内置起步技能**（通用、公开安全，随仓库分发；`node skills/install.mjs` 安装到 agent 目录）。个人的本机技能放 `.pi/skills/` 或 `~/.pi/agent/skills/`，**不进仓库**（本目录只收通用技能）。
 - 测试夹具用**明显虚构**的数据，并在文件里注明（例：`tools/memory-eval/cases.json` 的 `_disclaimer`）
 - **提交信息也当公开文本写**：写「按用户决策…」，不写真名
 - 收尾自查：对**全历史**扫一遍本机用户名 / 真名 / 邮箱关键词，必须 0 命中。关键词自己填 —— `git log --all -p | grep -iE "<用户名>|<真名>"`（把它们写进本文件反而是泄露）
