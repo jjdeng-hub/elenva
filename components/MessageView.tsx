@@ -20,7 +20,7 @@ import { toolTiming } from "@/lib/tool-timing";
 import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecutionMessage, CustomMessage, TextContent, ToolCallContent, ToolResultMessage, UserMessage } from "@/lib/types";
 import { imageBlockSrc } from "@/lib/image-block";
 import { lineDiff, parseSdkDiff, type ParsedDiffLine } from "@/lib/line-diff";
-import { isEditToolName, isWriteToolName } from "@/lib/tool-names";
+import { isEditToolName, isWriteToolName, parseMcpToolName } from "@/lib/tool-names";
 import { TodoList } from "@/components/TodoList";
 import { coerceTodoItems, todoProgress, type TodoItem } from "@/extensions/elenva-todo/state";
 
@@ -122,6 +122,8 @@ function toolInputSummary(input: Record<string, unknown> | undefined, rawInput?:
 const HOST_TOOL_LABELS: Record<string, string> = {
   present_plan: "计划",
   todo_write: "任务清单",
+  codemode: "脚本",
+  tool_search: "工具搜索",
 };
 
 /** todo_write 工具卡的一行摘要（清单本体在展开区渲染） */
@@ -241,6 +243,9 @@ function ToolCallCard({
   const planText = isPlan ? planTextOf(block.input) : "";
   const isTodo = block.toolName === "todo_write";
   const todoItems = isTodo ? coerceTodoItems((block.input as { todos?: unknown } | undefined)?.todos) : null;
+  const mcpTool = parseMcpToolName(block.toolName);
+  const isCodemode = block.toolName === "codemode";
+  const codemodeScript = isCodemode && typeof block.input?.code === "string" ? block.input.code : "";
   // 计划是「决策文档」：默认展开，且不再把 JSON 参数倒一遍（倒出来的就是同一段正文）
   const [open, setOpen] = useState(isPlan && planText.length > 0);
   const running = !result;
@@ -249,7 +254,9 @@ function ToolCallCard({
     ? stripControlSequences(planText.split("\n").find((line) => line.trim()) ?? "")
     : isTodo
       ? stripControlSequences(todoSummaryText(todoItems))
-      : stripControlSequences(toolInputSummary(block.input, block.rawInput));
+      : isCodemode && codemodeScript
+        ? stripControlSequences(codemodeScript.split("\n").find((line) => line.trim()) ?? "")
+        : stripControlSequences(toolInputSummary(block.input, block.rawInput));
   const planStatus = isPlan ? planStatusLabel((result?.details as { status?: unknown } | undefined)?.status) : null;
   /* write/edit 的「改动」区：内核 details.diff 优先，input 兜底（见 buildToolDiff） */
   const diffLines = buildToolDiff(block, result);
@@ -270,7 +277,18 @@ function ToolCallCard({
         <span className="shrink-0 text-dim">
           <ToolNameIcon name={block.toolName} />
         </span>
-        <span className="shrink-0 font-mono text-[12px] text-fg/90">{HOST_TOOL_LABELS[block.toolName] ?? block.toolName}</span>
+        {mcpTool ? (
+          <>
+            <span className="shrink-0 rounded-sm bg-panel-2 px-1.5 py-0.5 text-[10px] font-semibold text-dim" title="MCP 工具">
+              MCP
+            </span>
+            <span className="shrink-0 font-mono text-[12px] text-fg/90" title={block.toolName}>
+              {mcpTool.server} · {mcpTool.tool}
+            </span>
+          </>
+        ) : (
+          <span className="shrink-0 font-mono text-[12px] text-fg/90">{HOST_TOOL_LABELS[block.toolName] ?? block.toolName}</span>
+        )}
         {previewPath && (
           <span
             role="button"
@@ -338,7 +356,11 @@ function ToolCallCard({
             </div>
           ) : (
             <>
-              {diffLines ? (
+              {isCodemode && codemodeScript ? (
+                <pre className="max-h-64 overflow-auto border-b border-line/60 px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-muted">
+                  {codemodeScript}
+                </pre>
+              ) : diffLines ? (
                 <DiffBlock lines={diffLines} />
               ) : (
                 Object.keys(block.input || {}).length > 0 && (

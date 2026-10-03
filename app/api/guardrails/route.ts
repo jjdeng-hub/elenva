@@ -10,6 +10,7 @@ import {
   writeApprovalMode,
   writePlanMode,
   writePlanModeDefault,
+  writeMcpWriteApproval,
   writeVerificationGuard,
 } from "@/lib/guardrail-settings";
 import type { ApprovalMode } from "@/lib/tool-risk";
@@ -33,6 +34,7 @@ export async function GET(req: Request) {
         approvalMode: settings.approvalMode,
         planModeDefault: settings.planModeDefault,
         verificationGuard: settings.verificationGuard,
+        mcpWriteApproval: settings.mcpWriteApproval,
         allowByProject: settings.allowByProject,
         verifyCommandsByProject: settings.verifyCommandsByProject,
         /** 带了 cwd 就直接给该项目的声明列表（服务端规范化 key，界面不用猜写法） */
@@ -89,6 +91,10 @@ export async function POST(req: Request) {
       case "setVerificationGuard": {
         const settings = writeVerificationGuard(body.enabled !== false);
         return NextResponse.json({ verificationGuard: settings.verificationGuard });
+      }
+      case "setMcpWriteApproval": {
+        const settings = writeMcpWriteApproval(body.enabled !== false);
+        return NextResponse.json({ mcpWriteApproval: settings.mcpWriteApproval });
       }
       case "addVerifyCommand": {
         if (!body.cwd || !body.pattern) {

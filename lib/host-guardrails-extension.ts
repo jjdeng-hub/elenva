@@ -188,6 +188,16 @@ function shortCommand(command: string, limit = 400): string {
   return trimmed.length > limit ? `${trimmed.slice(0, limit)}…` : trimmed;
 }
 
+/** MCP 工具的参数摘要（确认卡里给一眼上下文；截断防长内容） */
+function shortInputJson(input: Record<string, unknown> | undefined, limit = 300): string {
+  try {
+    const text = JSON.stringify(input ?? {});
+    return text.length > limit ? `${text.slice(0, limit)}…` : text;
+  } catch {
+    return "";
+  }
+}
+
 function planModeActive(runtime: GuardrailsRuntime): boolean {
   const sessionId = runtime.getSessionId();
   if (!sessionId) return false;
@@ -288,6 +298,8 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
           cwd: runtime.getCwd(),
           allowedRoots: runtime.getAllowedRoots(),
         });
+        // MCP 写操作由独立开关控制：关掉时回到默认（不打扰）；总闸「关闭」时同样不生效
+        if (risk.mcpWrite === true && !settings.mcpWriteApproval) return;
         if (!needsApproval(risk, settings.approvalMode)) return;
         const allowRules = [
           ...(settings.allowByProject[cwdKey(runtime.getCwd())] ?? []),
@@ -300,7 +312,9 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
           if (settings.approvalFallback === "queue") {
             const n = enqueuePendingApproval({
               toolName,
-              detail: shortCommand(typeof input?.command === "string" ? input.command : ""),
+              detail: toolName.startsWith("mcp__")
+                ? shortInputJson(input)
+                : shortCommand(typeof input?.command === "string" ? input.command : ""),
               reason: risk.reason,
               ruleKey: risk.ruleKey,
               cwd: runtime.getCwd(),
@@ -320,7 +334,7 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
         const target = toolTargetPath(input);
         const detail = toolName === "bash" || toolName === "powershell"
           ? shortCommand(typeof input?.command === "string" ? input.command : "")
-          : target ?? "";
+          : target ?? (toolName.startsWith("mcp__") ? shortInputJson(input) : "");
         const options = [
           "允许一次",
           ...(sessionId && risk.ruleKey ? ["本会话总是允许"] : []),

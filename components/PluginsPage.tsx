@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, Download, Loader2, Package, Plug, RefreshCw, Search, Sparkles, Star, Trash2 } from "lucide-react";
+import { ChevronRight, Download, Loader2, Package, Plug, RefreshCw, Search, Server, ShieldCheck, Sparkles, Star, Trash2 } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
@@ -16,6 +16,15 @@ type PluginPackage = {
   packageName?: string;
   canCheckForUpdates?: boolean;
   counts: { extensions: number; skills: number; prompts: number; themes: number };
+};
+
+/** /api/mcp-servers 返回项（~/.pi/agent/mcp.json 里的服务器） */
+type McpServer = {
+  name: string;
+  description?: string;
+  enabled: boolean;
+  transport: "stdio" | "http";
+  target: string;
 };
 
 /** /api/package-catalog 返回项（npm registry 搜索） */
@@ -60,6 +69,28 @@ const normalizeSource = (raw: string) =>
     .replace(/^["']+|["']+$/g, "")
     .trim();
 
+/** 布尔开关（与设置页同款交互；本页自持一份，避免跨页耦合） */
+function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+  return (
+    <button
+      onClick={() => onChange(!on)}
+      disabled={disabled}
+      aria-pressed={on}
+      className={cn(
+        "relative h-5 w-9 shrink-0 cursor-pointer rounded-full t-fast disabled:opacity-50",
+        on ? "bg-accent" : "bg-line",
+      )}
+    >
+      <span
+        className={cn(
+          "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-all",
+          on ? "left-[18px]" : "left-0.5",
+        )}
+      />
+    </button>
+  );
+}
+
 export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
   const [packages, setPackages] = useState<PluginPackage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +99,15 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
   const [updateMsg, setUpdateMsg] = useState<Record<string, string>>({});
   const [installSource, setInstallSource] = useState("");
   const [installingSource, setInstallingSource] = useState<string | null>(null);
+
+  /** MCP 服务器（~/.pi/agent/mcp.json；内核在会话启动时连接） */
+  const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
+  const [mcpLoading, setMcpLoading] = useState(true);
+  const [mcpBusy, setMcpBusy] = useState<string | null>(null);
+  const [mcpNote, setMcpNote] = useState<string | null>(null);
+  /** MCP 写操作确认开关（护栏设置，与审批档位独立） */
+  const [mcpWriteApproval, setMcpWriteApproval] = useState(true);
+  const [mcpWriteBusy, setMcpWriteBusy] = useState(false);
 
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalog, setCatalog] = useState<CatalogItem[] | null>(null);
@@ -95,6 +135,67 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadMcp = useCallback(async () => {
+    setMcpLoading(true);
+    try {
+      const [serversData, guardData] = await Promise.all([
+        fetch("/api/mcp-servers", { cache: "no-store" }).then((r) => r.json()),
+        fetch("/api/guardrails", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
+      ]);
+      const data = serversData as { servers?: McpServer[]; error?: string };
+      setMcpServers(data.servers ?? []);
+      setMcpNote(data.error ?? null);
+      const guard = guardData as { mcpWriteApproval?: boolean } | null;
+      if (guard && typeof guard.mcpWriteApproval === "boolean") setMcpWriteApproval(guard.mcpWriteApproval);
+    } catch {
+      setMcpServers([]);
+    } finally {
+      setMcpLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadMcp();
+  }, [loadMcp]);
+
+  const setMcpWriteApprovalSetting = async (next: boolean) => {
+    setMcpWriteBusy(true);
+    try {
+      const res = await fetch("/api/guardrails", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "setMcpWriteApproval", enabled: next }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { mcpWriteApproval?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setMcpWriteApproval(data.mcpWriteApproval !== false);
+      toast(next ? "已开启：MCP 写操作需确认" : "已关闭：MCP 写操作不再确认");
+    } catch (e) {
+      toast(`操作失败：${errText(e)}`, 6000);
+    } finally {
+      setMcpWriteBusy(false);
+    }
+  };
+
+  const setMcpEnabled = async (server: McpServer, enabled: boolean) => {
+    setMcpBusy(server.name);
+    try {
+      const res = await fetch("/api/mcp-servers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "setEnabled", name: server.name, enabled }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { servers?: McpServer[]; error?: string };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (Array.isArray(data.servers)) setMcpServers(data.servers);
+      toast(enabled ? `已启用 ${server.name} · 新会话生效` : `已停用 ${server.name} · 新会话生效`);
+    } catch (e) {
+      toast(`操作失败：${errText(e)}`, 6000);
+    } finally {
+      setMcpBusy(null);
+    }
+  };
 
   /**
    * 统一的 POST 封装：cwd 必填（API 会校验）、读后端的 error 字段、用返回的列表直接刷新。
@@ -480,6 +581,67 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
                 </button>
               </div>
             ))}
+          </div>
+        </Card>
+
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle>MCP 服务器</CardTitle>
+            <span className="ml-auto text-[12px] text-dim">{mcpServers.length} 个</span>
+          </CardHeader>
+          <div className="px-4 pt-3 text-[12px] text-dim">
+            通过 MCP 协议给 Elen 接上外部工具（stdio / HTTP）。服务器在会话启动时连接，工具由模型按需调用、不占对话上下文。
+          </div>
+          <div className="mx-4 mt-3 flex items-center gap-3 rounded-lg border border-line bg-panel-2/40 p-3">
+            <ShieldCheck size={14} className="shrink-0 text-dim" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-medium text-fg">写操作需确认</div>
+              <div className="text-[12px] text-dim">
+                删除 / 清空 / 写入类 MCP 工具执行前弹确认卡，读取类不打扰（审批档位设为「关闭」时不生效）
+              </div>
+            </div>
+            <Toggle
+              on={mcpWriteApproval}
+              disabled={mcpWriteBusy}
+              onChange={(next) => void setMcpWriteApprovalSetting(next)}
+            />
+          </div>
+          {mcpLoading && (
+            <div className="flex items-center gap-2 px-4 py-4 text-[12px] text-dim">
+              <Loader2 size={14} className="animate-spin" /> 加载中…
+            </div>
+          )}
+          {!mcpLoading && mcpServers.length === 0 && (
+            <div className="px-4 py-4 text-[12px] text-dim">
+              {mcpNote ?? "还没有接入任何服务器。接入方式：在 ~/.pi/agent/mcp.json 配置（目前由维护者代管）。"}
+            </div>
+          )}
+          {!mcpLoading && mcpServers.length > 0 && (
+            <div className="grid items-start gap-3 px-4 py-4 lg:grid-cols-2">
+              {mcpServers.map((s) => (
+                <div key={s.name} className="flex items-center gap-3 rounded-lg border border-line bg-panel-2/40 p-3">
+                  <Server size={14} className="shrink-0 text-dim" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="truncate text-[13px] font-medium text-fg" title={s.name}>
+                        {s.name}
+                      </span>
+                      <span className="rounded-sm bg-panel-2 px-1.5 py-0.5 text-[11px] text-dim">{s.transport}</span>
+                      {!s.enabled && (
+                        <span className="rounded-sm bg-panel-2 px-1.5 py-0.5 text-[11px] text-dim">已停用</span>
+                      )}
+                    </div>
+                    <div className="truncate text-[12px] text-dim" title={s.description || s.target}>
+                      {s.description || s.target}
+                    </div>
+                  </div>
+                  <Toggle on={s.enabled} disabled={mcpBusy !== null} onChange={(next) => void setMcpEnabled(s, next)} />
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="border-t border-line-soft px-4 py-2 text-[11px] text-dim">
+            改动对新会话生效 · 会话里输入 /mcp 查看连接状态、重连或登录
           </div>
         </Card>
       </div>
