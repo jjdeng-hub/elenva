@@ -1,5 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { createAgentSessionFromServices, createAgentSessionServices, getAgentDir, initTheme, SessionManager, SettingsManager, Theme, type CreateAgentSessionServicesOptions } from "@earendil-works/pi-coding-agent";
+import { createAgentSessionFromServices, createAgentSessionServices, createCodemodeExtension, createMcpExtension, createToolSearchExtension, getAgentDir, initTheme, SessionManager, SettingsManager, Theme, type CreateAgentSessionServicesOptions, type InlineExtension } from "@earendil-works/pi-coding-agent";
 import { KeybindingsManager as TuiKeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { randomUUID } from "crypto";
 import { existsSync, realpathSync, writeFileSync } from "fs";
@@ -216,6 +216,21 @@ class PlainTextTheme extends Theme {
 const PLAIN_TEXT_THEME = new PlainTextTheme();
 const CUSTOM_UI_KEYBINDINGS = new TuiKeybindingsManager(TUI_KEYBINDINGS);
 
+/**
+ * 由内核「按需暴露」机制管理的工具：MCP 命名空间（mcp__*）、MCP 资源工具、
+ * codemode 与 tool_search。它们的激活状态由内核 MCP 扩展按服务器曝光配置自行决定
+ * （或经设置 / 会话工具选择显式启用），宿主不要把它们自动塞进活动工具集——
+ * 否则 MCP 工具会整体声明给模型，破坏按需暴露设计（请求体积也会暴涨）。
+ */
+function isExposureManagedToolName(name: string): boolean {
+  return (
+    name.startsWith("mcp__") ||
+    name.includes("mcp_resource") ||
+    name === "codemode" ||
+    name === "tool_search"
+  );
+}
+
 function withExtensionTools(session: AgentSessionLike, toolNames: string[]): string[] {
   if (toolNames.length === 0) return [];
 
@@ -224,7 +239,8 @@ function withExtensionTools(session: AgentSessionLike, toolNames: string[]): str
   const extensionToolNames = session
     .getAllTools()
     .map((t) => t.name)
-    .filter((name) => !codingToolNames.has(name));
+    .filter((name) => !codingToolNames.has(name))
+    .filter((name) => !isExposureManagedToolName(name));
 
   return [...new Set([...selectedToolNames, ...extensionToolNames])];
 }
@@ -2173,6 +2189,7 @@ export async function startAgentSession(
     // If specific tool names were requested (non-empty), set the active tools to the
     // requested builtin coding tools PLUS all extension/package tools, so installed
     // extensions stay usable in ELENVA Web just like in the `pi` CLI.
+    // 按需暴露类工具（MCP 命名空间 / codemode / tool_search）除外——由内核扩展管理。
     if (!subagentResources && !chatOnly) {
       inner.setActiveToolsByName(withExtensionTools(inner, selectedToolNames ?? inner.getActiveToolNames()));
     }
@@ -2210,6 +2227,17 @@ export async function startAgentSession(
 }
 
 /**
+ * pi 1.0 内置扩展工厂（SDK 不会自动加载，必须由宿主传入——对齐 CLI 的 `builtInExtensions`）。
+ * 传入后：mcp.json 里的 MCP 服务器会被连接（工具按需暴露，见 isExposureManagedToolName）；
+ * 没有 mcp.json 时这些扩展处于休眠态，工具面与行为不变。
+ */
+const BUILTIN_EXTENSION_FACTORIES: InlineExtension[] = [
+  { name: "codemode", factory: createCodemodeExtension(), replaceable: true, builtin: true },
+  { name: "tool-search", factory: createToolSearchExtension(), replaceable: true, builtin: true },
+  { name: "mcp", factory: createMcpExtension(), replaceable: true, builtin: true },
+];
+
+/**
  * Web 端普通会话（非子代理、非纯聊天）使用的内联扩展集。
  * 「提示词」页的预览路径必须与真实会话共用这一份定义 ——
  * 否则页面上看到的组装结果会和实际跑起来的会话悄悄跑偏。
@@ -2221,6 +2249,7 @@ function webResourceLoaderOptions(
 ): NonNullable<CreateAgentSessionServicesOptions["resourceLoaderOptions"]> {
   return {
     extensionFactories: [
+      ...BUILTIN_EXTENSION_FACTORIES,
       createProjectCommandBashExtension({
         cwd: sessionCwd,
         settings: settingsManager,
