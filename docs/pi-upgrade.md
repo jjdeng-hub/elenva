@@ -100,7 +100,13 @@ npm ls -g --depth=0 | grep pi     # 全局装了哪些
 
 对齐它用 `npm i -g @earendil-works/pi-coding-agent@<X>`。注意改完要**重启守护进程**才会生效（版本是进程启动时加载的）。
 
-截至 2026-09-21：网页内核 **0.86.1**（本轮升级）、全局 CLI **0.86.1**（同日同步） —— 档位一致。
+截至 2026-10-03：网页内核 **1.0.0**（本轮升级）、全局 CLI **0.86.1**（待对齐） —— 档位暂不一致（CLI 对齐另行安排）。
+
+### 1.0.0 升级记录（2026-10-03，chore/pi-1.0）
+
+- **实测适配仅两处**（其余 API 全兼容）：① `prompt` 的 `preflightResult` 回调签名 `(success: boolean)` → `(disposition: "handled" | "queued" | "started")`（只在接受时触发；照 RPC 参考实现「任何 disposition = 接受」处理）；② `steer()` / `followUp()` 返回值 `Promise<void>` → `Promise<QueuedDisposition>`。改动集中在 `lib/pi-types.ts`（手写镜像）与 `lib/agent-runtime.ts`。
+- **兼容性实测**：会话格式 `CURRENT_SESSION_VERSION = 3` 不变（老会话回放正常）；扩展钩子全在（10 个）；工具面不变（15 个，新内置扩展 mcp/codemode/tool-search 未进入 SDK 会话工具面）；审批闸门实测正常（工作区外写入弹卡、批准后执行）；`pi-hermes-memory` 的 `pi-tui` 依赖未观察到重复模块警告；dev 全日志 0 警告 0 错误。
+- **升级前后跨 0.87 → 0.99 → 1.0**：上下文边界（ContextEditEntry）、codemode/MCP/虚拟模型/分类器（含内置 TypeSafe `jev-latest`）等新能力可用，供后续按需接入。
 
 ## 七、修改本手册的时机
 
