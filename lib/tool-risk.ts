@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { normalizeSlashes } from "./allowed-roots";
-import { isEditToolName, isWriteToolName } from "./tool-names";
+import { isEditToolName, isWriteToolName, parseMcpToolName } from "./tool-names";
 
 /**
  * 工具调用的风险分级。
@@ -32,6 +32,11 @@ export interface ToolRisk {
    * 安装依赖、npx 拉远程包：它们会在本机执行第三方脚本，用户往往没意识到。
    */
   confirmInRisky?: boolean;
+  /**
+   * MCP 写操作标记：由 host-guardrails 结合 mcpWriteApproval 开关决定是否弹卡
+   * （开关关闭 → 不打扰；开关打开 → 按 confirmInRisky 在 risky 档位弹卡）。
+   */
+  mcpWrite?: true;
 }
 
 export interface ToolRiskContext {
@@ -205,8 +210,40 @@ export function classifyToolCall(
   if (isWriteToolName(toolName) || isEditToolName(toolName)) {
     return classifyWrite(toolName, input ?? {}, ctx);
   }
+  if (toolName.startsWith("mcp__")) {
+    const mcpWrite = classifyMcpWrite(toolName);
+    if (mcpWrite) return mcpWrite;
+    // 读类 MCP 工具落到下面的默认分支（不打扰）
+  }
   // 自定义/扩展工具默认归到 guarded：它们能干什么不由本模块判断。
   return { level: "guarded", reason: `扩展工具 ${toolName}`, ruleKey: `tool:${toolName}`, ruleLabel: `工具 ${toolName}` };
+}
+
+/**
+ * MCP 写操作识别：按工具名的词段判断（delete / clear / update / create …）。
+ * 命中 → mcpWrite + confirmInRisky（risky 档位也弹卡）；读类返回 null。
+ * 真正的弹卡还取决于 mcpWriteApproval 开关（见 host-guardrails-extension）。
+ */
+const MCP_WRITE_SEGMENTS = new Set([
+  "delete", "clear", "remove", "update", "create", "write", "append", "add", "set",
+  "edit", "move", "rename", "copy", "merge", "apply", "sync", "import", "send",
+  "post", "publish", "replace", "batch", "upload", "insert", "modify", "put", "patch",
+]);
+
+function classifyMcpWrite(toolName: string): ToolRisk | null {
+  const parsed = parseMcpToolName(toolName);
+  const server = parsed?.server ?? "mcp";
+  const tool = parsed?.tool ?? toolName;
+  const segments = tool.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+  if (!segments.some((segment) => MCP_WRITE_SEGMENTS.has(segment))) return null;
+  return {
+    level: "guarded",
+    reason: `MCP 写操作：${server} 的 ${tool}`,
+    ruleKey: `mcp-server:${server}`,
+    ruleLabel: `MCP ${server} 的写操作`,
+    confirmInRisky: true,
+    mcpWrite: true,
+  };
 }
 
 /** 当前审批档位下，这次调用是否需要人工确认 */

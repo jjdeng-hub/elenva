@@ -22,6 +22,12 @@ export interface GuardrailSettings {
    * 与 approvalMode 是两个维度：前者决定「拦不拦」，它决定「拦下之后」。
    */
   approvalFallback: "reject" | "queue";
+  /**
+   * MCP 写操作确认：删除/清空/写入类 MCP 工具执行前弹确认卡（读取类不打扰）。
+   * 独立于 approvalMode —— 关闭时 MCP 写操作回到默认（不弹卡）；
+   * approvalMode 设为「关闭」时本项同样不生效（总闸优先）。
+   */
+  mcpWriteApproval: boolean;
   /** 免确认规则：按项目 cwd 分组，值是 tool-risk 给出的 ruleKey */
   allowByProject: Record<string, string[]>;
   /** 打开会话时默认进入计划模式 */
@@ -44,6 +50,7 @@ export interface GuardrailSettings {
 export const DEFAULT_GUARDRAIL_SETTINGS: GuardrailSettings = {
   approvalMode: "risky",
   approvalFallback: "reject",
+  mcpWriteApproval: true,
   allowByProject: {},
   planModeDefault: false,
   planModeSessions: {},
@@ -94,6 +101,9 @@ export function readGuardrailSettings(settingsPath = getGuardrailSettingsPath())
       approvalFallback: isApprovalFallback(stored.approvalFallback)
         ? stored.approvalFallback
         : DEFAULT_GUARDRAIL_SETTINGS.approvalFallback,
+      mcpWriteApproval: stored.mcpWriteApproval === undefined
+        ? DEFAULT_GUARDRAIL_SETTINGS.mcpWriteApproval
+        : stored.mcpWriteApproval === true,
       allowByProject: readStringArrayMap(stored.allowByProject),
       planModeDefault: stored.planModeDefault === true,
       planModeSessions: stored.planModeSessions !== null
@@ -143,6 +153,14 @@ export function writeVerificationGuard(
 ): GuardrailSettings {
   const current = readGuardrailSettings(settingsPath);
   return write({ ...current, verificationGuard: enabled }, settingsPath);
+}
+
+export function writeMcpWriteApproval(
+  enabled: boolean,
+  settingsPath = getGuardrailSettingsPath(),
+): GuardrailSettings {
+  const current = readGuardrailSettings(settingsPath);
+  return write({ ...current, mcpWriteApproval: enabled }, settingsPath);
 }
 
 /**
