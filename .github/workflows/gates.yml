@@ -33,3 +33,42 @@ jobs:
           git diff --exit-code
       - name: 生产构建
         run: npm run build
+
+  launcher-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: 探测器找到真实 node（find-node.ps1）
+        shell: cmd
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File bin\find-node.ps1
+      - name: 桩测试：node 在 PATH（dev.cmd + 中文名 shim）
+        shell: cmd
+        timeout-minutes: 5
+        run: |
+          mkdir .ci-stub
+          > .ci-stub\node.cmd echo @echo off
+          >> .ci-stub\node.cmd echo echo STUB-NODE-CALLED
+          >> .ci-stub\node.cmd echo exit /b 0
+          set "PATH=%CD%\.ci-stub;%PATH%"
+          call dev.cmd < nul > dev-out.txt 2>&1
+          type dev-out.txt
+          findstr /C:"STUB-NODE-CALLED" dev-out.txt || exit /b 1
+          findstr /C:"[ERROR]" dev-out.txt && exit /b 1
+          rem Chinese-named shim: iterate root *.cmd, skip dev.cmd, call the rest.
+          for %%f in (*.cmd) do if /i not "%%f"=="dev.cmd" call "%%f" < nul > shim-out.txt 2>&1
+          type shim-out.txt
+          findstr /C:"STUB-NODE-CALLED" shim-out.txt || exit /b 1
+      - name: 找不到 node 时：友好报错 + 退出码 1
+        shell: cmd
+        timeout-minutes: 2
+        run: |
+          if exist "C:\Program Files\nodejs\node.exe" (
+            echo SKIP: runner has C:\Program Files\nodejs -- cannot simulate "no node" here.
+            exit /b 0
+          )
+          set "PATH=%SystemRoot%\system32;%SystemRoot%"
+          call dev.cmd < nul > dev-missing.txt 2>&1
+          type dev-missing.txt
+          if not errorlevel 1 exit /b 1
+          findstr /C:"[ERROR] Node.js not found" dev-missing.txt || exit /b 1
