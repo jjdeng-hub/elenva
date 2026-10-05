@@ -29,10 +29,23 @@ if not defined NODE_EXE if exist "C:\Program Files\nodejs\node.exe" set "NODE_EX
 if not defined NODE_EXE if exist "%LOCALAPPDATA%\Programs\nodejs\node.exe" set "NODE_EXE=%LOCALAPPDATA%\Programs\nodejs\node.exe"
 if not defined NODE_EXE if exist "%~dp0dist\elenva-web\runtime\node.exe" set "NODE_EXE=%~dp0dist\elenva-web\runtime\node.exe"
 
+rem Still nothing? Run the full detector: registry + common dirs + version
+rem managers (nvm / fnm / scoop / volta / chocolatey). "where node" alone
+rem misses valid installs when PATH is stale or Node came from a manager.
+if not defined NODE_EXE for /f "usebackq delims=" %%i in (`powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0bin\find-node.ps1" 2^>nul`) do set "NODE_EXE=%%i"
+
 if not defined NODE_EXE (
   echo.
   echo   [ERROR] Node.js not found.
-  echo   Install Node.js, or make sure it is on PATH, then retry.
+  echo.
+  echo   If Node.js is installed, close this window and retry -- a stale PATH
+  echo   after an install or update is the usual cause; restarting the PC also
+  echo   refreshes it.
+  echo   Otherwise install Node.js 22.19 or newer from https://nodejs.org/
+  echo.
+  echo   Workaround: in a terminal where "node -v" works, run:
+  echo     npm run setup
+  echo     npm run dev
   echo.
   pause
   exit /b 1
