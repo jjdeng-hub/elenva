@@ -2,7 +2,7 @@
 "use strict";
 
 /**
- * 开发模式启动器 —— 由项目根目录的「开发模式.cmd」双击调用。
+ * 开发模式启动器 —— 由项目根目录的「dev.cmd」（或「开发模式.cmd」跳板）双击调用。
  *
  * 与 bin/elenva-web-portable.js 的分工：
  *   · elenva-web-portable.js → 跑 standalone 的 server.js（生产产物，无热更新，App 模式窗口）
