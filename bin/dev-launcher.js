@@ -10,15 +10,13 @@
  *
  * 刻意使用系统默认浏览器（保留地址栏），以便与便携包的 App 模式窗口一眼区分。
  *
- * 流程：端口已有服务 → 直接开浏览器；否则先确认依赖（缺失时询问是否自动安装），
- * 再拉起 next dev → 轮询直到就绪 → 开浏览器。
+ * 流程：端口已有服务 → 直接开浏览器；否则拉起 next dev → 轮询直到就绪 → 开浏览器。
+ * 不做依赖检查（项目决定：能跑就跑，跑不起来自然失败——缺依赖时由 next / node 直接报错）。
  */
 
 const { spawn } = require("child_process");
-const fs = require("fs");
 const http = require("http");
 const path = require("path");
-const readline = require("readline");
 const { getUnsupportedNodeVersionMessage, isNodeVersionSupported } = require("./node-version");
 
 // 双击入口没有 npm 层做检查，这里先守一道：Node 太老时给可行动的提示，
@@ -76,82 +74,7 @@ function waitUntilReady(deadline, callback) {
   probe((ok) => (ok ? callback(true) : setTimeout(() => waitUntilReady(deadline, callback), 300)));
 }
 
-/** npm 在 Windows 上必须经 cmd 调用（.cmd 垫片不能直接 spawn）——与 bin/setup.js 同款 */
-function runNpm(args, callback) {
-  let settled = false;
-  const finish = (ok) => {
-    if (!settled) {
-      settled = true;
-      callback(ok);
-    }
-  };
-  const child = process.platform === "win32"
-    ? spawn(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `npm ${args.join(" ")}`], {
-        cwd: projectDir,
-        stdio: "inherit",
-      })
-    : spawn("npm", args, { cwd: projectDir, stdio: "inherit" });
-  child.on("error", (error) => {
-    say(`无法运行 npm：${error.message}`);
-    say("请确认已安装 Node.js（自带 npm）：https://nodejs.org/");
-    finish(false);
-  });
-  child.on("close", (code) => finish(code === 0));
-}
-
-/** 交互确认；非交互场景（管道 / 重定向）默认继续，避免卡住 */
-function confirm(question, callback) {
-  if (!process.stdin.isTTY) {
-    callback(true);
-    return;
-  }
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  rl.question(`\n  ${question} `, (answer) => {
-    rl.close();
-    const text = answer.trim().toLowerCase();
-    callback(text === "" || text === "y" || text === "yes" || text === "是");
-  });
-}
-
-/**
- * 依赖检查：缺失时询问是否自动安装 —— 双击入口的第一次运行不该卡在
- * 「请先在项目目录运行 npm install」（外部用户的第一道墙，实测踩过）。
- */
-function ensureDeps(callback) {
-  if (fs.existsSync(nextBin)) {
-    callback(true);
-    return;
-  }
-  say("依赖还没有安装 —— 首次运行需要先装一次（视网络约 1～3 分钟）。");
-  confirm("现在自动安装吗？（回车 = 是，输入 n = 否）", (yes) => {
-    if (!yes) {
-      say("已取消。之后可在项目目录运行：npm run setup");
-      process.exitCode = 1;
-      callback(false);
-      return;
-    }
-    say("正在安装依赖（npm install）…");
-    runNpm(["install"], (ok) => {
-      if (ok && fs.existsSync(nextBin)) {
-        say("依赖安装完成。");
-        callback(true);
-        return;
-      }
-      say("依赖安装没有成功。可手动重试：npm run setup（或 npm install）");
-      process.exitCode = 1;
-      callback(false);
-    });
-  });
-}
-
 function startDev() {
-  ensureDeps((depsReady) => {
-    if (!depsReady) return;
-    startDevServer();
-  });
-}
-
-function startDevServer() {
   say(`正在启动开发服务（端口 ${port}）…`);
   const child = spawn(process.execPath, [nextBin, "dev", "-H", hostname, "-p", port], {
     cwd: projectDir,
