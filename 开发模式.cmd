@@ -19,14 +19,8 @@ rem Chinese user-facing messages live in bin\dev-launcher.js -- Node prints them
 rem and chcp 65001 above makes them render correctly in this console.
 rem ---------------------------------------------------------------------------
 
-if not exist "node_modules\next\dist\bin\next" (
-  echo.
-  echo   [ERROR] Dependencies are not installed.
-  echo   Run:  npm install
-  echo.
-  pause
-  exit /b 1
-)
+rem Dependency check lives in bin\dev-launcher.js now -- on first launch it
+rem offers to run "npm install", so a fresh clone works from a double-click.
 
 rem Try node on PATH, then common install locations, then the bundled runtime.
 set "NODE_EXE="
