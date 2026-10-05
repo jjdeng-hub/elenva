@@ -9,9 +9,9 @@ rem names/paths (that class of bug is why this launcher was rebuilt). Node.js
 rem prints Unicode to the console via WriteConsoleW, so the Chinese messages
 rem from bin\dev-launcher.js render correctly without any chcp.
 rem
-rem The real work lives in bin\dev-launcher.js: dependency check (offers to
-rem run npm install on first launch), then starts next dev, then opens the
+rem The real work lives in bin\dev-launcher.js: starts next dev, then opens the
 rem browser. This file only finds a usable node.exe and hands over.
+rem (No dependency check here on purpose -- "if it runs, it runs".)
 rem ---------------------------------------------------------------------------
 setlocal
 cd /d "%~dp0"
