@@ -8,7 +8,9 @@
   elenva.ico           快捷方式图标
   app/                 Next standalone 产物 + public/
 
-前置：先运行 `npm run build`（产出 .next/standalone）。
+前置：先运行 `ELENVA_BUILD_STANDALONE=1 npm run build`（产出 .next/standalone；
+Windows cmd 用 `set ELENVA_BUILD_STANDALONE=1 && npm run build`）。
+默认构建不产出 standalone（避免 npm 包 / 生产部署出现 next start 警告）。
 node.exe 默认复用本机托管 Node，可用环境变量 ELENVA_NODE_EXE 覆盖。
 """
 import os
@@ -55,7 +57,7 @@ def main() -> None:
     if not node_exe.exists():
         sys.exit(f"找不到 node.exe：{node_exe}（可用 ELENVA_NODE_EXE 指定）")
     if not (STANDALONE / "server.js").exists():
-        sys.exit("缺少 .next/standalone —— 请先运行 `npm run build`")
+        sys.exit("缺少 .next/standalone —— 请先运行 `ELENVA_BUILD_STANDALONE=1 npm run build`")
     if not (PUBLIC / "icons" / "elenva.ico").exists():
         sys.exit("缺少 public/icons/elenva.ico —— 请先运行 .audit/make-pwa-icons.py")
 
