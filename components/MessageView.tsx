@@ -124,6 +124,7 @@ const HOST_TOOL_LABELS: Record<string, string> = {
   todo_write: "任务清单",
   codemode: "脚本",
   tool_search: "工具搜索",
+  generate_image: "生成图片",
 };
 
 /** todo_write 工具卡的一行摘要（清单本体在展开区渲染） */
@@ -249,6 +250,11 @@ function ToolCallCard({
   // 计划是「决策文档」：默认展开，且不再把 JSON 参数倒一遍（倒出来的就是同一段正文）
   const [open, setOpen] = useState(isPlan && planText.length > 0);
   const running = !result;
+  /* 带图片结果的工具（如本机生图 generate_image）：图片就是产出本体——到达时自动展开，下方渲染 */
+  const resultImages = useMemo(() => (result ? result.content.filter((c) => c.type === "image") : []), [result]);
+  useEffect(() => {
+    if (resultImages.length > 0) setOpen(true);
+  }, [resultImages.length]);
   const timing = toolTiming(startedAt, result);
   const summary = isPlan
     ? stripControlSequences(planText.split("\n").find((line) => line.trim()) ?? "")
@@ -256,7 +262,9 @@ function ToolCallCard({
       ? stripControlSequences(todoSummaryText(todoItems))
       : isCodemode && codemodeScript
         ? stripControlSequences(codemodeScript.split("\n").find((line) => line.trim()) ?? "")
-        : stripControlSequences(toolInputSummary(block.input, block.rawInput));
+        : block.toolName === "generate_image" && typeof block.input?.prompt === "string"
+          ? stripControlSequences(block.input.prompt)
+          : stripControlSequences(toolInputSummary(block.input, block.rawInput));
   const planStatus = isPlan ? planStatusLabel((result?.details as { status?: unknown } | undefined)?.status) : null;
   /* write/edit 的「改动」区：内核 details.diff 优先，input 兜底（见 buildToolDiff） */
   const diffLines = buildToolDiff(block, result);
@@ -373,6 +381,19 @@ function ToolCallCard({
                 <div className="max-h-64 overflow-auto px-3 py-2 font-mono text-[12px] whitespace-pre-wrap">
                   {resultText(result)}
                   {result.isError && <span className="ml-1 text-danger">(错误)</span>}
+                </div>
+              )}
+              {resultImages.length > 0 && (
+                <div className="flex flex-wrap gap-2 border-t border-line/60 px-3 py-2">
+                  {resultImages.map((img, i) => (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      key={i}
+                      src={imageBlockSrc(img)}
+                      alt="生成图片"
+                      className="max-h-72 max-w-full rounded-md border border-line"
+                    />
+                  ))}
                 </div>
               )}
             </>
