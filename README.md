@@ -73,22 +73,7 @@ ELENVA Web 就是为这件事做的：一个**信息密度高、但一眼能看�
 
 ## 快速开始
 
-> **发布状态（2026-09）**：源码方式可用；便携包与 npm 包**尚未发布**（构建脚本已就绪，发布后此处会更新）。
-
-### 方式一：Windows 便携包（解压即用，不需要 Node 与终端）
-
-下载 `elenva-web-<version>-win-x64.zip`，解压到任意目录，双击 `start.cmd`。
-
-包内自带 Node 运行时，**无需安装 Node、无需终端**。启动后会以应用模式打开一个独立窗口（无地址栏）。
-
-### 方式二：npm
-
-```bash
-npm i -g elenva-web
-elenva-web
-```
-
-### 方式三：源码
+发布与更新只通过 [GitHub Releases](https://github.com/jjdeng-hub/elenva/releases) 提供；当前使用源码运行。
 
 需要 Node ≥ 22.19（[nodejs.org](https://nodejs.org/)）。
 
@@ -107,6 +92,8 @@ npm run dev          # 开发模式，热更新，http://127.0.0.1:30200
 npm run setup -- --build
 npm run start
 ```
+
+版本发布约定见 [`docs/release.md`](docs/release.md)。
 
 ### 首次使用
 
@@ -130,8 +117,6 @@ npm run start
 npm run setup          # 首次准备：检查 Node 版本 + 安装依赖
 npm run dev            # 开发服务器（Turbopack，热更新约 70ms）
 npm run build          # 生产构建
-npm run pack:tarball   # 构建并打出 npm 包
-npm run release        # 版本号自增 + 构建 + 发布
 ```
 
 **Windows 用户**：可直接双击项目根目录的 `dev.cmd`（或 `开发模式.cmd`，同一入口）拉起服务并打开浏览器（先跑过一次 `npm run setup` 即可）。
