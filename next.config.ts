@@ -12,10 +12,8 @@ try {
 } catch { /* package not found, use default */ }
 
 const nextConfig: NextConfig = {
-  // 产出 .next/standalone 自包含目录（含精简 node_modules + server.js），供便携包使用。
-  // 默认关闭 —— standalone 会让常规 `next start`（npm 包 / 生产部署）每次都报
-  // "does not work with output: standalone" 警告（实测只是警告、服务可用，但不该出现在正式包里）。
-  // 便携包构建时显式开启：ELENVA_BUILD_STANDALONE=1 npm run build（见 tools/build-portable.py）。
+  // standalone 仅作为历史兼容开关保留；当前启动方式使用常规 `next start`。
+  // 需要 standalone 产物时仍可显式设置 ELENVA_BUILD_STANDALONE=1 构建。
   output: process.env.ELENVA_BUILD_STANDALONE ? "standalone" : undefined,
   outputFileTracingRoot: configDir,
   // 关闭开发模式的 "N" 悬浮球指示器

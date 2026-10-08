@@ -75,6 +75,8 @@ ELENVA Web 就是为这件事做的：一个**信息密度高、但一眼能看�
 
 发布与更新只通过 [GitHub Releases](https://github.com/jjdeng-hub/elenva/releases) 提供；当前使用源码运行。
 
+Windows 用户可双击根目录的 `启动.cmd`（或 ASCII 入口 `start.cmd`）。它会自动安装缺失依赖、构建过期产物、启动生产服务并打开浏览器。
+
 需要 Node ≥ 22.19（[nodejs.org](https://nodejs.org/)）。
 
 ```bash
@@ -84,7 +86,7 @@ npm run setup        # 检查 Node 版本 → 安装依赖
 npm run dev          # 开发模式，热更新，http://127.0.0.1:30200
 ```
 
-> Windows 用户不想开终端：按上面装好依赖后，直接双击根目录的 `dev.cmd`（`开发模式.cmd` 是同一入口的跳板）即可启动。
+> Windows 用户也可以直接双击根目录的 `启动.cmd`；开发时使用 `npm run dev` 保持热更新。
 
 生产运行（`--build` 会在装完依赖后顺手做生产构建）：
 
@@ -107,8 +109,8 @@ npm run start
 
 | | |
 |---|---|
-| Node | `>= 22.19.0`（便携包已内置） |
-| 操作系统 | Windows（便携包）；macOS / Linux 可用源码或 npm 方式运行 |
+| Node | `>= 22.19.0` |
+| 操作系统 | Windows / macOS / Linux（源码运行） |
 | 模型 | 需要至少一个供应商的 API key |
 
 ## 开发
@@ -119,7 +121,7 @@ npm run dev            # 开发服务器（Turbopack，热更新约 70ms）
 npm run build          # 生产构建
 ```
 
-**Windows 用户**：可直接双击项目根目录的 `dev.cmd`（或 `开发模式.cmd`，同一入口）拉起服务并打开浏览器（先跑过一次 `npm run setup` 即可）。
+**Windows 用户**：可直接双击项目根目录的 `启动.cmd`（或 ASCII 入口 `start.cmd`）拉起生产服务并打开浏览器；开发模式使用 `npm run dev`。
 
 ### 提交前检查
 
@@ -166,7 +168,7 @@ lib/                 内核适配与业务逻辑
   clipboard.ts       复制（含非安全上下文回退）
   theme.ts           主题与防闪烁
   project-command-env.ts  子进程环境（含 UTF-8 编码修正）
-bin/                 启动器（npm 包 / 便携包 / 开发模式）
+bin/                 启动器（生产启动、Node 检查与环境探测）
 public/              PWA 资源
 tools/              设计系统规范页与收敛脚本（开发用）
 ```

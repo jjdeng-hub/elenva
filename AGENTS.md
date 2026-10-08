@@ -14,10 +14,10 @@ ELENVA Web —— [pi coding agent](https://pi.dev) 的 Web 工作台。Next.js 
 
 由此：
 
-- 为「陌生人第一次打开」服务的能力（便携包 / 局域网密码 / 更新提示 / 首用引导）是**旁支**，可搁置，不因它们的存在而约束主线。
+- 为「陌生人第一次打开」服务的能力（局域网密码 / 更新提示 / 首用引导）是**旁支**，可搁置，不因它们的存在而约束主线。
 - **安装可靠性**（纯 JS、免编译）仍是硬约束：换台机器部署时自己同样不想装编译工具链（见下方「禁止引入原生模块」）。
 - **素材是副产品**（项目过程会用于自媒体）—— 不要为了「能写一篇文章」而做功能。
-- **开源为展示式**（2026-09-21 定，见 `docs/roadmap.md`）：源码公开、欢迎 fork 与 issue/PR；不承诺上手支持、不做多用户 / i18n。发布通道（便携包 / npm）按需维护。
+- **开源为展示式**（2026-09-21 定，见 `docs/roadmap.md`）：源码公开、欢迎 fork 与 issue/PR；不承诺上手支持、不做多用户 / i18n。发布只走 GitHub Releases。
 
 ## 技术栈
 
@@ -32,7 +32,7 @@ ELENVA Web —— [pi coding agent](https://pi.dev) 的 Web 工作台。Next.js 
 
 ### 0. 启动脚本的编码规则（实测踩过，会静默出错）
 
-`开发模式.cmd` / `bin/*.cmd` / `bin/*.ps1` 必须按下面的规则存：
+`start.cmd` / `启动.cmd` / `bin/*.cmd` / `bin/*.ps1` 必须按下面的规则存：
 
 | 文件 | 内容 | 编码 | 行尾 |
 |---|---|---|---|
@@ -54,13 +54,13 @@ ELENVA Web —— [pi coding agent](https://pi.dev) 的 Web 工作台。Next.js 
 ```bash
 # node 用桩拦下来，不会真起服务
 mkdir -p "$TEMP/nodestub" && printf '@echo off\r\necho STUB-NODE-CALLED %%*\r\nexit /b 0\r\n' > "$TEMP/nodestub/node.cmd"
-PATH="$TEMP/nodestub:$PATH" cmd //c "$(cygpath -w "$(pwd)/开发模式.cmd")"
+PATH="$TEMP/nodestub:$PATH" cmd //c "$(cygpath -w "$(pwd)/启动.cmd")"
 # 干净的一跑只应输出一行 STUB-NODE-CALLED，且无任何命令行回显
 ```
 
 ### 1. 禁止引入 `node-pty` 或任何原生模块
 
-本项目当初从上游 fork 时**主动移除了终端功能**，换来的收益是：纯 JS 依赖、免编译、`npm i` 不会因原生模块构建失败。Windows 便携包能「解压即用」正是靠这一点。
+本项目当初从上游 fork 时**主动移除了终端功能**，换来的收益是：纯 JS 依赖、免编译、`npm i` 不会因原生模块构建失败。源码启动无需额外编译工具链。
 
 如果要加终端类功能，先确认它不需要原生模块。
 
@@ -192,7 +192,7 @@ CI（`.github/workflows/gates.yml`）在 push / PR 时跑同样三道门 + 生�
 ## 已知待办
 
 - **界面截图待用演示数据重拍**：原 6 张（`docs/screenshots/`）里有本机技能路径与用户名路径，已移出仓库；开源前需在干净环境重拍后放回
-- 更新提示已指向 `elenva-web`，但**包尚未发布到 npm** → 发布后自动生效；发布仓库确定后填 `RELEASE_REPOSITORY`（`lib/app-update.ts`）即可出现跳转链接。**展示式开源下按需处理**：发布 npm 后自动生效；不为它做额外工作（README 已标注「尚未发布」）
+- 发布与更新只走 GitHub Releases；设置页通过 `https://api.github.com/repos/jjdeng-hub/elenva/releases/latest` 检查，发布约定见 `docs/release.md`。npm 与便携包通道已废弃。
 - **故意保留**的 `pi-web:*` 标识：`lib/subagents.ts`、`lib/session-tool-selection.ts`、`lib/subagent-runtime.ts` 里的消息类型 —— 它们会被**写入会话文件**，改名会破坏已有会话的向后兼容
 - **推送通知链路已移除**：`/api/push/*` + `lib/web-push.ts` 在界面侧从未接入，已连同上未启用的
   i18n 词条一起删除（`public/sw.js` 的 push 监听保留，重新启用时从 git 历史取回服务端即可）。
