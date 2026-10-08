@@ -28,7 +28,7 @@
     "prebuild": "node bin/node-version.js",
     "build": "next build --webpack",
     "prestart": "node bin/node-version.js",
-    "start": "next start -H 127.0.0.1 -p 30200"
+    "start": "node bin/start-launcher.js"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.0.0",

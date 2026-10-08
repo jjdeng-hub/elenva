@@ -36,7 +36,7 @@ module.exports = {
 
 // 作为 CLI 直接运行（`node bin/node-version.js`）时执行一次检查：
 // 通过则静默退出 0；失败打印可行动的提示并退出 1。
-// npm 的 predev / prebuild / prestart 钩子走这里，dev.cmd 的 launcher 复用同一份提示。
+// npm 的 predev / prebuild / prestart 钩子走这里，start.cmd 的 launcher 复用同一份提示。
 if (require.main === module) {
   if (!isNodeVersionSupported(process.versions.node)) {
     process.stderr.write(`${getUnsupportedNodeVersionMessage(process.versions.node)}\n`);
