@@ -20,20 +20,6 @@
   "engines": {
     "node": ">=22.19.0"
   },
-  "bin": {
-    "elenva-web": "bin/elenva-web.js"
-  },
-  "files": [
-    "bin",
-    ".next",
-    "!.next/cache",
-    "!.next/dev",
-    "!.next/standalone",
-    "!.next/**/*.js.map",
-    "public",
-    "next.config.ts",
-    "package.json"
-  ],
   "scripts": {
     "setup": "node bin/setup.js",
     "predev": "node bin/node-version.js",
@@ -42,9 +28,7 @@
     "prebuild": "node bin/node-version.js",
     "build": "next build --webpack",
     "prestart": "node bin/node-version.js",
-    "start": "next start -H 127.0.0.1 -p 30200",
-    "pack:tarball": "npm run build && npm pack",
-    "release": "npm version patch --no-git-tag-version && npm run build && npm publish"
+    "start": "next start -H 127.0.0.1 -p 30200"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.0.0",

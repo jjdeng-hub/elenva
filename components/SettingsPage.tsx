@@ -354,20 +354,39 @@ function ToolsSection() {
 /* ---------------- 关于 ---------------- */
 function AboutSection() {
   const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<string | null>(null);
+  const [result, setResult] = useState<{ message: string; url?: string } | null>(null);
 
   const check = async () => {
     setChecking(true);
     setResult(null);
     try {
-      const d = await fetch("/api/app-update", { cache: "no-store" }).then((r) => r.json());
-      if (d.hasUpdate) {
-        setResult(`发现新版本 ${d.latestVersion}（当前 ${d.currentVersion}）。本版本为自研 UI，暂不跟随原版升级。`);
-      } else {
-        setResult(`已是最新版本${d.currentVersion ? `（${d.currentVersion}）` : ""}`);
+      const response = await fetch("/api/app-update", { cache: "no-store" });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: unknown } | null;
+        const reason = typeof body?.error === "string" ? body.error : `HTTP ${response.status}`;
+        throw new Error(reason);
       }
-    } catch {
-      setResult("检查更新失败（网络原因）");
+
+      const d = await response.json() as {
+        currentVersion?: unknown;
+        latestVersion?: unknown;
+        updateAvailable?: unknown;
+        releaseUrl?: unknown;
+      };
+      const currentVersion = typeof d.currentVersion === "string" ? d.currentVersion : "未知";
+      const latestVersion = typeof d.latestVersion === "string" ? d.latestVersion : currentVersion;
+      if (d.updateAvailable === true) {
+        setResult({
+          message: `发现新版本 v${latestVersion}（当前 v${currentVersion}）`,
+          url: typeof d.releaseUrl === "string" ? d.releaseUrl : undefined,
+        });
+      } else {
+        setResult({ message: `已是最新版本（v${currentVersion}）` });
+      }
+    } catch (error) {
+      setResult({
+        message: `检查更新失败（${error instanceof Error ? error.message : "未知原因"}）`,
+      });
     } finally {
       setChecking(false);
     }
@@ -392,7 +411,14 @@ function AboutSection() {
           {checking ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
           检查更新
         </button>
-        {result && <div className="mt-2 rounded-md bg-panel-2 px-3 py-1.5 text-[12px]">{result}</div>}
+        {result && (
+          <div className="mt-2 rounded-md bg-panel-2 px-3 py-1.5 text-[12px]">
+            {result.message}
+            {result.url && (
+              <>（<a className="text-accent underline" href={result.url} target="_blank" rel="noreferrer">去 GitHub 下载</a>）</>
+            )}
+          </div>
+        )}
       </div>
     </Card>
   );

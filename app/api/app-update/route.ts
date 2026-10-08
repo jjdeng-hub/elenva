@@ -5,7 +5,7 @@ import { getReleaseUrl, isNewerStableVersion } from "@/lib/app-update";
 export const dynamic = "force-dynamic";
 
 const CURRENT_VERSION = process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0";
-const NPM_LATEST_URL = "https://registry.npmjs.org/elenva-web/latest";
+const GITHUB_LATEST_RELEASE_URL = "https://api.github.com/repos/jjdeng-hub/elenva/releases/latest";
 const CACHE_TTL_MS = 12 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 5_000;
 const SKIP_VERSION_CHECK = process.env.PI_WEB_SKIP_VERSION_CHECK === "1";
@@ -25,23 +25,33 @@ function getCache(): AppUpdateCache {
 }
 
 async function fetchLatestVersion(): Promise<AppUpdateResponse> {
-  const response = await fetch(NPM_LATEST_URL, {
+  const response = await fetch(GITHUB_LATEST_RELEASE_URL, {
     cache: "no-store",
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/vnd.github+json" },
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
-  if (!response.ok) throw new Error(`npm registry returned HTTP ${response.status}`);
 
-  const body = await response.json() as { version?: unknown };
-  const latestVersion = typeof body.version === "string" ? body.version : "";
-  if (!latestVersion) throw new Error("npm registry returned an invalid version");
+  // GitHub 在尚无任何 release 时返回 404；这不是检查失败，也不应误报更新。
+  if (response.status === 404) {
+    return {
+      currentVersion: CURRENT_VERSION,
+      latestVersion: CURRENT_VERSION,
+      updateAvailable: false,
+      releaseUrl: "",
+    };
+  }
+  if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`);
+
+  const body = await response.json() as { tag_name?: unknown; html_url?: unknown };
+  const tagName = typeof body.tag_name === "string" ? body.tag_name : "";
+  const latestVersion = tagName.replace(/^v/, "");
+  if (!latestVersion) throw new Error("GitHub returned a release without a valid tag");
 
   return {
     currentVersion: CURRENT_VERSION,
     latestVersion,
     updateAvailable: isNewerStableVersion(latestVersion, CURRENT_VERSION),
-    // 发布仓库未配置时为空串——只提示版本号，不给跳转链接
-    releaseUrl: getReleaseUrl(latestVersion),
+    releaseUrl: typeof body.html_url === "string" ? body.html_url : getReleaseUrl(latestVersion),
   };
 }
 

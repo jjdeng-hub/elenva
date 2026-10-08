@@ -22,13 +22,10 @@ export function isNewerStableVersion(candidate: string, current: string): boolea
   return false;
 }
 
-/**
- * 发布仓库（`owner/repo`）。确定后填上，更新提示里就会出现跳转链接；
- * 留空则只提示版本号、不给链接。
- */
-const RELEASE_REPOSITORY: string | null = null;
+/** GitHub 发布仓库（`owner/repo`）。 */
+const RELEASE_REPOSITORY = "jjdeng-hub/elenva";
 
 export function getReleaseUrl(version: string): string {
-  if (!RELEASE_REPOSITORY || !parseStableVersion(version)) return "";
+  if (!parseStableVersion(version)) return "";
   return `https://github.com/${RELEASE_REPOSITORY}/releases/tag/v${version}`;
 }
