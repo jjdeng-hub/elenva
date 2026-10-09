@@ -25,10 +25,21 @@ const nextBuildDir = path.join(projectDir, ".next");
 const port = String(process.env.PORT || 30200);
 const hostname = "127.0.0.1";
 const url = `http://${hostname}:${port}`;
-const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 function say(message) {
   process.stdout.write(`\n  ${message}\n`);
+}
+
+/** npm 在 Windows 上必须经 cmd 调用（.cmd 垫片不能直接 spawn——Node ≥ 20.12 会抛 EINVAL） */
+function runNpm(args) {
+  if (process.platform === "win32") {
+    return spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `npm ${args.join(" ")}`], {
+      cwd: projectDir,
+      stdio: "inherit",
+      env: process.env,
+    });
+  }
+  return spawnSync("npm", args, { cwd: projectDir, stdio: "inherit", env: process.env });
 }
 
 function openBrowser() {
@@ -70,11 +81,7 @@ function hasDependencies() {
 
 function installDependencies() {
   say("未找到完整依赖，正在安装 npm 依赖…");
-  const result = spawnSync(npmCommand, ["install"], {
-    cwd: projectDir,
-    stdio: "inherit",
-    env: process.env,
-  });
+  const result = runNpm(["install"]);
   if (result.error) {
     say(`无法执行 npm install：${result.error.message}`);
     return false;
@@ -124,11 +131,7 @@ function needsBuild() {
 
 function buildProduction() {
   say("生产构建不存在或已过期，正在构建…");
-  const result = spawnSync(npmCommand, ["run", "build"], {
-    cwd: projectDir,
-    stdio: "inherit",
-    env: process.env,
-  });
+  const result = runNpm(["run", "build"]);
   if (result.error) {
     say(`无法执行 npm run build：${result.error.message}`);
     return false;
@@ -166,6 +169,17 @@ function startProduction() {
     process.on(signal, () => child.kill(signal));
   }
   child.on("exit", (code) => process.exit(code ?? 0));
+}
+
+// 自检模式：只验证 npm 调用链路（Windows CI 用——防 .cmd 直 spawn 回归）
+if (process.argv.includes("--selftest-npm")) {
+  const result = runNpm(["--version"]);
+  if (result.error || result.status !== 0) {
+    say(`npm 自检失败：${result.error ? result.error.message : `退出码 ${result.status}`}`);
+    process.exit(1);
+  }
+  say("npm 自检通过");
+  process.exit(0);
 }
 
 probe((alreadyRunning) => {

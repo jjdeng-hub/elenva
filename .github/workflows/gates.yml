@@ -31,6 +31,8 @@ jobs:
         run: |
           python3 tools/style-converge.py
           git diff --exit-code
+      - name: 启动器构建判定矩阵（四态）
+        run: bash tools/test-launcher-matrix.sh
       - name: 生产构建
         run: npm run build
 
@@ -39,9 +41,16 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: 探测器找到真实 node（find-node.ps1）
         shell: cmd
         run: powershell -NoProfile -ExecutionPolicy Bypass -File bin\find-node.ps1
+      - name: npm 调用自检（Windows 不能直接 spawn npm.cmd）
+        shell: cmd
+        timeout-minutes: 3
+        run: node bin\start-launcher.js --selftest-npm
       - name: 桩测试：start.cmd 与中文名 shim
         shell: cmd
         timeout-minutes: 5
