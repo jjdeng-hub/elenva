@@ -113,8 +113,12 @@ function latestSourceMtime(directory) {
 }
 
 function needsBuild() {
-  if (!fs.existsSync(nextBuildDir)) return true;
-  const buildMtime = fs.statSync(nextBuildDir).mtimeMs;
+  // 必须检查生产构建标记（BUILD_ID），而不只是 .next 目录存在：
+  // dev 服务器缓存或半成品 .next 目录会让 next start 直接报
+  // "Could not find a production build"。没有标记 = 一律重建。
+  const buildIdFile = path.join(nextBuildDir, "BUILD_ID");
+  if (!fs.existsSync(buildIdFile)) return true;
+  const buildMtime = fs.statSync(buildIdFile).mtimeMs;
   return latestSourceMtime(projectDir) > buildMtime;
 }
 
