@@ -22,6 +22,7 @@ if (!isNodeVersionSupported(process.versions.node)) {
 const projectDir = path.resolve(__dirname, "..");
 const nextBin = path.join(projectDir, "node_modules", "next", "dist", "bin", "next");
 const nextBuildDir = path.join(projectDir, ".next");
+const buildStampFile = path.join(nextBuildDir, ".elenva-build-stamp");
 const port = String(process.env.PORT || 30200);
 const hostname = "127.0.0.1";
 const url = `http://${hostname}:${port}`;
@@ -120,17 +121,30 @@ function latestSourceMtime(directory) {
 }
 
 function needsBuild() {
-  // 必须检查生产构建标记（BUILD_ID），而不只是 .next 目录存在：
-  // dev 服务器缓存或半成品 .next 目录会让 next start 直接报
-  // "Could not find a production build"。没有标记 = 一律重建。
+  // 有效性判定用两道标记：
+  // 1) .next/BUILD_ID —— 生产构建的存在标记（dev 缓存/半成品会让 next start 报
+  //    "Could not find a production build"）；
+  // 2) .elenva-build-stamp —— 由本启动器在「构建完整成功」后写入。构建中途失败
+  //    （如类型检查报错）可能已留下 BUILD_ID，但不会有 stamp，因此仍会重建。
   const buildIdFile = path.join(nextBuildDir, "BUILD_ID");
   if (!fs.existsSync(buildIdFile)) return true;
-  const buildMtime = fs.statSync(buildIdFile).mtimeMs;
+  if (!fs.existsSync(buildStampFile)) return true;
+  const buildMtime = fs.statSync(buildStampFile).mtimeMs;
   return latestSourceMtime(projectDir) > buildMtime;
 }
 
 function buildProduction() {
   say("生产构建不存在或已过期，正在构建…");
+  // 旧的 .next 可能来自 dev 服务器（含 .next/dev/types 等）。这些文件会被 next build 的类型检查
+  // 读入，残缺的 dev 缓存会直接导致 "Failed to type check"——重建前先清空，保证从干净状态构建。
+  if (fs.existsSync(nextBuildDir)) {
+    say("清理旧的构建产物（.next）…");
+    try {
+      fs.rmSync(nextBuildDir, { recursive: true, force: true });
+    } catch (error) {
+      say(`无法完全清理 .next（${error.message}），继续尝试构建…`);
+    }
+  }
   const result = runNpm(["run", "build"]);
   if (result.error) {
     say(`无法执行 npm run build：${result.error.message}`);
@@ -139,6 +153,15 @@ function buildProduction() {
   if (result.status !== 0) {
     say(`生产构建失败（退出码 ${result.status ?? "未知"}）。`);
     return false;
+  }
+  if (!fs.existsSync(path.join(nextBuildDir, "BUILD_ID"))) {
+    say("构建结束但未生成构建标记（.next/BUILD_ID），视为失败——请查看上方日志。");
+    return false;
+  }
+  try {
+    fs.writeFileSync(buildStampFile, `launcher build ok at ${new Date().toISOString()}\n`);
+  } catch {
+    // 标记写不进去只意味着下次会重新构建，不影响本次启动。
   }
   return true;
 }
