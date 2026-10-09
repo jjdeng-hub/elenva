@@ -65,6 +65,7 @@ export function ModelScopeEditor() {
   const [defaultRef, setDefaultRef] = useState<string | null>(null);
   const [checkedAt, setCheckedAt] = useState<number | undefined>();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
@@ -75,15 +76,20 @@ export function ModelScopeEditor() {
 
   const loadModels = useCallback(async () => {
     try {
-      const d = (await fetch("/api/models", { cache: "no-store" }).then((r) => r.json())) as ModelsPayload;
+      const res = await fetch("/api/models", { cache: "no-store" });
+      const d = (await res.json()) as ModelsPayload;
+      // 加载失败（如 403 / 网络错误）时如实报错，而不是伪装成"没有可用模型"。
+      if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
       // 白名单（enabledModels）会让内核侧只返回"可见"模型；编辑器必须用未过滤的
       // 全量清单，否则收窄后看不见被移出的模型、无法再勾回来（2026-09-28 反馈）。
       const list = Array.isArray(d.allModelList) ? d.allModelList : d.modelList;
       setModels(Array.isArray(list) ? list : []);
       setCheckedAt(d.catalogCheckedAt);
       setDefaultRef(d.defaultModel ? `${d.defaultModel.provider}/${d.defaultModel.modelId}` : null);
-    } catch {
+      setLoadError(null);
+    } catch (e) {
       setModels([]);
+      setLoadError(e instanceof Error ? e.message : String(e));
     }
   }, []);
 
@@ -269,7 +275,13 @@ export function ModelScopeEditor() {
           </div>
         )}
         {!loading && groups.length === 0 && (
-          <div className="py-4 text-[12px] text-dim">{models.length === 0 ? "没有可用模型，请先在下方配置厂商密钥。" : "没有匹配的模型"}</div>
+          <div className="py-4 text-[12px] text-dim">
+            {loadError
+              ? `模型库加载失败：${loadError}`
+              : models.length === 0
+                ? "没有可用模型，请先在下方配置厂商密钥。"
+                : "没有匹配的模型"}
+          </div>
         )}
         {!loading &&
           groups.map(([provider, list]) => (

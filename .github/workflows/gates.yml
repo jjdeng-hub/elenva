@@ -35,6 +35,23 @@ jobs:
         run: bash tools/test-launcher-matrix.sh
       - name: 生产构建
         run: npm run build
+      - name: 模型路由回归（无 cwd 不得 403）
+        run: |
+          NODE_ENV=production node node_modules/next/dist/bin/next start -H 127.0.0.1 -p 30977 > /tmp/next-models.log 2>&1 &
+          APP_PID=$!
+          ready=0
+          for i in $(seq 1 40); do
+            if curl -s -o /dev/null "http://127.0.0.1:30977/login"; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" != "1" ]; then cat /tmp/next-models.log; exit 1; fi
+          code_no_cwd=$(curl -s -o /tmp/models-nocwd.json -w "%{http_code}" "http://127.0.0.1:30977/api/models")
+          code_denied=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:30977/api/models?cwd=/tmp")
+          kill "$APP_PID" || true
+          echo "GET /api/models -> $code_no_cwd ; GET /api/models?cwd=/tmp -> $code_denied"
+          node -e "const d=JSON.parse(require('fs').readFileSync('/tmp/models-nocwd.json','utf8')); if(!Array.isArray(d.allModelList)) throw new Error('allModelList not an array')"
+          [ "$code_no_cwd" = "200" ]
+          [ "$code_denied" = "403" ]
 
   launcher-windows:
     runs-on: windows-latest
