@@ -113,6 +113,22 @@ Windows：双击根目录的 `启动.cmd`（或 `start.cmd`），会自动安装
 
 首次使用：首页会提示“接入模型”。如果你已经用过 pi，会自动继承 `~/.pi/agent/` 里已有的 key 和会话。
 
+### 可选：安装扩展与内置技能
+
+仓库里的三个扩展和内置技能不会自动生效，需要复制到 pi 的 agent 目录（默认 `~/.pi/agent/`，与 pi CLI 共用）。安装脚本只做复制，不需要额外依赖，可重复执行以更新。
+
+```bash
+node skills/install.mjs                          # 内置起步技能 → ~/.pi/agent/skills/
+node extensions/elenva-worklog/install.mjs       # 工作记录（状态栏）
+node extensions/elenva-todo/install.mjs          # 会话内任务清单
+node extensions/elenva-memory/install.mjs        # 记忆索引与整理（会合并 hermes 配置）
+```
+
+- 卸载：每个脚本加 `--uninstall`；`--print-path` 可查看目标目录。
+- `elenva-memory` 依赖记忆扩展 `pi-hermes-memory`，需先通过 pi 安装（本机使用的版本是 0.9.9）：`pi install npm:pi-hermes-memory@0.9.9`。没有它时 `elenva-memory` 的索引层仍会安装，但记忆读写工具不可用。
+- `elenva-memory` 的配置合并针对 `~/.pi/agent/hermes-memory-config.json`：文件存在时会先备份为 `.bak-preinstall` 再修改。首次启动后才生成的话，装完再跑一次即可。
+- 以上改动会影响 pi CLI，因为它和 ELENVA 共用同一个 agent 目录。
+
 版本发布只通过 [GitHub Releases](https://github.com/jjdeng-hub/elenva/releases) 提供。
 
 ## 与 pi 的关系

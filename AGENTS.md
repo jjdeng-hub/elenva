@@ -112,7 +112,7 @@ PATH="$TEMP/nodestub:$PATH" cmd //c "$(cygpath -w "$(pwd)/启动.cmd")"
 ELENVA 的 agent 开发以 **《深入理解 AI Agent》（李博杰 著）为准绳**，不凭个人经验即兴发挥：
 **凡与 Agent 相关的活儿（设计 / 改动 / 排查 / 评审 / 写方案）开工前一律先加载技能 `agent-book-reference`**，
 按 `docs/agent-design-standard.md` 的闸门查书定位依据（章节 + 行号）；偏离书中做法必须写进该文件的
-「偏离登记」并说明理由。查书入口：与 `pi-web-ui` 同级的 `ai-agent-book/`（入口 `LOCAL-README.md`）。
+「偏离登记」并说明理由。查书入口：本地副本（不随仓库分发，见 `docs/agent-design-standard.md` 第四节）。
 
 ## 提交前必须验证
 
@@ -152,7 +152,7 @@ CI（`.github/workflows/gates.yml`）在 push / PR 时跑同样三道门 + 生�
 | 改 `.cmd` / `.ps1` | **两套编码规则，别混**（见下）：`.cmd` 必须**纯 ASCII + 无 BOM + CRLF**；`.ps1` 必须 **UTF-8 with BOM + CRLF** |
 | 改宿主提示词 | 先读 `docs/host-prompt.md`（收录规则、装配槽位、验证口径）；文本在 `lib/host-prompt.ts` |
 | 改文案 | 直接改组件里的中文字符串（界面为纯中文，无 i18n 层） |
-| 出新设计稿 | Ardot 画布 → 导出 PNG 到 `../design/`（设计资产不在本仓库） |
+| 出新设计稿 | 设计工具导出 PNG 到本机设计目录（设计资产不在本仓库，只在 `docs/screenshots/` 留演示截图） |
 
 ## 记忆约定
 
@@ -191,7 +191,7 @@ CI（`.github/workflows/gates.yml`）在 push / PR 时跑同样三道门 + 生�
 
 ## 已知待办
 
-- **界面截图待用演示数据重拍**：原 6 张（`docs/screenshots/`）里有本机技能路径与用户名路径，已移出仓库；开源前需在干净环境重拍后放回
+- **界面截图（已完成）**：`docs/screenshots/` 的 5 张均为演示工作区（`/home/demo/pi-workspace`）与虚构数据，已核对无个人路径；截图更新时沿用同样做法
 - 发布与更新只走 GitHub Releases；设置页通过 `https://api.github.com/repos/jjdeng-hub/elenva/releases/latest` 检查，发布约定见 `docs/release.md`。npm 与便携包通道已废弃。
 - **故意保留**的 `pi-web:*` 标识：`lib/subagents.ts`、`lib/session-tool-selection.ts`、`lib/subagent-runtime.ts` 里的消息类型 —— 它们会被**写入会话文件**，改名会破坏已有会话的向后兼容
 - **推送通知链路已移除**：`/api/push/*` + `lib/web-push.ts` 在界面侧从未接入，已连同上未启用的

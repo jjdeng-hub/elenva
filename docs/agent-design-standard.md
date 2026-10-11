@@ -1,7 +1,7 @@
 # Agent 开发标准
 
 > 2026-09-20 定。ELENVA 的 agent 开发以 **《深入理解 AI Agent》（李博杰 著，Apache-2.0 开源）为准绳**，
-> 不以个人经验即兴发挥。本地副本：与 `pi-web-ui` 同级的 `ai-agent-book/`（入口 `LOCAL-README.md`）。
+> 不以个人经验即兴发挥。本地副本不随仓库分发，需自行获取（书为 Apache-2.0 开源）；下文「定位」以本地副本的目录结构为准。
 > 本文件＝效力声明 + 执行闸门 + 偏离登记；查书方法见项目技能 `agent-book-reference`。
 
 ## 一、效力（谁说了算）
@@ -39,8 +39,8 @@
 
 ## 四、常用定位（先看这两处，别全文搜索）
 
-- **按问题查**：`ai-agent-book/LOCAL-README.md` 的同名表（含 ELENVA 零件 ↔ 本书概念对照）。
-- **行号索引**：`ai-agent-book/_meta/outline.md`（283 条，已校验）；失效时按 LOCAL-README 文末流程重拉 + `node _meta/verify.mjs` 自检。
+- **按问题查**：本地副本的 `LOCAL-README.md` 同名表（含 ELENVA 零件 ↔ 本书概念对照）。
+- **行号索引**：本地副本的 `_meta/outline.md`（283 条，已校验）；失效时按 LOCAL-README 文末流程重拉 + `node _meta/verify.mjs` 自检。
 
 ## 五、记忆系统的评估（改记忆相关东西必跑）
 
