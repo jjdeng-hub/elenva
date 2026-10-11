@@ -35,6 +35,8 @@ jobs:
         run: bash tools/test-launcher-matrix.sh
       - name: 开发模式启动器测试（桩）
         run: bash tools/test-dev-launcher.sh
+      - name: 一键更新流程测试（桩）
+        run: bash tools/test-update-flow.sh
       - name: 内部状态剥离自检
         run: node tools/internal-state-selftest.mjs
       - name: 生产构建
@@ -73,6 +75,7 @@ jobs:
         timeout-minutes: 3
         run: |
           node bin\start-launcher.js --selftest-npm
+          node bin\start-launcher.js --selftest-git
           node bin\dev-launcher.js --selftest-npm
       - name: 桩测试：生产/开发入口与中文名 shim
         shell: cmd

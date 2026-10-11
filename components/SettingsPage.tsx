@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Boxes,
   Loader2,
@@ -354,7 +354,36 @@ function ToolsSection() {
 /* ---------------- 关于 ---------------- */
 function AboutSection() {
   const [checking, setChecking] = useState(false);
-  const [result, setResult] = useState<{ message: string; url?: string } | null>(null);
+  const [result, setResult] = useState<{ message: string; url?: string; latest?: string } | null>(null);
+  const [canApply, setCanApply] = useState(false);
+  const [applyPhase, setApplyPhase] = useState("idle");
+  const [applyMessage, setApplyMessage] = useState("");
+  const [applyToVersion, setApplyToVersion] = useState("");
+  const pollRef = useRef<number | null>(null);
+
+  const stopPolling = () => {
+    if (pollRef.current !== null) {
+      window.clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+
+  /** 读取一键更新状态（启动器写入）：能否更新 / 进行到哪一步。 */
+  const refreshApplyStatus = async (): Promise<string | null> => {
+    try {
+      const res = await fetch("/api/app-update/apply", { cache: "no-store" });
+      if (!res.ok) return null;
+      const d = (await res.json()) as { phase?: unknown; message?: unknown; canApply?: unknown; toVersion?: unknown };
+      const phase = typeof d.phase === "string" ? d.phase : "idle";
+      setCanApply(d.canApply === true);
+      setApplyPhase(phase);
+      setApplyMessage(typeof d.message === "string" ? d.message : "");
+      setApplyToVersion(typeof d.toVersion === "string" ? d.toVersion : "");
+      return phase;
+    } catch {
+      return null;
+    }
+  };
 
   const check = async () => {
     setChecking(true);
@@ -379,6 +408,7 @@ function AboutSection() {
         setResult({
           message: `发现新版本 v${latestVersion}（当前 v${currentVersion}）`,
           url: typeof d.releaseUrl === "string" ? d.releaseUrl : undefined,
+          latest: latestVersion,
         });
       } else {
         setResult({ message: `已是最新版本（v${currentVersion}）` });
@@ -390,6 +420,48 @@ function AboutSection() {
     } finally {
       setChecking(false);
     }
+    void refreshApplyStatus();
+  };
+
+  /** 发起一键更新：POST 下单 → 轮询进度（服务重建期间会断开，恢复后自动完成）。 */
+  const apply = async () => {
+    stopPolling();
+    setApplyPhase("requested");
+    setApplyMessage("已请求更新，等待启动器执行…");
+    try {
+      const res = await fetch("/api/app-update/apply", { method: "POST" });
+      const d = (await res.json().catch(() => null)) as { error?: unknown } | null;
+      if (!res.ok) throw new Error(typeof d?.error === "string" ? d.error : `HTTP ${res.status}`);
+    } catch (error) {
+      setApplyPhase("failed");
+      setApplyMessage(error instanceof Error ? error.message : String(error));
+      return;
+    }
+    pollRef.current = window.setInterval(() => {
+      void (async () => {
+        const phase = await refreshApplyStatus();
+        if (phase === null) {
+          setApplyPhase("restarting");
+          setApplyMessage("服务重启中…（页面会短暂断开，完成后自动恢复）");
+          return;
+        }
+        if (phase === "done" || phase === "failed") {
+          stopPolling();
+          if (phase === "done") window.setTimeout(() => window.location.reload(), 2500);
+        }
+      })();
+    }, 2000);
+  };
+
+  useEffect(() => stopPolling, []);
+
+  const applying = ["requested", "pulling", "installing", "building", "restarting"].includes(applyPhase);
+  const PHASE_TEXT: Record<string, string> = {
+    requested: "已请求更新，等待启动器执行…",
+    pulling: "正在拉取代码…",
+    installing: "正在安装依赖…",
+    building: "正在重建（约 3-5 分钟）…",
+    restarting: "正在重启服务…",
   };
 
   return (
@@ -415,7 +487,29 @@ function AboutSection() {
           <div className="mt-2 rounded-md bg-panel-2 px-3 py-1.5 text-[12px]">
             {result.message}
             {result.url && (
-              <>（<a className="text-accent underline" href={result.url} target="_blank" rel="noreferrer">去 GitHub 下载</a>）</>
+              <>（<a className="text-accent underline" href={result.url} target="_blank" rel="noreferrer">{result.latest && canApply ? "查看发布页" : "去 GitHub 查看"}</a>）</>
+            )}
+            {result.latest && !applying && applyPhase !== "done" && canApply && (
+              <div className="mt-2">
+                <button onClick={() => void apply()} className="btn btn-primary">
+                  更新到 v{result.latest}
+                </button>
+              </div>
+            )}
+            {result.latest && !applying && applyPhase !== "done" && !canApply && (
+              <div className="mt-1.5 text-[11px] text-dim">一键更新需通过「生产模式.cmd」启动（更新由启动器执行）。</div>
+            )}
+            {applyPhase === "failed" && (
+              <div className="mt-1.5 text-[11px] text-danger">更新未完成：{applyMessage}（可重试）</div>
+            )}
+            {applying && (
+              <div className="mt-2 flex items-center gap-1.5">
+                <Loader2 size={12} className="animate-spin text-accent" />
+                <span>{PHASE_TEXT[applyPhase] ?? applyMessage}</span>
+              </div>
+            )}
+            {applyPhase === "done" && (
+              <div className="mt-2 text-accent">✓ 已更新到 v{applyToVersion || result.latest}</div>
             )}
           </div>
         )}
