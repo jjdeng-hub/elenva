@@ -5,7 +5,7 @@
  * 全绿输出 SELFTEST: OK / n 通过；有失败输出 SELFTEST: FAILED 并以退出码 1 结束。
  */
 import { createJiti } from "jiti";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -110,6 +110,69 @@ const render = storeMod.renderWorklog(written, 2);
 check("renderWorklog 只渲染 tail 条", render.includes("工作 4") && !render.includes("工作 1"));
 
 rmSync(tmp, { recursive: true, force: true });
+
+// ── 5. 钩子级：context 处理器 —— 块为 null 时也要摘除旧注入（回归点）────────
+// 修复背景：此前「无块」路径直接 return，跳过了 stripStatusMessages，与
+// elenva-todo 钩子（先摘后判）不对称。这里用 mock 的 pi 直接驱动真实处理器。
+const indexMod = await jiti.import("./index.ts");
+const register = typeof indexMod === "function" ? indexMod : indexMod.default;
+check("扩展入口加载（default 为注册函数）", typeof register === "function");
+
+const makeHandlers = () => {
+  const handlers = {};
+  register(
+    new Proxy(
+      {},
+      {
+        get: (_target, key) =>
+          key === "on" ? (name, fn) => { handlers[name] = fn; } : () => undefined,
+      },
+    ),
+  );
+  return handlers;
+};
+const contextHandler = makeHandlers()["context"];
+check("注册了 context 处理器", typeof contextHandler === "function");
+
+const hookDir = mkdtempSync(join(tmpdir(), "elenva-worklog-hook-"));
+const hookCwd = join(hookDir, "demo-repo");
+mkdirSync(hookCwd, { recursive: true });
+const prevWorklogDir = process.env.ELENVA_WORKLOG_DIR;
+process.env.ELENVA_WORKLOG_DIR = hookDir;
+
+const staleMsg = { role: "user", content: "<agent_status>\n旧状态\n</agent_status>" };
+const realMsg = { role: "user", content: "真实提问" };
+
+// A) 无工作记录 → 块为 null；旧注入仍应被摘除（本轮修复点）
+let hookResult = await contextHandler({ messages: [realMsg, staleMsg] }, { cwd: hookCwd });
+check(
+  "无记录：不注入、但摘除旧注入",
+  Array.isArray(hookResult?.messages) && hookResult.messages.length === 1 && hookResult.messages[0] === realMsg,
+);
+// B) 无旧注入 + 无块 → undefined（不动消息）
+hookResult = await contextHandler({ messages: [realMsg] }, { cwd: hookCwd });
+check("无旧注入且无块 → 不返回", hookResult === undefined);
+
+// C) 进行中的记录 → 摘旧注入 + 追加新块
+writeFileSync(join(hookDir, "demo-repo.md"), "# 工作记录 · demo-repo\n\n## 2026-10-11 22:00 · 做一半 · doing\n目标：把事做完\n", "utf8");
+hookResult = await contextHandler({ messages: [realMsg, staleMsg] }, { cwd: hookCwd });
+check(
+  "有块：摘旧注入并追加新块",
+  Array.isArray(hookResult?.messages) && hookResult.messages.length === 2 &&
+    hookResult.messages[0] === realMsg && String(hookResult.messages[1].content).includes("<agent_status>"),
+);
+
+// D) 已完成且无待办 → 块为 null；旧注入仍应被摘除（修复点的精确形态）
+writeFileSync(join(hookDir, "demo-repo.md"), "# 工作记录 · demo-repo\n\n## 2026-10-11 22:00 · 已完成 · done\n", "utf8");
+hookResult = await contextHandler({ messages: [realMsg, staleMsg] }, { cwd: hookCwd });
+check(
+  "已完成且无待办：不注入、但摘除旧注入",
+  Array.isArray(hookResult?.messages) && hookResult.messages.length === 1 && hookResult.messages[0] === realMsg,
+);
+
+if (prevWorklogDir === undefined) delete process.env.ELENVA_WORKLOG_DIR;
+else process.env.ELENVA_WORKLOG_DIR = prevWorklogDir;
+rmSync(hookDir, { recursive: true, force: true });
 
 console.log(`\nSELFTEST: ${fail === 0 ? "OK" : "FAILED"} — ${pass} 通过 / ${fail} 失败`);
 if (fail > 0) process.exitCode = 1;

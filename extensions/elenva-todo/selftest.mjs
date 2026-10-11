@@ -103,5 +103,61 @@ check(
     stripped.some((m) => String(m.content).includes("上面那段")),
 );
 
+// ── 6. 钩子级：context 处理器 —— 无清单时摘除旧注入（与 worklog 对称）─────
+const indexMod = await jiti.import("./index.ts");
+const register = typeof indexMod === "function" ? indexMod : indexMod.default;
+check("扩展入口加载（default 为注册函数）", typeof register === "function");
+
+const registerHandlers = () => {
+  const handlers = {};
+  register(
+    new Proxy(
+      {},
+      {
+        get: (_target, key) =>
+          key === "on" ? (name, fn) => { handlers[name] = fn; } : () => undefined,
+      },
+    ),
+  );
+  return handlers;
+};
+
+const staleMsg = { role: "user", content: "<elenva_todos>\n旧清单\n</elenva_todos>" };
+const realMsg = { role: "user", content: "真实提问" };
+const emptyCtx = { cwd: process.cwd(), sessionManager: { getBranch: () => [] } };
+
+// A) 无清单 → 块为 null；旧注入仍应被摘除
+let hookHandler = registerHandlers()["context"];
+check("注册了 context 处理器", typeof hookHandler === "function");
+let hookResult = await hookHandler({ messages: [realMsg, staleMsg] }, emptyCtx);
+check(
+  "无清单：不注入、但摘除旧注入",
+  Array.isArray(hookResult?.messages) && hookResult.messages.length === 1 && hookResult.messages[0] === realMsg,
+);
+hookResult = await hookHandler({ messages: [realMsg] }, emptyCtx);
+check("无旧注入且无清单 → 不返回", hookResult === undefined);
+
+// B) 有清单（从会话分支重建）→ 摘旧注入 + 追加新块
+const branchWithTodos = [
+  {
+    type: "message",
+    message: {
+      role: "toolResult",
+      toolName: "todo_write",
+      details: { todos: [{ text: "步骤一", status: "in_progress" }, { text: "步骤二", status: "pending" }] },
+    },
+  },
+];
+hookHandler = registerHandlers()["context"];
+hookResult = await hookHandler(
+  { messages: [realMsg, staleMsg] },
+  { cwd: process.cwd(), sessionManager: { getBranch: () => branchWithTodos } },
+);
+check(
+  "有清单：摘旧注入并追加新块",
+  Array.isArray(hookResult?.messages) && hookResult.messages.length === 2 &&
+    hookResult.messages[0] === realMsg && String(hookResult.messages[1].content).includes("<elenva_todos>"),
+);
+
 console.log(`\nSELFTEST: ${fail === 0 ? "OK" : "FAILED"} — ${pass} 通过 / ${fail} 失败`);
 if (fail > 0) process.exitCode = 1;

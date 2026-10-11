@@ -31,7 +31,7 @@
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { appendEntry, nowStamp, readWorklog, renderWorklog, type WorklogEntry, type WorklogStatus } from "./store.js";
-import { buildStatusBlock, statusBudget, stripStatusMessages } from "./status.js";
+import { buildStatusBlock, stripStatusMessages } from "./status.js";
 
 const STATUS_VALUES: WorklogStatus[] = ["done", "doing", "blocked"];
 
@@ -49,11 +49,13 @@ export default function elenvaWorklog(pi: ExtensionAPI): void {
   // ── 1. 状态栏：每轮 LLM 调用前注入（ch2 L851 / L914 / L945）───────────────
   pi.on("context", async (event, ctx) => {
     try {
-      if (statusBudget() <= 0) return;
+      // 先摘上轮注入，再决定是否追加新块 —— 块为 null 的每条路径（无记录 /
+      // 已完成且无待办 / 预算为 0）也要走摘除，与 elenva-todo 钩子对齐。
+      const messages = stripStatusMessages(event.messages);
+      const hadStale = messages.length !== event.messages.length;
       const file = readWorklog(ctx.cwd);
       const block = buildStatusBlock(file);
-      if (!block) return;
-      const messages = stripStatusMessages(event.messages);
+      if (!block) return hadStale ? { messages } : undefined;
       return {
         messages: [...messages, { role: "user", content: block, timestamp: Date.now() }],
       };

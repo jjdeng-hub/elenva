@@ -39,6 +39,10 @@ jobs:
         run: bash tools/test-update-flow.sh
       - name: 内部状态剥离自检
         run: node tools/internal-state-selftest.mjs
+      - name: 扩展自检（任务清单 / 工作记录）
+        run: |
+          node extensions/elenva-todo/selftest.mjs
+          node extensions/elenva-worklog/selftest.mjs
       - name: 生产构建
         run: npm run build
       - name: 模型路由回归（无 cwd 不得 403）
