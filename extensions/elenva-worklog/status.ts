@@ -81,6 +81,8 @@ export function buildStatusBlock(file: WorklogFile, budget = statusBudget()): st
   if (budget <= 0) return null;
   const latest = file.entries[0];
   if (!latest) return null;
+  // 已完成且没有待办的工作记录不再注入：“最近一条已完成”对下一轮没有行动价值，只是噪声。
+  if (latest.status === "done" && !latest.todo) return null;
 
   const who = file.projectName ?? "本目录";
   const head = `工作记录（${who}）· 最近一条 ${latest.at} · ${clip(latest.title, 80)} ${STATUS_MARK[latest.status]}`;

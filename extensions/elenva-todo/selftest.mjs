@@ -67,6 +67,7 @@ check("注入块：含进度与进行中项", block.includes("1/3") && block.inc
 check("注入块：预算内", block.length <= 400, `(${block.length})`);
 check("注入块：空清单 → null", mod.buildTodoBlock([], 400) === null);
 check("注入块：budget=0 → null", mod.buildTodoBlock(good, 0) === null);
+check("注入块：全部完成 → null（不再背着已完成的清单）", mod.buildTodoBlock([{ text: "a", status: "completed" }, { text: "b", status: "completed" }], 400) === null);
 const tiny = mod.buildTodoBlock(good, 60);
 check("注入块：小预算收缩而非超限", tiny === null || tiny.length <= 60, tiny ? `(${tiny.length})` : "(null)");
 const manyItems = Array.from({ length: 20 }, (_, i) => ({ text: `步骤 ${i + 1}：做一件事然后验证结果是否正确`, status: "pending" }));

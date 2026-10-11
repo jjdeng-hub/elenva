@@ -14,6 +14,7 @@ import {
   normalizeDisplayMath,
 } from "@/lib/markdown";
 import { copyText } from "@/lib/clipboard";
+import { stripInternalStateTags } from "@/lib/internal-state";
 import { formatClock, formatDuration } from "@/lib/format";
 import { stripControlSequences } from "@/lib/tool-execution-progress";
 import { toolTiming } from "@/lib/tool-timing";
@@ -621,8 +622,9 @@ function AssistantBlocks({
   const nodes: React.ReactNode[] = [];
   const flush = (key: string) => {
     if (textChunks.length === 0) return;
-    const text = textChunks.join("");
+    const text = stripInternalStateTags(textChunks.join(""));
     textChunks.length = 0;
+    if (text.trim() === "") return;
     nodes.push(<Markdown key={key} text={text} />);
   };
   blocks.forEach((block, i) => {

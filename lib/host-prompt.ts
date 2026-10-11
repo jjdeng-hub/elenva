@@ -118,6 +118,12 @@ export const HOST_PROMPT_SECTIONS: readonly HostPromptSection[] = [
     text: "**计划模式**：开启时会另外给出规则，此时只有只读操作可用，直到你提交计划并获得批准。",
   },
   {
+    id: "internal-state",
+    rationale: "框架每轮注入的状态块（记忆索引 / 任务清单 / 工作记录）是给 agent 看的背景。实测过：模型把它原样写进回复，用户看到的是内部状态。提示词要事先说明，输出侧再兜底剥离。",
+    relatedTo: "elenva-memory（memory_index）· elenva-todo（elenva_todos）· elenva-worklog（agent_status）的注入块",
+    text: "以 `<memory_index>`、`<elenva_todos>`、`<agent_status>` 包裹的内容是内部状态，只供你参考；不得在回复中引用、复述或提及它们。",
+  },
+  {
     id: "language",
     rationale: "界面为中文，结论直接给用户看；不写的话模型可能随基座用英文。",
     relatedTo: "全部界面组件（无 i18n 层，文案即中文）",

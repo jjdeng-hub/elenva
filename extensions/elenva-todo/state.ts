@@ -149,16 +149,15 @@ export function todoStatusBudget(): number {
 export function buildTodoBlock(items: readonly TodoItem[], budget = todoStatusBudget()): string | null {
   if (budget <= 0 || items.length === 0) return null;
   const { done, total, active } = todoProgress(items);
-  const allDone = done === total;
+  // 全部完成后不再注入：已完成的清单对后续轮次只是噪声（每轮都背着一份已做完的清单）。
+  if (done === total) return null;
   const footerLong = "（todo_write 全量更新；完成后无需再维护）";
   const footerShort = "（todo_write 维护）";
 
   const build = (itemMax: number, maxItems: number, footer: string): string => {
-    const state = allDone
-      ? `${done}/${total} · 全部完成`
-      : active
-        ? `${done}/${total} · 进行中：${clip(active.text, Math.min(itemMax, 48))}`
-        : `${done}/${total}`;
+    const state = active
+      ? `${done}/${total} · 进行中：${clip(active.text, Math.min(itemMax, 48))}`
+      : `${done}/${total}`;
     const lines = [TODO_MARK_OPEN, `任务清单（${state}）：`];
     const shown = items.slice(0, maxItems);
     for (const item of shown) lines.push(`${statusMark(item.status)} ${clip(item.text, itemMax)}`);

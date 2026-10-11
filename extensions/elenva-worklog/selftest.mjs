@@ -60,6 +60,9 @@ check("含待办", block.includes("整文件源码模式"));
 check("在预算内", block.length <= 320, `(${block.length})`);
 check("空记录 → 不注入", statusMod.buildStatusBlock({ path: "x.md", projectName: "p", entries: [] }, 320) === null);
 check("budget=0 → 不注入", statusMod.buildStatusBlock(file, 0) === null);
+check("最近一条已完成且无待办 → 不注入", statusMod.buildStatusBlock({ path: "x.md", projectName: "p", entries: [{ at: "2026-09-20 10:00", title: "完成了", status: "done" }] }, 320) === null);
+check("最近一条已完成但有待办 → 仍注入", typeof statusMod.buildStatusBlock({ path: "x.md", projectName: "p", entries: [{ at: "2026-09-20 10:00", title: "完成了", status: "done", todo: "还要补文档" }] }, 320) === "string");
+check("进行中 → 注入", typeof statusMod.buildStatusBlock({ path: "x.md", projectName: "p", entries: [{ at: "2026-09-20 10:00", title: "做一半", status: "doing" }] }, 320) === "string");
 const tiny = statusMod.buildStatusBlock(file, 130);
 check("小预算下收缩而不是超限", tiny === null || tiny.length <= 130, tiny ? `(${tiny.length})` : "(null)");
 
