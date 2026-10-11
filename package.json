@@ -23,8 +23,8 @@
   "scripts": {
     "setup": "node bin/setup.js",
     "predev": "node bin/node-version.js",
-    "dev": "next dev -H 127.0.0.1 -p 30200",
-    "dev:lan": "next dev -H 0.0.0.0 -p 30200",
+    "dev": "next dev -H 127.0.0.1 -p 30299",
+    "dev:lan": "next dev -H 0.0.0.0 -p 30299",
     "prebuild": "node bin/node-version.js",
     "build": "next build --webpack",
     "prestart": "node bin/node-version.js",

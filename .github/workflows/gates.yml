@@ -31,8 +31,10 @@ jobs:
         run: |
           python3 tools/style-converge.py
           git diff --exit-code
-      - name: 启动器构建判定矩阵（四态）
+      - name: 启动器构建判定矩阵
         run: bash tools/test-launcher-matrix.sh
+      - name: 开发模式启动器测试（桩）
+        run: bash tools/test-dev-launcher.sh
       - name: 生产构建
         run: npm run build
       - name: 模型路由回归（无 cwd 不得 403）
@@ -67,8 +69,10 @@ jobs:
       - name: npm 调用自检（Windows 不能直接 spawn npm.cmd）
         shell: cmd
         timeout-minutes: 3
-        run: node bin\start-launcher.js --selftest-npm
-      - name: 桩测试：start.cmd 与中文名 shim
+        run: |
+          node bin\start-launcher.js --selftest-npm
+          node bin\dev-launcher.js --selftest-npm
+      - name: 桩测试：生产/开发入口与中文名 shim
         shell: cmd
         timeout-minutes: 5
         run: |
@@ -81,9 +85,16 @@ jobs:
           type start-out.txt
           findstr /C:"STUB-NODE-CALLED" start-out.txt || exit /b 1
           findstr /C:"[ERROR]" start-out.txt && exit /b 1
-          call 启动.cmd < nul > shim-out.txt 2>&1
+          call 生产模式.cmd < nul > shim-out.txt 2>&1
           type shim-out.txt
           findstr /C:"STUB-NODE-CALLED" shim-out.txt || exit /b 1
+          call dev.cmd < nul > dev-out.txt 2>&1
+          type dev-out.txt
+          findstr /C:"STUB-NODE-CALLED" dev-out.txt || exit /b 1
+          findstr /C:"[ERROR]" dev-out.txt && exit /b 1
+          call 开发模式.cmd < nul > dev-shim-out.txt 2>&1
+          type dev-shim-out.txt
+          findstr /C:"STUB-NODE-CALLED" dev-shim-out.txt || exit /b 1
       - name: 找不到 node 时：友好报错 + 退出码 1
         shell: cmd
         timeout-minutes: 2

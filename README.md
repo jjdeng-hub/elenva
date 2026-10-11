@@ -109,7 +109,7 @@ npm run setup -- --build    # 检查 Node、安装依赖、生产构建
 npm run start               # http://127.0.0.1:30200
 ```
 
-Windows：双击根目录的 `启动.cmd`（或 `start.cmd`），会自动安装依赖、构建并打开浏览器。
+Windows：双击根目录的 `生产模式.cmd`（或 `start.cmd`），会自动安装依赖、构建并打开浏览器。
 
 首次使用：首页会提示“接入模型”。如果你已经用过 pi，会自动继承 `~/.pi/agent/` 里已有的 key 和会话。
 
@@ -151,9 +151,11 @@ pi 是引擎，ELENVA 是仪表盘。
 
 ```bash
 npm run setup   # 检查 Node 版本、安装依赖
-npm run dev     # 开发模式，热更新
+npm run dev     # 开发模式，热更新（http://127.0.0.1:30299）
 npm run build   # 生产构建
 ```
+
+Windows 上两个模式都有双击入口：`生产模式.cmd`（生产，端口 30200）与 `开发模式.cmd`（开发，热更新，端口 30299）；两者可以同时运行。
 
 ### 提交前检查（与 CI 相同）
 

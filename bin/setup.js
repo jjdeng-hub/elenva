@@ -94,8 +94,9 @@ async function main() {
   say("");
   say("  ✓ 环境就绪。下一步：");
   say("");
-  say("    开发模式：  npm run dev            （热更新，http://127.0.0.1:30200）");
+  say("    开发模式：  npm run dev            （热更新，http://127.0.0.1:30299）");
   say(`    生产模式：  ${WITH_BUILD ? "npm run start" : "npm run setup -- --build，然后 npm run start"}`);
+  say("    Windows 入口：生产模式.cmd（生产）/ 开发模式.cmd（开发，热更新）");
   say("");
   say("  首次打开后按首页引导接入模型（选厂商 → 填凭据 → 选默认模型）。");
   say("");
