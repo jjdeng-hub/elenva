@@ -35,6 +35,8 @@ jobs:
         run: bash tools/test-launcher-matrix.sh
       - name: 开发模式启动器测试（桩）
         run: bash tools/test-dev-launcher.sh
+      - name: 内部状态剥离自检
+        run: node tools/internal-state-selftest.mjs
       - name: 生产构建
         run: npm run build
       - name: 模型路由回归（无 cwd 不得 403）
