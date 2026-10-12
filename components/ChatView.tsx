@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelLeftClose, PanelLeftOpen, PanelRight, FileCode2, GitBranch, Menu, Search, X } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, PanelRight, FileCode2, GitBranch, ListTree, Menu, Search, X } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentStatusBar } from "@/components/AgentStatusBar";
@@ -35,6 +35,9 @@ const SIDEBAR_COLLAPSED_KEY = "elenva-chat-sidebar-collapsed";
 const OBSERVATORY_KEY = "elenva-chat-observatory";
 /** 观测栏需要的最小窗宽（与 Tailwind xl 断点对齐） */
 const OBSERVATORY_MIN_WIDTH = 1280;
+
+/** 右侧槽位同时只承载一个面板：会话树 / 文件预览 / 观测栏 */
+type RightPanel = "tree" | "files" | "observatory" | null;
 
 /** Windows 路径比较用：去尾分隔符 + 小写 */
 function normPath(p: string): string {
@@ -184,7 +187,6 @@ export function ChatView({
   /* 右侧观测栏（会话实时数据）。
      横向余量不足时必须整栏隐藏：220(主侧栏) + 256(会话列表) + 320(观测栏) = 796px，
      1280px 窗宽下聊天区只剩 ~480px，比不显示更糟。 */
-  const [railOpen, setRailOpen] = useState(false);
   const [railAllowed, setRailAllowed] = useState(false);
   useEffect(() => {
     const mq = window.matchMedia(`(min-width: ${OBSERVATORY_MIN_WIDTH}px)`);
@@ -193,16 +195,35 @@ export function ChatView({
     mq.addEventListener("change", apply);
     return () => mq.removeEventListener("change", apply);
   }, []);
+
+  /* 右侧只有一个槽位，所以用**单一状态**而不是三个独立布尔：
+     三个布尔 + 渲染优先级会拼出一个看不见的旧状态 —— 树/文件开着时点观测栏没反应，
+     关掉树之后观测栏又按那个旧状态冒出来。改成单一状态后，谁显示就是谁。 */
+  const [rightPanel, setRightPanel] = useState<RightPanel>(null);
   useEffect(() => {
     const saved = localStorage.getItem(OBSERVATORY_KEY);
-    if (saved !== null) setRailOpen(saved === "1");
-    else if (window.innerWidth >= 1440) setRailOpen(true);
+    if (saved !== null) setRightPanel(saved === "1" ? "observatory" : null);
+    else if (window.innerWidth >= 1440) setRightPanel("observatory");
   }, []);
-  const toggleRail = useCallback(() => {
-    setRailOpen((v) => {
-      localStorage.setItem(OBSERVATORY_KEY, v ? "0" : "1");
-      return !v;
+  const railOpen = rightPanel === "observatory";
+  /** 顶栏三按钮互斥切换：点谁显示谁，点当前显示的收起 */
+  const togglePanel = useCallback((panel: Exclude<RightPanel, null>) => {
+    setRightPanel((v) => {
+      const next = v === panel ? null : panel;
+      // 只有观测栏有持久化偏好；切到树/文件不覆写它
+      if (panel === "observatory") localStorage.setItem(OBSERVATORY_KEY, next ? "1" : "0");
+      return next;
     });
+  }, []);
+  /** 程序化打开观测栏（本轮明细入口）：算一次显式打开，持久化 */
+  const showObservatory = useCallback(() => {
+    localStorage.setItem(OBSERVATORY_KEY, "1");
+    setRightPanel("observatory");
+  }, []);
+  /** 观测栏自己的关闭按钮：收起并记住「已关」 */
+  const closeObservatory = useCallback(() => {
+    localStorage.setItem(OBSERVATORY_KEY, "0");
+    setRightPanel(null);
   }, []);
 
   /* 侧栏折叠（响应式默认：窄屏折叠），状态持久化 */
@@ -341,7 +362,6 @@ export function ChatView({
     [handleBuiltinSlashCommand, handleSend],
   );
 
-  const [treeOpen, setTreeOpen] = useState(false);
   const sessionTree = data?.tree ?? null;
   const hasTree = !isNew && !!sessionTree && sessionTree.length > 0;
 
@@ -367,21 +387,20 @@ export function ChatView({
     }
     return out.reverse(); // 最新写入在前
   }, [messages, toolResults, cwd]);
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const openFilePreview = useCallback(
     (path: string) => {
       // 工具卡的原始输入可能是相对路径/反斜杠路径，统一解析为绝对路径
       const resolved = resolveLocalFilePath(path, cwd || undefined) ?? path;
       setPreviewPath(resolved);
-      setPreviewOpen(true);
+      setRightPanel("files");
     },
     [cwd],
   );
-  /* 切换会话时收起面板 */
+  /* 切换会话时只收起文件预览（它是会话内的临时选中）；观测栏偏好跨会话保留 */
   useEffect(() => {
-    setPreviewOpen(false);
     setPreviewPath(null);
+    setRightPanel((v) => (v === "files" ? null : v));
   }, [session?.id, newSessionCwd]);
 
   /* ---------- 上下文健康：最近一次压缩 ---------- */
@@ -486,12 +505,6 @@ export function ChatView({
   const turn = useTurnCheckpoints(planSessionId, checkpointRefreshKey);
   /** 当前任务清单（最后一条成功的 todo_write 参数；消息流一变即重算，回滚 / 切分支自动正确） */
   const todos = useMemo(() => latestTodoState(messages, toolResults), [messages, toolResults]);
-  /* 右侧只有一个槽位，打开观测栏要先腾位（与工具栏里的逻辑一致） */
-  const openRail = useCallback(() => {
-    setTreeOpen(false);
-    setPreviewOpen(false);
-    setRailOpen(true);
-  }, []);
 
   /* ---------- 项目信任检查（P1）---------- */
   const [trust, setTrust] = useState<{ requiresTrust: boolean; trusted: boolean } | null>(null);
@@ -700,13 +713,10 @@ export function ChatView({
             {/* 会话文件预览入口 */}
             {writtenFiles.length > 0 && (
               <button
-                onClick={() => {
-                  setTreeOpen(false);
-                  setPreviewOpen((v) => !v);
-                }}
+                onClick={() => togglePanel("files")}
                 className={cn(
                   "flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-lg border px-2 text-[12px] t-fast",
-                  previewOpen
+                  rightPanel === "files"
                     ? "border-accent/40 bg-accent-soft text-accent"
                     : "border-line bg-panel-2 text-muted hover:text-fg",
                 )}
@@ -735,27 +745,22 @@ export function ChatView({
             {hasTree && (
               <button
                 data-testid="tree-button"
-                onClick={() => {
-                  // 与预览面板互斥：右侧只有一个槽位，同时开两个会把聊天挤没
-                  setTreeOpen((v) => {
-                    if (!v) setPreviewOpen(false);
-                    return !v;
-                  });
-                }}
+                /* 三个按钮互斥由单一状态 rightPanel 保证，不再各自清场 */
+                onClick={() => togglePanel("tree")}
                 className={cn(
                   "flex size-8 cursor-pointer items-center justify-center rounded-lg t-fast",
-                  treeOpen ? "bg-active text-accent" : "text-dim hover:bg-hover hover:text-fg",
+                  rightPanel === "tree" ? "bg-active text-accent" : "text-dim hover:bg-hover hover:text-fg",
                 )}
                 title="会话树：浏览分支、跳转到任意历史点继续"
               >
-                <GitBranch size={14} />
+                <ListTree size={14} />
               </button>
             )}
             {/* 状态胶囊（运行中/空闲）已移除（2026-09-21）：运行态在输入框（停止按钮）、
                 输入框上方状态条、页脚、会话列表圆点四处都有信号；常驻的空闲胶囊只是噪音。 */}
             {/* 观测栏开关：宽屏才有意义，窄屏隐藏以免挤掉聊天区 */}
             <button
-              onClick={toggleRail}
+              onClick={() => togglePanel("observatory")}
               title={railOpen ? "收起观测栏" : "展开观测栏（本会话实时数据）"}
               aria-label={railOpen ? "收起观测栏" : "展开观测栏"}
               aria-pressed={railOpen}
@@ -815,28 +820,27 @@ export function ChatView({
             running={agentRunning || bashRunning}
             railOpen={railOpen}
             canOpenRail={railAllowed}
-            onOpenRail={openRail}
+            onOpenRail={showObservatory}
           />
         )}
         {!isEmpty && statusBar}
         {!isEmpty && chatInputEl}
           </div>
-          {/* 右侧只有一个槽位：会话树 / 文件预览 / 观测栏三选一（优先级即此顺序）。
-              它们都是「右侧信息面」，同时开两个会把聊天区挤到不可用。 */}
-          {treeOpen && sessionTree ? (
+          {/* 右侧只有一个槽位：会话树 / 文件预览 / 观测栏三选一，由 rightPanel 单一状态决定。 */}
+          {rightPanel === "tree" && sessionTree ? (
             <TreePanel
               docked
               tree={sessionTree}
               activeLeafId={activeLeafId}
               onNavigate={(id) => void handleNavigate(id)}
-              onClose={() => setTreeOpen(false)}
+              onClose={() => setRightPanel(null)}
             />
-          ) : previewOpen && writtenFiles.length > 0 ? (
+          ) : rightPanel === "files" && writtenFiles.length > 0 ? (
             <FilePreviewPanel
               files={writtenFiles}
               selected={previewPath}
               onSelect={setPreviewPath}
-              onClose={() => setPreviewOpen(false)}
+              onClose={() => setRightPanel(null)}
               /* 观测栏的「本会话文件」区撤掉后，这个跳转的家就在文件列表这儿 */
               onOpenCode={onOpenCode ? (f) => onOpenCode(f, cwd || "") : undefined}
             />
@@ -856,7 +860,7 @@ export function ChatView({
               thinkingLevel={thinkingLevel}
               onOpenFile={openFilePreview}
               onOpenGit={onOpenGit}
-              onClose={toggleRail}
+              onClose={closeObservatory}
               compacting={isCompacting}
               onCompact={() => void sessionActions.compact()}
               onAbortCompaction={() => void handleAbortCompaction()}

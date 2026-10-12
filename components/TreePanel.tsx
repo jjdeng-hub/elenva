@@ -4,7 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   CornerDownRight,
-  GitBranch,
+  ListTree,
   MessageSquare,
   Sparkles,
   Wrench,
@@ -234,7 +234,7 @@ export function TreePanel({
       style={docked ? { width: paneWidth } : undefined}
     >
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3.5">
-        <GitBranch size={14} className="shrink-0 text-accent" />
+        <ListTree size={14} className="shrink-0 text-accent" />
         <span className="text-[13px] font-semibold text-fg">会话树</span>
         {docked && <span className="shrink-0 text-[11px] text-dim">{flattenCount(tree)} 个节点</span>}
         <button

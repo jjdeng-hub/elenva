@@ -7,8 +7,8 @@ import {
   CheckCircle2,
   Coins,
   CornerDownRight,
+  ChevronDown,
   Copy,
-  Download,
   GitBranch,
   Hash,
   History,
@@ -120,6 +120,53 @@ function Section({
         {meta && <span className="ml-auto shrink-0 text-[11px] tabular-nums text-dim">{meta}</span>}
       </div>
       <div className="mt-2">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * 折叠区块（观测栏瘦身用）。
+ *
+ * 观测栏是「一屏看全」的摘要面板，长尾信息（完整 token 明细、运行环境、会话产物）
+ * 默认收起，真要看时才展开；折叠头右侧那一行是这个区的摘要。
+ * 交互与消息流里的思考块 / 工具卡折叠头一致：ChevronDown 旋转 + 点整行切换。
+ */
+function CollapsibleSection({
+  title,
+  icon,
+  summary,
+  testId,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  icon: React.ReactNode;
+  /** 收起时显示在标题右侧的一行摘要 */
+  summary?: React.ReactNode;
+  testId?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div data-section={title} className="border-b border-line-soft">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        data-testid={testId}
+        className="flex w-full cursor-pointer items-center gap-1.5 px-3.5 py-3 text-left t-fast hover:bg-hover/50"
+      >
+        <ChevronDown
+          size={12}
+          className={cn("shrink-0 text-dim transition-transform", open && "rotate-180")}
+        />
+        <span className="shrink-0 text-dim">{icon}</span>
+        <span className="text-[11px] font-semibold text-muted">{title}</span>
+        {summary && !open && (
+          <span className="ml-auto min-w-0 truncate text-[11px] tabular-nums text-dim">{summary}</span>
+        )}
+      </button>
+      {open && <div className="px-3.5 pb-3">{children}</div>}
     </div>
   );
 }
@@ -513,6 +560,17 @@ export function SessionObservatory({
   const todos = useMemo(() => latestTodoState(messages, results), [messages, results]);
   const todoStats = todos && todos.items.length > 0 ? todoProgress(todos.items) : null;
 
+  /* 运行统计收起时的摘要行：只留「耗时 · 调用 · 花费」三个最常看的数 */
+  const statsSummary = sessionStats
+    ? [
+        sessionStats.totalActiveMs ? formatDuration(sessionStats.totalActiveMs) : null,
+        `${sessionStats.toolCalls} 次工具`,
+        formatCost(sessionStats.cost),
+      ]
+        .filter((v): v is string => Boolean(v))
+        .join(" · ")
+    : "等待首条消息";
+
   const tokens = sessionStats?.tokens;
   // percent 是浮点（433.4k/1.00M → 43.3375），展示层必须取整
   const pct = contextUsage?.percent != null ? Math.round(contextUsage.percent) : null;
@@ -648,39 +706,116 @@ export function SessionObservatory({
                重复信息（长会话里前几条总是共几个最新文件）。数据仍在 ChatView 里
                供头部按钮与预览面板使用。 */}
 
-        {/* ---------- 子代理 ---------- */}
+        {/* 子代理（仅运行中渲染）：位置紧跟「本轮」，不破高频在前原则 */}
         <SubagentSection parentSessionId={sessionStats?.sessionId} onOpenSubagents={onOpenSubagents} />
 
-        {/* ---------- 计划模式（预留位置）----------
-            pi 没有独立的「计划档位」（工具档位只有 none/minimal/default/full）；
-            它的 plan 子代理就是厂家的计划模式。这里把这条路线写清楚并给出入口，
-            而不是放一句「规划中」的路线图文案。 */}
-        <Section title="计划模式" icon={<ListChecks size={12} />}>
-          <div className="text-[11px] leading-relaxed text-dim">
-            pi 的 <b className="font-medium text-fg">plan</b> 子代理：能调研仓库、产出可实施方案，
-            但<strong className="text-fg">不改动任何文件</strong>。
-          </div>
-          <div className="mt-1.5 rounded-md bg-panel-2 px-2 py-1.5 font-mono text-[10px] leading-relaxed text-muted">
-            在对话里说：「用 plan 子代理制定 XX 的方案」
-          </div>
-          {onOpenSubagents && (
-            <button
-              onClick={onOpenSubagents}
-              className="btn btn-sm btn-ghost mt-1.5 w-full"
-              data-testid="rail-open-subagents"
-            >
-              <Bot size={10} /> 管理子代理配置
-            </button>
-          )}
-        </Section>
+        {/* ---------- 上下文窗口（独立区块）---------- */}
+        {contextUsage ? (
+          <Section
+            title="上下文窗口"
+            icon={<Layers size={12} />}
+            meta={pct !== null ? `${pct}%` : undefined}
+          >
+            <div className="h-1.5 w-full overflow-hidden rounded-full bg-panel-2">
+              <div
+                className={cn(
+                  "h-full rounded-full",
+                  pct === null ? "bg-accent" : nearTrigger ? "bg-danger" : pct >= 60 ? "bg-warn" : "bg-accent",
+                )}
+                style={{ width: `${Math.max(0, Math.min(100, pct ?? 0))}%` }}
+              />
+            </div>
+            <div className="mt-1 text-[11px] tabular-nums text-dim">
+              {contextUsage.tokens !== null ? formatTokens(contextUsage.tokens) : "—"} /{" "}
+              {formatTokens(contextUsage.contextWindow)}
+            </div>
+            {trigger && (
+              <div
+                className={cn(
+                  "mt-1.5 flex items-start gap-1.5 text-[10px] leading-relaxed",
+                  nearTrigger ? "text-warn" : "text-dim/70",
+                )}
+              >
+                {nearTrigger && <AlertTriangle size={10} className="mt-0.5 shrink-0" />}
+                <span className="min-w-0 flex-1">
+                  {compaction.enabled
+                    ? `约 ${trigger.percent}%（${trigger.tokens.toLocaleString()}）时内核自动压缩`
+                    : "自动压缩已关闭"}
+                </span>
+                {/* 看到触发点想改，就地能跳过去（阈值在 设置 → Pi 行为 → 响应预留 Token） */}
+                {onOpenSettings && (
+                  <button
+                    onClick={onOpenSettings}
+                    title="调整自动压缩的触发点（设置 → Pi 行为 → 响应预留 Token）"
+                    data-testid="rail-compaction-settings"
+                    className="shrink-0 cursor-pointer underline decoration-dotted underline-offset-2 t-fast hover:text-fg"
+                  >
+                    调整
+                  </button>
+                )}
+              </div>
+            )}
+            {/* 压缩放在占用率旁边：动机与动作相邻，不必再去菜单里找 */}
+            {(onCompact || onAbortCompaction) && (
+              <div className="mt-2">
+                {compacting ? (
+                  <button onClick={onAbortCompaction} className="btn btn-sm btn-ghost w-full text-danger">
+                    停止压缩
+                  </button>
+                ) : (
+                  <button onClick={onCompact} className="btn btn-sm btn-ghost w-full" data-testid="rail-compact">
+                    压缩上下文
+                  </button>
+                )}
+              </div>
+            )}
+          </Section>
+        ) : (
+          <Section title="上下文窗口" icon={<Layers size={12} />}>
+            <Empty>暂无上下文数据。</Empty>
+          </Section>
+        )}
 
-        {/* ---------- 运行统计 | 上下文窗口（两列并排）----------
-            两者都是「几行短数字」，各占一行会把面板拉得很长。
-            内部顺序：先「干了什么」（消息 / 工具 / 时长 / 缓存命中），
-            再「花了多少」（结算条），token 明细放最后 —— 它是结算的注脚。 ---------- */}
-        <SectionPair
-          left={
-            <Section flush title="运行统计" icon={<ListChecks size={12} />}>
+        {/* ---------- Git（压成一行：分支 · 状态 + 打开入口）---------- */}
+        {gitInfo?.isRepo ? (
+          <div
+            data-section="Git"
+            title="观测栏只读。提交与撤销提交在「Git 变更」页完成 —— 那里能先看 diff 并逐个勾选文件。"
+            className="flex items-center gap-1.5 border-b border-line-soft px-3.5 py-3"
+          >
+            <span className="shrink-0 text-dim">
+              <GitBranch size={12} />
+            </span>
+            <span className="min-w-0 flex-1 truncate text-[12px] text-muted">
+              <span className="text-fg">{gitInfo.branch || "（未知分支）"}</span>
+              {" · "}
+              <span className={cn(gitInfo.dirty > 0 && "text-accent")}>
+                {gitInfo.dirty > 0 ? `未提交 ${gitInfo.dirty}` : "干净"}
+              </span>
+            </span>
+            {onOpenGit && cwd && (
+              <button
+                onClick={() => onOpenGit(cwd)}
+                data-testid="observatory-open-git"
+                className="shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 text-[11px] text-accent t-fast hover:bg-accent-soft"
+              >
+                打开 Git 变更 →
+              </button>
+            )}
+          </div>
+        ) : (
+          <Section title="Git" icon={<GitBranch size={12} />}>
+            <Empty>当前工作区不是 Git 仓库。</Empty>
+          </Section>
+        )}
+
+        {/* ---------- 运行统计（默认一行摘要，点开展开明细）---------- */}
+        <CollapsibleSection
+          title="运行统计"
+          icon={<ListChecks size={12} />}
+          summary={statsSummary}
+          testId="rail-stats-toggle"
+        >
           {sessionStats ? (
             <>
               <Stat label="消息" value={`${sessionStats.userMessages} 问 · ${sessionStats.assistantMessages} 答`} />
@@ -711,120 +846,12 @@ export function SessionObservatory({
           ) : (
             <Empty>统计随第一条消息开始累积。</Empty>
           )}
-            </Section>
-          }
-          right={
-            /* 右列两段叠放：上下文窗口 + Git（详见下方注释） */
-            <div className="flex h-full flex-col">
-            {contextUsage ? (
-              <Section
-                flush
-                title="上下文窗口"
-                icon={<Layers size={12} />}
-                meta={pct !== null ? `${pct}%` : undefined}
-              >
-                {/* 窄列里进度条与数字不能同排（会把数字挤没），改成上下两行 */}
-                <div className="h-1.5 w-full overflow-hidden rounded-full bg-panel-2">
-                  <div
-                    className={cn(
-                      "h-full rounded-full",
-                      pct === null ? "bg-accent" : nearTrigger ? "bg-danger" : pct >= 60 ? "bg-warn" : "bg-accent",
-                    )}
-                    style={{ width: `${Math.max(0, Math.min(100, pct ?? 0))}%` }}
-                  />
-                </div>
-                <div className="mt-1 text-[11px] tabular-nums text-dim">
-                  {contextUsage.tokens !== null ? formatTokens(contextUsage.tokens) : "—"} /{" "}
-                  {formatTokens(contextUsage.contextWindow)}
-                </div>
-                {trigger && (
-                  <div
-                    className={cn(
-                      "mt-1.5 flex items-start gap-1.5 text-[10px] leading-relaxed",
-                      nearTrigger ? "text-warn" : "text-dim/70",
-                    )}
-                  >
-                    {nearTrigger && <AlertTriangle size={10} className="mt-0.5 shrink-0" />}
-                    <span className="min-w-0 flex-1">
-                      {compaction.enabled
-                        ? `约 ${trigger.percent}%（${trigger.tokens.toLocaleString()}）时内核自动压缩`
-                        : "自动压缩已关闭"}
-                    </span>
-                    {/* 看到触发点想改，就地能跳过去（阈值在 设置 → Pi 行为 → 响应预留 Token） */}
-                    {onOpenSettings && (
-                      <button
-                        onClick={onOpenSettings}
-                        title="调整自动压缩的触发点（设置 → Pi 行为 → 响应预留 Token）"
-                        data-testid="rail-compaction-settings"
-                        className="shrink-0 cursor-pointer underline decoration-dotted underline-offset-2 t-fast hover:text-fg"
-                      >
-                        调整
-                      </button>
-                    )}
-                  </div>
-                )}
-                {/* 压缩放在占用率旁边：动机与动作相邻，不必再去菜单里找 */}
-                {(onCompact || onAbortCompaction) && (
-                  <div className="mt-2">
-                    {compacting ? (
-                      <button onClick={onAbortCompaction} className="btn btn-sm btn-ghost w-full text-danger">
-                        停止压缩
-                      </button>
-                    ) : (
-                      <button onClick={onCompact} className="btn btn-sm btn-ghost w-full" data-testid="rail-compact">
-                        压缩上下文
-                      </button>
-                    )}
-                  </div>
-                )}
-              </Section>
-            ) : (
-              <Section flush title="上下文窗口" icon={<Layers size={12} />}>
-                <Empty>暂无上下文数据。</Empty>
-              </Section>
-            )}
-            {/* Git 叠在上下文窗口下面（两段都是「几行短信息」）：运行统计补了结算条与
-                token 明细后高出一倍多（实测 366px vs 上下文 150px），右列底部原本会
-                空出一大块；叠上去后两列高度接近，观测栏整体也不再被拉长。 */}
-            <div className="border-t border-line-soft">
-        <Section
-              flush
-          title="Git"
-          icon={<GitBranch size={12} />}
-          meta={gitInfo?.dirty ? `${gitInfo.dirty} 个变更` : undefined}
-        >
-          {gitInfo?.isRepo ? (
-            <>
-              <Stat label="分支" value={gitInfo.branch || "（未知）"} />
-              <Stat
-                label="未提交"
-                value={gitInfo.dirty > 0 ? `${gitInfo.dirty} 个文件` : "工作区干净"}
-                tone={gitInfo.dirty > 0 ? "accent" : undefined}
-              />
-              {onOpenGit && cwd && (
-                <button
-                  onClick={() => onOpenGit(cwd)}
-                  className="btn btn-sm btn-ghost mt-2 w-full"
-                  data-testid="observatory-open-git"
-                >
-                  {gitInfo.dirty > 0 ? `查看并提交这 ${gitInfo.dirty} 个变更 →` : "打开 Git 变更 →"}
-                </button>
-              )}
-              <div className="mt-1.5 text-[10px] leading-relaxed text-dim/70">
-                观测栏只读。提交与撤销提交在「Git 变更」页完成 —— 那里能先看 diff 并逐个勾选文件。
-              </div>
-            </>
-          ) : (
-            <Empty>当前工作区不是 Git 仓库。</Empty>
-          )}
-        </Section>
-            </div>
-            </div>
-          }
-        />
+        </CollapsibleSection>
 
-        {/* ---------- 运行环境（通栏）---------- */}
-        <Section title="运行环境" icon={<Hash size={12} />}>
+        {/* ---------- 会话信息（底部折叠区：运行环境 + 会话产物 + 会话文件）----------
+            低频信息集中到最后：默认收起，要用时展开。 ---------- */}
+        <CollapsibleSection title="会话信息" icon={<Hash size={12} />} testId="rail-session-info">
+          <div className="text-[10px] uppercase tracking-wide text-dim">运行环境</div>
           {displayModel ? (
             <Stat label="模型" value={`${displayModel.provider}/${displayModel.modelId}`} />
           ) : (
@@ -836,46 +863,47 @@ export function SessionObservatory({
             <Coins size={10} className="shrink-0" />
             用量为离线统计，不出本机
           </div>
-        </Section>
 
-        {/* ---------- 会话产物（导出 / 克隆 / 会话文件）---------- */}
-        {(onExportHtml || onClone) && (
-          <Section title="会话产物" icon={<Download size={12} />}>
-            <div className="flex flex-col gap-1.5">
-              {onExportHtml && (
-                <button onClick={onExportHtml} className="btn btn-sm btn-ghost w-full" data-testid="rail-export">
-                  <Share size={10} /> 导出 HTML
-                </button>
-              )}
-              {onClone && (
-                <button onClick={onClone} className="btn btn-sm btn-ghost w-full" data-testid="rail-clone">
-                  <Copy size={10} /> 克隆会话
-                </button>
-              )}
-            </div>
-            {sessionStats?.sessionFile && (
-              <div className="mt-2 border-t border-line-soft pt-2">
-                <div className="text-[10px] text-dim">会话文件</div>
-                <div className="mt-0.5 flex items-start gap-1.5">
-                  <span
-                    className="min-w-0 flex-1 break-all font-mono text-[10px] leading-relaxed text-dim/80"
-                    title={sessionStats.sessionFile}
-                  >
-                    {sessionStats.sessionFile}
-                  </span>
-                  <button
-                    onClick={() => void copyText(sessionStats.sessionFile!)}
-                    title="复制路径"
-                    aria-label="复制会话文件路径"
-                    className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-dim t-fast hover:bg-hover hover:text-fg"
-                  >
-                    <Copy size={10} />
+          {(onExportHtml || onClone) && (
+            <div className="mt-3 border-t border-line-soft pt-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-dim">会话产物</div>
+              <div className="mt-1.5 flex flex-col gap-1.5">
+                {onExportHtml && (
+                  <button onClick={onExportHtml} className="btn btn-sm btn-ghost w-full" data-testid="rail-export">
+                    <Share size={10} /> 导出 HTML
                   </button>
-                </div>
+                )}
+                {onClone && (
+                  <button onClick={onClone} className="btn btn-sm btn-ghost w-full" data-testid="rail-clone">
+                    <Copy size={10} /> 克隆会话
+                  </button>
+                )}
               </div>
-            )}
-          </Section>
-        )}
+            </div>
+          )}
+
+          {sessionStats?.sessionFile && (
+            <div className="mt-3 border-t border-line-soft pt-2.5">
+              <div className="text-[10px] uppercase tracking-wide text-dim">会话文件</div>
+              <div className="mt-0.5 flex items-start gap-1.5">
+                <span
+                  className="min-w-0 flex-1 break-all font-mono text-[10px] leading-relaxed text-dim/80"
+                  title={sessionStats.sessionFile}
+                >
+                  {sessionStats.sessionFile}
+                </span>
+                <button
+                  onClick={() => void copyText(sessionStats.sessionFile!)}
+                  title="复制路径"
+                  aria-label="复制会话文件路径"
+                  className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-dim t-fast hover:bg-hover hover:text-fg"
+                >
+                  <Copy size={10} />
+                </button>
+              </div>
+            </div>
+          )}
+        </CollapsibleSection>
       </div>
     </aside>
     </>
