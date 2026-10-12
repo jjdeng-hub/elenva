@@ -176,8 +176,16 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-* {
-  border-color: var(--line);
+/* 裸 border（只写宽度不写颜色）的默认描边色。
+   **必须留在 @layer base 里**：未分层（unlayered）的 `*` 选择器在级联中高于所有 @layer，
+   会把 Tailwind 的 border 颜色工具类（border-accent / border-transparent / focus:border-accent/50
+   等）整个压掉 —— 计算值恒为 var(--line)，表现为全站边框色「改了没反应」
+   （实测踩到：右栏标签栏激活下划线显示为灰色）。放进 base 后本规则仍提供默认值，
+   而 @layer utilities 能正常覆盖它。 */
+@layer base {
+  * {
+    border-color: var(--line);
+  }
 }
 
 ::selection {
