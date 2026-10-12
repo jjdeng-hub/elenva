@@ -22,6 +22,7 @@ import { TreePanel, countTreeNodes } from "@/components/TreePanel";
 import { WorkspacePicker, type WorkspaceOption } from "@/components/WorkspacePicker";
 import { useAgentSession, type AttachedImage, type ChatInputHandle } from "@/hooks/useAgentSession";
 import { useSessionActions } from "@/hooks/useSessionActions";
+import { usePersistedWidth } from "@/components/ui/Resizer";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
 import { useTurnCheckpoints } from "@/hooks/useTurnCheckpoints";
 import { latestTodoState } from "@/lib/todo-view";
@@ -207,6 +208,15 @@ export function ChatView({
   }, []);
   /** 最近一次打开的面板：顶栏开关收起后再展开时回到这一页 */
   const lastRailPanelRef = useRef<Exclude<RightPanel, null>>("observatory");
+
+  /* 三个右侧面板共用同一宽度：由 ChatView 持有单一持久化状态，再把 width/grow/reset
+     传给具体面板。此前三个面板各自 usePersistedWidth（观测 420 / 树 400 / 文件 340），
+     切换面板宽度会跳变；统一后拖拽任一面板即同时改变三者。 */
+  const {
+    width: railPanelWidth,
+    grow: growRailPanel,
+    reset: resetRailPanel,
+  } = usePersistedWidth("elenva-chat-rail-width", 420, 300, 640);
   useEffect(() => {
     if (rightPanel) lastRailPanelRef.current = rightPanel;
   }, [rightPanel]);
@@ -867,6 +877,9 @@ export function ChatView({
               onNavigate={(id) => void handleNavigate(id)}
               onClose={closeRail}
               header={railHeader}
+              width={railPanelWidth}
+              grow={growRailPanel}
+              reset={resetRailPanel}
             />
           ) : shownPanel === "files" && writtenFiles.length > 0 ? (
             <FilePreviewPanel
@@ -875,6 +888,9 @@ export function ChatView({
               onSelect={setPreviewPath}
               onClose={closeRail}
               header={railHeader}
+              width={railPanelWidth}
+              grow={growRailPanel}
+              reset={resetRailPanel}
               /* 观测栏的「本会话文件」区撤掉后，这个跳转的家就在文件列表这儿 */
               onOpenCode={onOpenCode ? (f) => onOpenCode(f, cwd || "") : undefined}
             />
@@ -885,6 +901,9 @@ export function ChatView({
             <SessionObservatory
               open={railOpen}
               header={railHeader}
+              width={railPanelWidth}
+              grow={growRailPanel}
+              reset={resetRailPanel}
               messages={messages}
               results={toolResults}
               cwd={cwd || ""}

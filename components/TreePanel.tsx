@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
-import { Resizer, usePersistedWidth } from "@/components/ui/Resizer";
+import { Resizer } from "@/components/ui/Resizer";
 import type { AgentMessage, SessionEntry, SessionTreeNode } from "@/lib/types";
 
 /** 会话树的节点总数（含分支上的全部节点）：面板头部与右栏 tab 计数共用 */
@@ -185,6 +185,9 @@ export function TreePanel({
   onNavigate,
   onClose,
   header,
+  width: paneWidth,
+  grow: growPane,
+  reset: resetPane,
 }: {
   tree: SessionTreeNode[];
   activeLeafId: string | null;
@@ -194,15 +197,12 @@ export function TreePanel({
   docked?: boolean;
   /** 停靠态自定义面板头（右栏共用标签栏）。浮层态不用，保留自己的标题行 */
   header?: ReactNode;
+  /* ---- 宽度：由 ChatView 持有单一持久化状态后传入（三个面板共用）---- */
+  width: number;
+  grow: (deltaPx: number) => void;
+  reset: () => void;
 }) {
   const activePath = useMemo(() => buildActivePathSet(tree, activeLeafId), [tree, activeLeafId]);
-  /* 停靠态宽度可拖拽（与观测栏/预览面板同一套交互） */
-  const { width: paneWidth, grow: growPane, reset: resetPane } = usePersistedWidth(
-    "elenva-tree-panel-width",
-    400,
-    300,
-    640,
-  );
   const [query, setQuery] = useState("");
   const filtered = useMemo(() => {
     if (!query.trim()) return tree;

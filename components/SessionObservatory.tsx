@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
-import { Resizer, usePersistedWidth } from "@/components/ui/Resizer";
+import { Resizer } from "@/components/ui/Resizer";
 import { formatCost, formatDuration, formatTokens } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
 import { compactionTrigger, useCompactionSettings } from "@/hooks/useCompactionSettings";
@@ -443,11 +443,18 @@ export function SessionObservatory({
   /** 观测栏是否展开。收起走宽度过渡（与另外两个侧栏同一节奏），不卸载组件 */
   open = true,
   header,
+  width: paneWidth,
+  grow: growPane,
+  reset: resetPane,
 }: {
   /** 自定义面板头（右栏共用标签栏） */
   header?: ReactNode;
   /** 观测栏是否展开。收起走宽度过渡（与另外两个侧栏同一节奏），组件不卸载 */
   open?: boolean;
+  /* ---- 宽度：由 ChatView 持有单一持久化状态后传入（三个面板共用）---- */
+  width: number;
+  grow: (deltaPx: number) => void;
+  reset: () => void;
   messages: AgentMessage[];
   results: Map<string, ToolResultMessage>;
   cwd: string;
@@ -577,13 +584,6 @@ export function SessionObservatory({
   const tokens = sessionStats?.tokens;
   // percent 是浮点（433.4k/1.00M → 43.3375），展示层必须取整
   const pct = contextUsage?.percent != null ? Math.round(contextUsage.percent) : null;
-  /* 观测栏宽度可拖拽：它是「数据面板」，用户常需要更宽来读长路径与命令 */
-  const { width: paneWidth, grow: growPane, reset: resetPane } = usePersistedWidth(
-    "elenva-observatory-width",
-    420,
-    300,
-    640,
-  );
   const compaction = useCompactionSettings();
   const trigger = contextUsage
     ? compactionTrigger(contextUsage.contextWindow, compaction.reserveTokens)

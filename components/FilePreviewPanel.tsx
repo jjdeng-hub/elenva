@@ -3,7 +3,7 @@
 import { Download, FileCode2, FileText, Image as ImageIcon, Loader2, RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
-import { Resizer, usePersistedWidth } from "@/components/ui/Resizer";
+import { Resizer } from "@/components/ui/Resizer";
 
 const IMAGE_RE = /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i;
 const MEDIA_RE = /\.(mp4|webm|mp3|wav|ogg|pdf|docx?)$/i;
@@ -24,6 +24,9 @@ export function FilePreviewPanel({
   onClose,
   onOpenCode,
   header,
+  width: paneWidth,
+  grow: growPane,
+  reset: resetPane,
 }: {
   /** 本会话写入过的文件（绝对路径，最新在前） */
   files: string[];
@@ -35,6 +38,10 @@ export function FilePreviewPanel({
   onOpenCode?: (path: string) => void;
   /** 自定义面板头（右栏共用标签栏） */
   header?: ReactNode;
+  /* ---- 宽度：由 ChatView 持有单一持久化状态后传入（三个面板共用）---- */
+  width: number;
+  grow: (deltaPx: number) => void;
+  reset: () => void;
 }) {
   const [content, setContent] = useState<ReadChunk | null>(null);
   const [loading, setLoading] = useState(false);
@@ -48,12 +55,6 @@ export function FilePreviewPanel({
   const [missing, setMissing] = useState<Set<string>>(new Set());
   /** 存亡核对是否已回来 —— 核对前不自动选中、不读内容，否则会先对已删除的文件发一次读请求（404） */
   const [checked, setChecked] = useState(false);
-  const { width: paneWidth, grow: growPane, reset: resetPane } = usePersistedWidth(
-    "elenva-preview-panel-width",
-    340,
-    260,
-    560,
-  );
 
   /* 面板打开（或列表变化）时核对存亡。网络错误不当成「已删除」—— 宁可漏标也不能误标。 */
   useEffect(() => {
