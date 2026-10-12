@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, PanelLeftClose, PanelLeftOpen, FileCode2, GitBranch, ListTree, Menu, Search, X } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, GitBranch, Menu, Search, X } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentStatusBar } from "@/components/AgentStatusBar";
@@ -10,6 +10,7 @@ import { ExtensionDialog } from "@/components/ExtensionDialog";
 import { FilePreviewPanel } from "@/components/FilePreviewPanel";
 import { LogoMark } from "@/components/Logo";
 import { SessionObservatory } from "@/components/SessionObservatory";
+import { RailTabs } from "@/components/RailTabs";
 import { TurnFooter } from "@/components/TurnFooter";
 import { TodoPanel } from "@/components/TodoPanel";
 import { ExtensionStrip } from "@/components/ExtensionStrip";
@@ -17,7 +18,7 @@ import { ModelPicker } from "@/components/ModelPicker";
 import { ProjectTrustDialog } from "@/components/ProjectTrustDialog";
 import { SessionTitle } from "@/components/SessionTitle";
 import { SessionSidebar } from "@/components/SessionSidebar";
-import { TreePanel } from "@/components/TreePanel";
+import { TreePanel, countTreeNodes } from "@/components/TreePanel";
 import { WorkspacePicker, type WorkspaceOption } from "@/components/WorkspacePicker";
 import { useAgentSession, type AttachedImage, type ChatInputHandle } from "@/hooks/useAgentSession";
 import { useSessionActions } from "@/hooks/useSessionActions";
@@ -26,7 +27,6 @@ import { useTurnCheckpoints } from "@/hooks/useTurnCheckpoints";
 import { latestTodoState } from "@/lib/todo-view";
 import { resolveLocalFilePath } from "@/lib/file-links";
 import type { SessionInfo, ToolResultMessage } from "@/lib/types";
-import { cn } from "@/components/lib/utils";
 import { basename, formatCost, formatTokens } from "@/lib/format";
 import { centerElementInContainer } from "@/lib/scroll";
 import { toast, dialogPrompt } from "@/components/ui/dialog";
@@ -35,9 +35,6 @@ const SIDEBAR_COLLAPSED_KEY = "elenva-chat-sidebar-collapsed";
 const OBSERVATORY_KEY = "elenva-chat-observatory";
 /** 观测栏需要的最小窗宽（与 Tailwind xl 断点对齐） */
 const OBSERVATORY_MIN_WIDTH = 1280;
-
-/** 顶栏右栏 tab 组内单个 tab 的通用样式：统一尺寸（约 28×28）+ 动效 */
-const RAIL_TAB_CLASS = "flex h-7 min-w-7 cursor-pointer items-center justify-center rounded-md t-fast";
 
 /** 右侧槽位同时只承载一个面板：会话树 / 文件预览 / 观测栏 */
 type RightPanel = "tree" | "files" | "observatory" | null;
@@ -208,25 +205,28 @@ export function ChatView({
     if (saved !== null) setRightPanel(saved === "1" ? "observatory" : null);
     else if (window.innerWidth >= 1440) setRightPanel("observatory");
   }, []);
-  const railOpen = rightPanel === "observatory";
-  /** 顶栏三按钮互斥切换：点谁显示谁，点当前显示的收起 */
-  const togglePanel = useCallback((panel: Exclude<RightPanel, null>) => {
+  /** 最近一次打开的面板：顶栏开关收起后再展开时回到这一页 */
+  const lastRailPanelRef = useRef<Exclude<RightPanel, null>>("observatory");
+  useEffect(() => {
+    if (rightPanel) lastRailPanelRef.current = rightPanel;
+  }, [rightPanel]);
+  /** 面板头标签栏点击：直接切换（右栏保持打开，只换内容页） */
+  const selectPanel = useCallback((panel: Exclude<RightPanel, null>) => {
+    setRightPanel(panel);
+    // 只有观测栏有持久化偏好；切到树/文件不覆写它
+    if (panel === "observatory") localStorage.setItem(OBSERVATORY_KEY, "1");
+  }, []);
+  /** 收起整个右栏（面板头的 × 与顶栏开关共用） */
+  const closeRail = useCallback(() => {
     setRightPanel((v) => {
-      const next = v === panel ? null : panel;
-      // 只有观测栏有持久化偏好；切到树/文件不覆写它
-      if (panel === "observatory") localStorage.setItem(OBSERVATORY_KEY, next ? "1" : "0");
-      return next;
+      if (v === "observatory") localStorage.setItem(OBSERVATORY_KEY, "0");
+      return null;
     });
   }, []);
   /** 程序化打开观测栏（本轮明细入口）：算一次显式打开，持久化 */
   const showObservatory = useCallback(() => {
     localStorage.setItem(OBSERVATORY_KEY, "1");
     setRightPanel("observatory");
-  }, []);
-  /** 观测栏自己的关闭按钮：收起并记住「已关」 */
-  const closeObservatory = useCallback(() => {
-    localStorage.setItem(OBSERVATORY_KEY, "0");
-    setRightPanel(null);
   }, []);
 
   /* 侧栏折叠（响应式默认：窄屏折叠），状态持久化 */
@@ -393,6 +393,48 @@ export function ChatView({
 
   /* 右栏 tab 组的可用项数：窄屏无观测、无写入、无分支时整组隐藏 */
   const railTabCount = (railAllowed ? 1 : 0) + (writtenFiles.length > 0 ? 1 : 0) + (hasTree ? 1 : 0);
+
+  /**
+   * 实际展示的面板：rightPanel 是用户意图，这里再按可用条件兜底 ——
+   * 激活的面板失去条件（文件被清空 / 会话树没了）时回退观测，观测也不可用才整栏收起。
+   * 这样顶栏开关、面板头标签栏的激活态与实际内容始终一致。
+   */
+  const filesAvailable = writtenFiles.length > 0;
+  const shownPanel: RightPanel =
+    rightPanel === null
+      ? null
+      : rightPanel === "tree" && hasTree
+        ? "tree"
+        : rightPanel === "files" && filesAvailable
+          ? "files"
+          : railAllowed
+            ? "observatory"
+            : null;
+  /** 观测栏是否展开（宽度过渡用；只有观测栏常驻挂载） */
+  const railOpen = shownPanel === "observatory";
+  /** 右栏整体是否可见（顶栏开关的图标与 tooltip 用） */
+  const railVisible = shownPanel !== null;
+
+  /** 顶栏开关：收起整个右栏，或展开到最近一次的面板（不可用则挑一个可用的） */
+  const toggleRail = useCallback(() => {
+    if (railVisible) {
+      setRightPanel(null);
+      if (shownPanel === "observatory") localStorage.setItem(OBSERVATORY_KEY, "0");
+      return;
+    }
+    const available = (p: Exclude<RightPanel, null>) =>
+      p === "observatory" ? railAllowed : p === "files" ? filesAvailable : hasTree;
+    const preferred = lastRailPanelRef.current;
+    const next = available(preferred)
+      ? preferred
+      : available("observatory")
+        ? "observatory"
+        : available("files")
+          ? "files"
+          : "tree";
+    setRightPanel(next);
+    if (next === "observatory") localStorage.setItem(OBSERVATORY_KEY, "1");
+  }, [railVisible, shownPanel, railAllowed, filesAvailable, hasTree]);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const openFilePreview = useCallback(
     (path: string) => {
@@ -634,6 +676,18 @@ export function ChatView({
     />
   );
 
+  /* 右栏三个面板共用的头部标签栏（观测 / 文件 / 树 + 收起）：一处定义，各面板通过 header 插槽渲染 */
+  const railHeader = (
+    <RailTabs
+      active={shownPanel}
+      railAllowed={railAllowed}
+      fileCount={writtenFiles.length}
+      treeNodes={sessionTree ? countTreeNodes(sessionTree) : undefined}
+      onSelect={selectPanel}
+      onClose={closeRail}
+    />
+  );
+
   return (
     <div className="flex min-h-0 flex-1">
       <SessionSidebar
@@ -734,62 +788,20 @@ export function ChatView({
             )}
             {/* 状态胶囊（运行中/空闲）已移除（2026-09-21）：运行态在输入框（停止按钮）、
                 输入框上方状态条、页脚、会话列表圆点四处都有信号；常驻的空闲胶囊只是噪音。 */}
-            {/* 右栏控制（观测 / 文件 / 树 三选一）：单一控件（一个圆角边框 + 内衬底色），
-                组内互斥直切；点当前激活项收起右栏。互斥由 rightPanel 单一状态保证。
-                出现条件：观测仅 ≥1280px、文件仅 writtenFiles>0、树仅 hasTree；可用项为 0 时整组隐藏。 */}
+            {/* 右栏总开关（镜像左侧会话列表的收起/展开）：点击收起或展开整个右栏。
+                面板切换（观测/文件/树）已移到右栏面板头部的标签栏（RailTabs）。
+                出现条件：可用项为 0（窄屏无观测、无写入、无分支）时不显示。 */}
             {railTabCount > 0 && (
-              <div
-                data-testid="rail-tabs"
-                className="flex h-8 shrink-0 items-center rounded-lg border border-line bg-panel-2 p-0.5"
+              <button
+                data-testid="rail-toggle"
+                onClick={toggleRail}
+                aria-pressed={railVisible}
+                title={railVisible ? "收起右栏" : "展开右栏（本会话实时数据）"}
+                aria-label={railVisible ? "收起右栏" : "展开右栏"}
+                className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-dim t-fast hover:bg-hover hover:text-fg"
               >
-                {railAllowed && (
-                  <button
-                    data-testid="rail-tab-observatory"
-                    onClick={() => togglePanel("observatory")}
-                    title="观测：本会话实时数据（再点收起）"
-                    aria-label="观测：本会话实时数据（再点收起）"
-                    aria-pressed={railOpen}
-                    className={cn(
-                      RAIL_TAB_CLASS,
-                      railOpen ? "bg-active text-accent" : "text-dim hover:bg-hover hover:text-fg",
-                    )}
-                  >
-                    <Activity size={14} />
-                  </button>
-                )}
-                {writtenFiles.length > 0 && (
-                  <button
-                    data-testid="rail-tab-files"
-                    onClick={() => togglePanel("files")}
-                    title="本会话 Agent 写入的文件（右侧预览）"
-                    aria-label="本会话 Agent 写入的文件（右侧预览）"
-                    aria-pressed={rightPanel === "files"}
-                    className={cn(
-                      RAIL_TAB_CLASS,
-                      "gap-0.5 px-1",
-                      rightPanel === "files" ? "bg-active text-accent" : "text-dim hover:bg-hover hover:text-fg",
-                    )}
-                  >
-                    <FileCode2 size={14} />
-                    <span className="text-[10px] tabular-nums">{writtenFiles.length}</span>
-                  </button>
-                )}
-                {hasTree && (
-                  <button
-                    data-testid="rail-tab-tree"
-                    onClick={() => togglePanel("tree")}
-                    title="会话树：浏览分支、跳转到任意历史点继续"
-                    aria-label="会话树：浏览分支、跳转到任意历史点继续"
-                    aria-pressed={rightPanel === "tree"}
-                    className={cn(
-                      RAIL_TAB_CLASS,
-                      rightPanel === "tree" ? "bg-active text-accent" : "text-dim hover:bg-hover hover:text-fg",
-                    )}
-                  >
-                    <ListTree size={14} />
-                  </button>
-                )}
-              </div>
+                {railVisible ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
+              </button>
             )}
             <ThemeToggle />
           </div>
@@ -845,21 +857,24 @@ export function ChatView({
         {!isEmpty && statusBar}
         {!isEmpty && chatInputEl}
           </div>
-          {/* 右侧只有一个槽位：会话树 / 文件预览 / 观测栏三选一，由 rightPanel 单一状态决定。 */}
-          {rightPanel === "tree" && sessionTree ? (
+          {/* 右侧只有一个槽位：会话树 / 文件预览 / 观测栏三选一。rightPanel 是用户意图，
+              shownPanel 已按可用条件兜底（不可用则回退观测 / 收起）。 */}
+          {shownPanel === "tree" && sessionTree ? (
             <TreePanel
               docked
               tree={sessionTree}
               activeLeafId={activeLeafId}
               onNavigate={(id) => void handleNavigate(id)}
-              onClose={() => setRightPanel(null)}
+              onClose={closeRail}
+              header={railHeader}
             />
-          ) : rightPanel === "files" && writtenFiles.length > 0 ? (
+          ) : shownPanel === "files" && writtenFiles.length > 0 ? (
             <FilePreviewPanel
               files={writtenFiles}
               selected={previewPath}
               onSelect={setPreviewPath}
-              onClose={() => setRightPanel(null)}
+              onClose={closeRail}
+              header={railHeader}
               /* 观测栏的「本会话文件」区撤掉后，这个跳转的家就在文件列表这儿 */
               onOpenCode={onOpenCode ? (f) => onOpenCode(f, cwd || "") : undefined}
             />
@@ -869,6 +884,7 @@ export function ChatView({
                实测直接把拖拽打死（420 → 420）。 */
             <SessionObservatory
               open={railOpen}
+              header={railHeader}
               messages={messages}
               results={toolResults}
               cwd={cwd || ""}
@@ -879,7 +895,7 @@ export function ChatView({
               thinkingLevel={thinkingLevel}
               onOpenFile={openFilePreview}
               onOpenGit={onOpenGit}
-              onClose={closeObservatory}
+              onClose={closeRail}
               compacting={isCompacting}
               onCompact={() => void sessionActions.compact()}
               onAbortCompaction={() => void handleAbortCompaction()}

@@ -21,7 +21,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
 import { Resizer, usePersistedWidth } from "@/components/ui/Resizer";
 import { formatCost, formatDuration, formatTokens } from "@/lib/format";
@@ -442,7 +442,10 @@ export function SessionObservatory({
   turn,
   /** 观测栏是否展开。收起走宽度过渡（与另外两个侧栏同一节奏），不卸载组件 */
   open = true,
+  header,
 }: {
+  /** 自定义面板头（右栏共用标签栏） */
+  header?: ReactNode;
   /** 观测栏是否展开。收起走宽度过渡（与另外两个侧栏同一节奏），组件不卸载 */
   open?: boolean;
   messages: AgentMessage[];
@@ -603,19 +606,21 @@ export function SessionObservatory({
       data-testid="observatory"
       aria-label="会话观测"
     >
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3.5">
-        <Activity size={14} className="shrink-0 text-accent" />
-        <span className="text-[13px] font-semibold text-fg">观测</span>
-        <span className="text-[11px] text-dim">本会话实时数据</span>
-        <button
-          onClick={onClose}
-          title="收起观测栏"
-          aria-label="收起观测栏"
-          className="ml-auto flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-dim t-fast hover:bg-hover hover:text-fg"
-        >
-          <X size={12} />
-        </button>
-      </div>
+      {header ?? (
+        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3.5">
+          <Activity size={14} className="shrink-0 text-accent" />
+          <span className="text-[13px] font-semibold text-fg">观测</span>
+          <span className="text-[11px] text-dim">本会话实时数据</span>
+          <button
+            onClick={onClose}
+            title="收起观测栏"
+            aria-label="收起观测栏"
+            className="ml-auto flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-dim t-fast hover:bg-hover hover:text-fg"
+          >
+            <X size={12} />
+          </button>
+        </div>
+      )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {/* ---------- 任务（任务拆解清单 · 实时，置顶）---------- */}

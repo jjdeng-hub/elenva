@@ -10,10 +10,15 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
 import { Resizer, usePersistedWidth } from "@/components/ui/Resizer";
 import type { AgentMessage, SessionEntry, SessionTreeNode } from "@/lib/types";
+
+/** 会话树的节点总数（含分支上的全部节点）：面板头部与右栏 tab 计数共用 */
+export function countTreeNodes(nodes: SessionTreeNode[]): number {
+  return nodes.reduce((acc, n) => acc + 1 + countTreeNodes(n.children), 0);
+}
 
 /** 从 entry 提取展示信息 */
 function describeEntry(entry: SessionEntry): { kind: "user" | "assistant" | "info" | "tool"; text: string } {
@@ -179,6 +184,7 @@ export function TreePanel({
   activeLeafId,
   onNavigate,
   onClose,
+  header,
 }: {
   tree: SessionTreeNode[];
   activeLeafId: string | null;
@@ -186,6 +192,8 @@ export function TreePanel({
   onClose: () => void;
   /** 停靠模式：作为右侧整栏（与观测栏/预览面板同一槽位），而不是浮在聊天上方的弹层 */
   docked?: boolean;
+  /** 停靠态自定义面板头（右栏共用标签栏）。浮层态不用，保留自己的标题行 */
+  header?: ReactNode;
 }) {
   const activePath = useMemo(() => buildActivePathSet(tree, activeLeafId), [tree, activeLeafId]);
   /* 停靠态宽度可拖拽（与观测栏/预览面板同一套交互） */
@@ -196,7 +204,6 @@ export function TreePanel({
     640,
   );
   const [query, setQuery] = useState("");
-
   const filtered = useMemo(() => {
     if (!query.trim()) return tree;
     const q = query.toLowerCase();
@@ -219,9 +226,6 @@ export function TreePanel({
     [onNavigate, onClose],
   );
 
-  const flattenCount = (nodes: SessionTreeNode[]): number =>
-    nodes.reduce((acc, n) => acc + 1 + flattenCount(n.children), 0);
-
   const panel = (
     <div
       data-testid="tree-panel"
@@ -233,17 +237,19 @@ export function TreePanel({
       )}
       style={docked ? { width: paneWidth } : undefined}
     >
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3.5">
-        <ListTree size={14} className="shrink-0 text-accent" />
-        <span className="text-[13px] font-semibold text-fg">会话树</span>
-        {docked && <span className="shrink-0 text-[11px] text-dim">{flattenCount(tree)} 个节点</span>}
-        <button
-          onClick={onClose}
-          className="ml-auto flex size-6 cursor-pointer items-center justify-center rounded-md text-dim t-fast hover:bg-hover hover:text-fg"
-        >
-          <X size={14} />
-        </button>
-      </div>
+      {header ?? (
+        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3.5">
+          <ListTree size={14} className="shrink-0 text-accent" />
+          <span className="text-[13px] font-semibold text-fg">会话树</span>
+          {!docked && <span className="shrink-0 text-[11px] text-dim">{countTreeNodes(tree)} 个节点</span>}
+          <button
+            onClick={onClose}
+            className="ml-auto flex size-6 cursor-pointer items-center justify-center rounded-md text-dim t-fast hover:bg-hover hover:text-fg"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
       {/* 说明只在停靠态常驻（浮层空间紧，靠标题 tooltip 兑付） */}
       {docked && (
         <div className="shrink-0 border-b border-line-soft px-3.5 py-1.5 text-[11px] leading-relaxed text-dim">

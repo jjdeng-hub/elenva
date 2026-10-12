@@ -1,7 +1,7 @@
 "use client";
 
 import { Download, FileCode2, FileText, Image as ImageIcon, Loader2, RefreshCw, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
 import { Resizer, usePersistedWidth } from "@/components/ui/Resizer";
 
@@ -23,6 +23,7 @@ export function FilePreviewPanel({
   onSelect,
   onClose,
   onOpenCode,
+  header,
 }: {
   /** 本会话写入过的文件（绝对路径，最新在前） */
   files: string[];
@@ -32,6 +33,8 @@ export function FilePreviewPanel({
   /** 在「代码」页打开该文件（带定位）。观测栏不再列本会话文件后，入口收到这里 ——
    *  文件列表和这个动作本来就该待在一起。 */
   onOpenCode?: (path: string) => void;
+  /** 自定义面板头（右栏共用标签栏） */
+  header?: ReactNode;
 }) {
   const [content, setContent] = useState<ReadChunk | null>(null);
   const [loading, setLoading] = useState(false);
@@ -128,18 +131,20 @@ export function FilePreviewPanel({
       style={{ width: paneWidth }}
     >
       {/* 面板头 */}
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3.5">
-        <FileText size={14} className="shrink-0 text-accent" />
-        <span className="text-[13px] font-semibold">会话文件</span>
-        <span className="chip">{files.length}</span>
-        <button
-          onClick={onClose}
-          className="ml-auto flex size-6 cursor-pointer items-center justify-center rounded-md text-dim t-fast hover:bg-hover hover:text-fg"
-          title="收起预览面板"
-        >
-          <X size={14} />
-        </button>
-      </div>
+      {header ?? (
+        <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-3.5">
+          <FileText size={14} className="shrink-0 text-accent" />
+          <span className="text-[13px] font-semibold">会话文件</span>
+          <span className="chip">{files.length}</span>
+          <button
+            onClick={onClose}
+            className="ml-auto flex size-6 cursor-pointer items-center justify-center rounded-md text-dim t-fast hover:bg-hover hover:text-fg"
+            title="收起预览面板"
+          >
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {/* 写入文件列表 */}
       <div className="max-h-56 shrink-0 overflow-y-auto border-b border-line p-1.5">
