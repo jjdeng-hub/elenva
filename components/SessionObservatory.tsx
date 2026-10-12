@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   CheckCircle2,
   Coins,
-  CornerDownRight,
   ChevronDown,
   Copy,
   GitBranch,
@@ -17,7 +16,6 @@ import {
   ListChecks,
   ListTodo,
   Share,
-  Wrench,
   X,
   XCircle,
 } from "lucide-react";
@@ -52,8 +50,6 @@ type GitInfo = { isRepo: boolean; branch: string | null; dirty: number } | null;
  * 完整的命令与工具卡逐条都在聊天区可见，这里再全列一遍只会把栏目撞长、淹没真正要看的东西。
  */
 const MAX_VISIBLE_FILES = 8;
-/** 工具种类一般不超 8 种（read/bash/edit/write/grep/find/ls…），列全不至于淹版面 */
-const MAX_VISIBLE_TOOLS = 10;
 /** 本轮命令上限：命令是要逐条比对的东西，超过一屏就失去「一眼扫完」的意义 */
 const MAX_VISIBLE_COMMANDS = 12;
 
@@ -70,23 +66,6 @@ function relativize(target: string, cwd: string): string {
   return cleaned.toLowerCase().startsWith(`${root}/`) ? cleaned.slice(root.length + 1) : cleaned;
 }
 
-/** 失败调用的错误摘要：工具结果里的第一行文字，截断展示 */
-function toolErrorDetail(result: { content?: unknown }): string {
-  const content = result.content;
-  if (!Array.isArray(content)) return "调用失败";
-  const text = content
-    .filter((b): b is { type: string; text: string } =>
-      Boolean(b) && typeof b === "object" && (b as { type?: string }).type === "text"
-      && typeof (b as { text?: unknown }).text === "string")
-    .map((b) => b.text)
-    .join("\n")
-    .trim();
-  if (!text) return "调用失败";
-  const firstLine = text.split("\n").find((l) => l.trim()) ?? text;
-  return firstLine.length > 48 ? `${firstLine.slice(0, 48)}…` : firstLine;
-}
-
-/** 路径拆成「文件名 + 父目录」，与 Git 变更页的列表保持一致 */
 function splitPath(p: string): { name: string; dir: string } {
   const parts = p.split(/[\\/]/).filter(Boolean);
   return { name: parts[parts.length - 1] ?? p, dir: parts.length > 1 ? parts[parts.length - 2] : "" };
@@ -96,23 +75,17 @@ function Section({
   title,
   icon,
   meta,
-  /** 在双列里时不画自己的下边框（边框由 SectionPair 统一给） */
-  flush = false,
-  /** 左右分栏里内容较窄时收一档内边距（双列实测每列仅 ~200px） */
-  tight = false,
   children,
 }: {
   title: string;
   icon: React.ReactNode;
   meta?: React.ReactNode;
-  flush?: boolean;
-  tight?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div
       data-section={title}
-      className={cn("min-w-0 py-3", tight ? "px-2.5" : "px-3.5", !flush && "border-b border-line-soft")}
+      className="min-w-0 border-b border-line-soft px-3.5 py-3"
     >
       <div className="flex items-center gap-1.5">
         <span className="shrink-0 text-dim">{icon}</span>
@@ -174,11 +147,12 @@ function CollapsibleSection({
 /**
  * 双列区块对。
  *
- * 为什么需要：观测栏里大部分区块内容很短（累计几行数字、上下文一条进度条、工具聚合几行），
+ * 为什么需要：观测栏里大部分区块内容很短（累计几行数字、上下文一条进度条），
  * 一条占一行的排版会把面板拉得很长，得频繁滚动——“两个短区块并排”比“拉长”好读。
- * 用在哪：「本轮 + 工具调用」「运行统计 + 上下文窗口/Git」两组短区块；
- * 带长命令、长文案、多行清单的（任务、计划模式、会话产物）保持通栏 ——
+ * 带长命令、长文案、多行清单的（任务、本轮、计划模式、会话产物）保持通栏 ——
  * 分半宽会把命令路径全截成 `cd /home/demo-…`，反而读不了。
+ *
+ * 注：「本轮 + 工具调用」的并排已随工具聚合下架撤掉；当前分支暂无调用点，组件保留备用。
  */
 function SectionPair({ left, right }: { left: React.ReactNode; right: React.ReactNode }) {
   return (
@@ -289,13 +263,10 @@ function TurnSection({
   turn,
   cwd,
   onOpenFile,
-  tools,
 }: {
   turn: TurnCheckpointsState;
   cwd: string;
   onOpenFile: (path: string) => void;
-  /** 会话级工具聚合。与「本轮」同栏并排（用户反馈：两行白占一屏，合成一行） */
-  tools?: React.ReactNode;
 }) {
   // 「本轮」= 合并后的用户轮（子轮次语义见 useTurnCheckpoints.mergeRound）
   const latest = turn.latestRound;
@@ -306,11 +277,7 @@ function TurnSection({
   const checkByCommand = new Map(summary?.checks.map((check) => [check.command, check]) ?? []);
 
   return (
-    <SectionPair
-      left={
     <Section
-      flush
-      tight
       title="本轮"
       icon={<History size={12} />}
       meta={
@@ -413,9 +380,6 @@ function TurnSection({
         </div>
       )}
     </Section>
-      }
-      right={tools}
-    />
   );
 }
 
@@ -437,7 +401,6 @@ export function SessionObservatory({
   onExportHtml,
   onClone,
   onOpenSubagents,
-  onJumpToMessage,
   onOpenSettings,
   turn,
   /** 观测栏是否展开。收起走宽度过渡（与另外两个侧栏同一节奏），不卸载组件 */
@@ -474,98 +437,11 @@ export function SessionObservatory({
   onClone?: () => void;
   /** 跳转到「子代理」页 */
   onOpenSubagents?: () => void;
-  /** 跳转到聊天区某条消息（失败清单用） */
-  onJumpToMessage?: (index: number) => void;
   /** 跳转到设置页（调整压缩阈值用） */
   onOpenSettings?: () => void;
   /** 本轮证据（改动 / 执行 / 验证 + 回滚）。数据源与输入框上方那行是同一个 hook */
   turn?: TurnCheckpointsState | null;
 }) {
-  /** 当前轮（最后一个 user 消息之后）的活动 —— 观测栏默认聚焦「刚才这一步做了什么」 */
-  /**
-   * 工具调用聚合 + 失败清单（会话级）。
-   *
-   * 取代原来的「本轮活动」：那一块列的是**逐条命令日志**，而同样内容在聊天区本来
-   * 就逐条可见 —— 观测栏再抄一份只是复读。真正只有聚合才能回答的是两件事：
-   *   1. 这场会话主要在干什么（bash 多？edit 多？还是在读代码）
-   *   2. 哪些调用失败了（需要人处理的东西）
-   */
-  const toolStats = useMemo(() => {
-    const counts = new Map<string, { count: number; failed: number }>();
-    const failures: { index: number; tool: string; detail: string }[] = [];
-    let thinking = 0;
-
-    const bump = (name: string, failed: boolean) => {
-      const prev = counts.get(name) ?? { count: 0, failed: 0 };
-      counts.set(name, { count: prev.count + 1, failed: prev.failed + (failed ? 1 : 0) });
-    };
-
-    messages.forEach((m, i) => {
-      if (m.role === "assistant") {
-        for (const b of m.content) {
-          if (b.type === "thinking") thinking += 1;
-          else if (b.type === "toolCall") {
-            const result = b.toolCallId ? results.get(b.toolCallId) : undefined;
-            bump(b.toolName, Boolean(result?.isError));
-            if (result?.isError) {
-              failures.push({ index: i, tool: b.toolName, detail: toolErrorDetail(result) });
-            }
-          }
-        }
-      } else if (m.role === "bashExecution") {
-        const failed = (m.exitCode ?? 0) !== 0;
-        bump("bash", failed);
-        if (failed) failures.push({ index: i, tool: "bash", detail: `退出码 ${m.exitCode}` });
-      }
-    });
-
-    const rows = [...counts.entries()]
-      .map(([name, v]) => ({ name, ...v }))
-      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-    const totalCalls = rows.reduce((n, r) => n + r.count, 0);
-    const totalFailed = rows.reduce((n, r) => n + r.failed, 0);
-    return { rows, failures, totalCalls, totalFailed, thinking };
-  }, [messages, results]);
-
-  /** 工具聚合面板（并排进「本轮」右栏；没有 turn 数据的会话由兜底分支原样渲染） */
-  const toolsJx =
-    toolStats.totalCalls > 0 ? (
-      <div className="flex flex-col" data-testid="rail-tools">
-        {toolStats.rows.slice(0, MAX_VISIBLE_TOOLS).map((row) => {
-          /* 失败详情直接缩进挂在对应工具行下面，而不是另开一个「失败调用」区块 ——
-             两者本来就描述同一件事，分成两块会多占一行标题、还要来回对照。 */
-          const firstFailure = toolStats.failures.find((f) => f.tool === row.name);
-          return (
-            <div key={row.name}>
-              <div className="flex items-center gap-2 py-0.5" data-testid="rail-tool">
-                <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg">{row.name}</span>
-                {row.failed > 0 && <span className="shrink-0 text-[10px] text-danger">{row.failed} 失败</span>}
-                <span className="shrink-0 text-[11px] tabular-nums text-muted">{row.count}</span>
-              </div>
-              {firstFailure && onJumpToMessage && (
-                <button
-                  onClick={() => onJumpToMessage(firstFailure.index)}
-                  title={`跳转到失败的那条消息：${firstFailure.detail}`}
-                  data-testid="rail-failure"
-                  className="mb-0.5 flex w-full cursor-pointer items-center gap-1.5 rounded-md bg-danger/5 px-1.5 py-0.5 text-left t-fast hover:bg-danger/10"
-                >
-                  <CornerDownRight size={10} className="shrink-0 text-danger/70" />
-                  <span className="min-w-0 flex-1 truncate text-[10px] text-danger">{firstFailure.detail}</span>
-                </button>
-              )}
-            </div>
-          );
-        })}
-        {toolStats.rows.length > MAX_VISIBLE_TOOLS && (
-          <div className="pt-0.5 text-[11px] text-dim">
-            另有 {toolStats.rows.length - MAX_VISIBLE_TOOLS} 种工具
-          </div>
-        )}
-      </div>
-    ) : (
-      <Empty>本会话还没有调用过工具。</Empty>
-    );
-
   /** 当前任务清单（与输入框上方面板同一推导；成功的 todo_write 才更新） */
   const todos = useMemo(() => latestTodoState(messages, results), [messages, results]);
   const todoStats = todos && todos.items.length > 0 ? todoProgress(todos.items) : null;
@@ -639,69 +515,8 @@ export function SessionObservatory({
           </Section>
         )}
 
-        {/* ---------- 本轮证据 + 工具调用（并排一行，竖线分隔；反馈：两行白占一屏）---------- */}
-        {turn && <TurnSection turn={turn} cwd={cwd} onOpenFile={onOpenFile} tools={toolsJx} />}
-
-        {/* 工具聚合挂到「本轮」右栏；没有 turn 数据的会话由这里兜底原样渲染 */}
-        {!turn && (
-        <Section
-          title="工具调用"
-          icon={<Wrench size={12} />}
-          meta={
-            toolStats.totalCalls > 0 ? (
-              <span>
-                {toolStats.totalCalls} 次
-                {toolStats.totalFailed > 0 && (
-                  <span className="text-danger"> · {toolStats.totalFailed} 失败</span>
-                )}
-              </span>
-            ) : undefined
-          }
-        >
-          {toolStats.totalCalls === 0 ? (
-            <Empty>本会话还没有调用过工具。</Empty>
-          ) : (
-            <>
-              <div className="flex flex-col" data-testid="rail-tools">
-                {toolStats.rows.slice(0, MAX_VISIBLE_TOOLS).map((row) => {
-                  /* 失败详情直接缩进挂在对应工具行下面，而不是另开一个「失败调用」区块 ——
-                     两者本来就描述同一件事，分成两块会多占一行标题、还要来回对照。 */
-                  const firstFailure = toolStats.failures.find((f) => f.tool === row.name);
-                  return (
-                    <div key={row.name}>
-                      <div className="flex items-center gap-2 py-0.5" data-testid="rail-tool">
-                        <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg">{row.name}</span>
-                        {row.failed > 0 && (
-                          <span className="shrink-0 text-[10px] text-danger">{row.failed} 失败</span>
-                        )}
-                        <span className="shrink-0 text-[11px] tabular-nums text-muted">{row.count}</span>
-                      </div>
-                      {firstFailure && onJumpToMessage && (
-                        <button
-                          onClick={() => onJumpToMessage(firstFailure.index)}
-                          title={`跳转到失败的那条消息：${firstFailure.detail}`}
-                          data-testid="rail-failure"
-                          className="mb-0.5 flex w-full cursor-pointer items-center gap-1.5 rounded-md bg-danger/5 px-1.5 py-0.5 text-left t-fast hover:bg-danger/10"
-                        >
-                          <CornerDownRight size={10} className="shrink-0 text-danger/70" />
-                          <span className="min-w-0 flex-1 truncate text-[10px] text-danger">
-                            {firstFailure.detail}
-                          </span>
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-                {toolStats.rows.length > MAX_VISIBLE_TOOLS && (
-                  <div className="pt-0.5 text-[11px] text-dim">
-                    另有 {toolStats.rows.length - MAX_VISIBLE_TOOLS} 种工具
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </Section>
-        )}
+        {/* ---------- 本轮证据（通栏）---------- */}
+        {turn && <TurnSection turn={turn} cwd={cwd} onOpenFile={onOpenFile} />}
 
         {/* 本会话文件区已移除：
             ① 聊天区工具栏的「📄 N」按钮本来就能列出同一份文件（右侧预览面板可比

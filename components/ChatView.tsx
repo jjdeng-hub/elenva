@@ -921,7 +921,6 @@ export function ChatView({
               onExportHtml={sessionActions.exportHtml}
               onClone={() => void sessionActions.clone()}
               onOpenSubagents={onOpenSubagents}
-              onJumpToMessage={handleJumpToMessage}
               onOpenSettings={onOpenSettings}
               turn={turn}
             />
