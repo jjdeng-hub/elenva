@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelLeftClose, PanelLeftOpen, PanelRight, FileCode2, GitBranch, ListTree, Menu, Search, X } from "lucide-react";
+import { Activity, PanelLeftClose, PanelLeftOpen, FileCode2, GitBranch, ListTree, Menu, Search, X } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentStatusBar } from "@/components/AgentStatusBar";
@@ -35,6 +35,9 @@ const SIDEBAR_COLLAPSED_KEY = "elenva-chat-sidebar-collapsed";
 const OBSERVATORY_KEY = "elenva-chat-observatory";
 /** 观测栏需要的最小窗宽（与 Tailwind xl 断点对齐） */
 const OBSERVATORY_MIN_WIDTH = 1280;
+
+/** 顶栏右栏 tab 组内单个 tab 的通用样式：统一尺寸（约 28×28）+ 动效 */
+const RAIL_TAB_CLASS = "flex h-7 min-w-7 cursor-pointer items-center justify-center rounded-md t-fast";
 
 /** 右侧槽位同时只承载一个面板：会话树 / 文件预览 / 观测栏 */
 type RightPanel = "tree" | "files" | "observatory" | null;
@@ -387,6 +390,9 @@ export function ChatView({
     }
     return out.reverse(); // 最新写入在前
   }, [messages, toolResults, cwd]);
+
+  /* 右栏 tab 组的可用项数：窄屏无观测、无写入、无分支时整组隐藏 */
+  const railTabCount = (railAllowed ? 1 : 0) + (writtenFiles.length > 0 ? 1 : 0) + (hasTree ? 1 : 0);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const openFilePreview = useCallback(
     (path: string) => {
@@ -710,22 +716,6 @@ export function ChatView({
                 <Search size={14} />
               </button>
             )}
-            {/* 会话文件预览入口 */}
-            {writtenFiles.length > 0 && (
-              <button
-                onClick={() => togglePanel("files")}
-                className={cn(
-                  "flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-lg border px-2 text-[12px] t-fast",
-                  rightPanel === "files"
-                    ? "border-accent/40 bg-accent-soft text-accent"
-                    : "border-line bg-panel-2 text-muted hover:text-fg",
-                )}
-                title="本会话 Agent 写入的文件（右侧预览）"
-              >
-                <FileCode2 size={12} />
-                <span className="tabular-nums">{writtenFiles.length}</span>
-              </button>
-            )}
             {/* git 分支 chip */}
             {gitInfo?.isRepo && cwd && (
               <button
@@ -742,36 +732,65 @@ export function ChatView({
                 )}
               </button>
             )}
-            {hasTree && (
-              <button
-                data-testid="tree-button"
-                /* 三个按钮互斥由单一状态 rightPanel 保证，不再各自清场 */
-                onClick={() => togglePanel("tree")}
-                className={cn(
-                  "flex size-8 cursor-pointer items-center justify-center rounded-lg t-fast",
-                  rightPanel === "tree" ? "bg-active text-accent" : "text-dim hover:bg-hover hover:text-fg",
-                )}
-                title="会话树：浏览分支、跳转到任意历史点继续"
-              >
-                <ListTree size={14} />
-              </button>
-            )}
             {/* 状态胶囊（运行中/空闲）已移除（2026-09-21）：运行态在输入框（停止按钮）、
                 输入框上方状态条、页脚、会话列表圆点四处都有信号；常驻的空闲胶囊只是噪音。 */}
-            {/* 观测栏开关：宽屏才有意义，窄屏隐藏以免挤掉聊天区 */}
-            <button
-              onClick={() => togglePanel("observatory")}
-              title={railOpen ? "收起观测栏" : "展开观测栏（本会话实时数据）"}
-              aria-label={railOpen ? "收起观测栏" : "展开观测栏"}
-              aria-pressed={railOpen}
-              data-testid="observatory-toggle"
-              className={cn(
-                "hidden size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg t-fast xl:flex",
-                railOpen ? "bg-active text-accent" : "text-dim hover:bg-hover hover:text-fg",
-              )}
-            >
-              <PanelRight size={14} />
-            </button>
+            {/* 右栏控制（观测 / 文件 / 树 三选一）：单一控件（一个圆角边框 + 内衬底色），
+                组内互斥直切；点当前激活项收起右栏。互斥由 rightPanel 单一状态保证。
+                出现条件：观测仅 ≥1280px、文件仅 writtenFiles>0、树仅 hasTree；可用项为 0 时整组隐藏。 */}
+            {railTabCount > 0 && (
+              <div
+                data-testid="rail-tabs"
+                className="flex h-8 shrink-0 items-center rounded-lg border border-line bg-panel-2 p-0.5"
+              >
+                {railAllowed && (
+                  <button
+                    data-testid="rail-tab-observatory"
+                    onClick={() => togglePanel("observatory")}
+                    title="观测：本会话实时数据（再点收起）"
+                    aria-label="观测：本会话实时数据（再点收起）"
+                    aria-pressed={railOpen}
+                    className={cn(
+                      RAIL_TAB_CLASS,
+                      railOpen ? "bg-active text-accent" : "text-dim hover:bg-hover hover:text-fg",
+                    )}
+                  >
+                    <Activity size={14} />
+                  </button>
+                )}
+                {writtenFiles.length > 0 && (
+                  <button
+                    data-testid="rail-tab-files"
+                    onClick={() => togglePanel("files")}
+                    title="本会话 Agent 写入的文件（右侧预览）"
+                    aria-label="本会话 Agent 写入的文件（右侧预览）"
+                    aria-pressed={rightPanel === "files"}
+                    className={cn(
+                      RAIL_TAB_CLASS,
+                      "gap-0.5 px-1",
+                      rightPanel === "files" ? "bg-active text-accent" : "text-dim hover:bg-hover hover:text-fg",
+                    )}
+                  >
+                    <FileCode2 size={14} />
+                    <span className="text-[10px] tabular-nums">{writtenFiles.length}</span>
+                  </button>
+                )}
+                {hasTree && (
+                  <button
+                    data-testid="rail-tab-tree"
+                    onClick={() => togglePanel("tree")}
+                    title="会话树：浏览分支、跳转到任意历史点继续"
+                    aria-label="会话树：浏览分支、跳转到任意历史点继续"
+                    aria-pressed={rightPanel === "tree"}
+                    className={cn(
+                      RAIL_TAB_CLASS,
+                      rightPanel === "tree" ? "bg-active text-accent" : "text-dim hover:bg-hover hover:text-fg",
+                    )}
+                  >
+                    <ListTree size={14} />
+                  </button>
+                )}
+              </div>
+            )}
             <ThemeToggle />
           </div>
         </div>
