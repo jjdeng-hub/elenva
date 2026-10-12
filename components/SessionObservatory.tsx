@@ -144,25 +144,6 @@ function CollapsibleSection({
   );
 }
 
-/**
- * 双列区块对。
- *
- * 为什么需要：观测栏里大部分区块内容很短（累计几行数字、上下文一条进度条），
- * 一条占一行的排版会把面板拉得很长，得频繁滚动——“两个短区块并排”比“拉长”好读。
- * 带长命令、长文案、多行清单的（任务、本轮、计划模式、会话产物）保持通栏 ——
- * 分半宽会把命令路径全截成 `cd /home/demo-…`，反而读不了。
- *
- * 注：「本轮 + 工具调用」的并排已随工具聚合下架撤掉；当前分支暂无调用点，组件保留备用。
- */
-function SectionPair({ left, right }: { left: React.ReactNode; right: React.ReactNode }) {
-  return (
-    <div className="grid grid-cols-2 border-b border-line-soft">
-      <div className="min-w-0 border-r border-line-soft">{left}</div>
-      <div className="min-w-0">{right}</div>
-    </div>
-  );
-}
-
 function Stat({ label, value, tone }: { label: string; value: string; tone?: "accent" | "muted" }) {
   return (
     <div className="flex items-baseline justify-between gap-2 py-0.5">

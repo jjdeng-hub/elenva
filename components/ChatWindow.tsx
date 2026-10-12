@@ -6,6 +6,7 @@ import type { AgentPhase } from "@/hooks/useAgentSession";
 import { cn } from "@/components/lib/utils";
 import { AssistantMessageView, MessageView, useMemoResults, StreamingIndicator } from "@/components/MessageView";
 import { ChatSkeleton, EmptyState } from "@/components/ui/bits";
+import { ConvMinimap } from "@/components/ConvMinimap";
 import { formatClock, formatDuration } from "@/lib/format";
 import { centerElementInContainer } from "@/lib/scroll";
 import { turnWallClock } from "@/lib/tool-timing";
@@ -517,6 +518,11 @@ export function ChatWindow({
             <div ref={bottomAnchor} />
         </div>
       </div>
+
+      {/* 对话导航细条（常驻右缘，纯浏览）：搜索态下消息不渲染锚点，细条同步隐藏 */}
+      {searchMatches === null && (
+        <ConvMinimap messages={messages} scrollContainerRef={scrollContainerRef} onJump={flashTarget} />
+      )}
 
       {/* Jump to bottom */}
       {!atBottom && (

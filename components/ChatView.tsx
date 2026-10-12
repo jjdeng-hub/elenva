@@ -18,7 +18,6 @@ import { ModelPicker } from "@/components/ModelPicker";
 import { ProjectTrustDialog } from "@/components/ProjectTrustDialog";
 import { SessionTitle } from "@/components/SessionTitle";
 import { SessionSidebar } from "@/components/SessionSidebar";
-import { TreePanel, countTreeNodes } from "@/components/TreePanel";
 import { WorkspacePicker, type WorkspaceOption } from "@/components/WorkspacePicker";
 import { useAgentSession, type AttachedImage, type ChatInputHandle } from "@/hooks/useAgentSession";
 import { useSessionActions } from "@/hooks/useSessionActions";
@@ -29,7 +28,6 @@ import { latestTodoState } from "@/lib/todo-view";
 import { resolveLocalFilePath } from "@/lib/file-links";
 import type { SessionInfo, ToolResultMessage } from "@/lib/types";
 import { basename, formatCost, formatTokens } from "@/lib/format";
-import { centerElementInContainer } from "@/lib/scroll";
 import { toast, dialogPrompt } from "@/components/ui/dialog";
 
 const SIDEBAR_COLLAPSED_KEY = "elenva-chat-sidebar-collapsed";
@@ -37,8 +35,8 @@ const OBSERVATORY_KEY = "elenva-chat-observatory";
 /** 观测栏需要的最小窗宽（与 Tailwind xl 断点对齐） */
 const OBSERVATORY_MIN_WIDTH = 1280;
 
-/** 右侧槽位同时只承载一个面板：会话树 / 文件预览 / 观测栏 */
-type RightPanel = "tree" | "files" | "observatory" | null;
+/** 右侧槽位同时只承载一个面板：文件预览 / 观测栏 */
+type RightPanel = "files" | "observatory" | null;
 
 /** Windows 路径比较用：去尾分隔符 + 小写 */
 function normPath(p: string): string {
@@ -121,7 +119,7 @@ export function ChatView({
     contextUsage, displayModel, modelNames, modelList, modelSwitching,
     thinkingLevel, modelThinkingLevels,
     entryIds, forkingEntryId, isCompacting, slashCommands,
-    queuedMessages, data, activeLeafId,
+    queuedMessages,
     extensionWidgets, extensionStatuses,
     extensionDialog, respondToExtensionUi,
     toolPreset, steeringMode, followUpMode,
@@ -129,7 +127,7 @@ export function ChatView({
     handleModelChange, handleThinkingLevelChange, handleToolPresetChange,
     loadModels,
     handleFork, handleCompact, handleBuiltinSlashCommand,
-    handleSteer, handleFollowUp, handleRecallQueue, handleNavigate,
+    handleSteer, handleFollowUp, handleRecallQueue,
     sessionStats,
     retryInfo, compactResult, compactError, handleAbortCompaction,
     modelError, modelScopeWarnings, notices,
@@ -259,22 +257,9 @@ export function ChatView({
   }, [loadEarlier]);
 
   /**
-   * 跳转到聊天区某条消息（观测栏的失败清单用）。
-   * 实现放在 ChatView 而不是 ChatWindow：滚动容器归 hook 所有（scrollContainerRef），
-   * ChatView 同时持有它与观测栏，是最短的那条连线。
+   * 跳转：观测栏的失败清单不再使用（本轮清理，无调用者）。
+   * 消息跳转现已归 ChatWindow 内部（搜索跳转 / 导航细条共用同一套 flashTarget）。
    */
-  const handleJumpToMessage = useCallback(
-    (index: number) => {
-      const sc = scrollContainerRef.current;
-      const el = sc?.querySelector<HTMLElement>(`[data-idx="${index}"]`);
-      if (!sc || !el) return;
-      centerElementInContainer(sc, el);
-      el.classList.add("ring-1", "ring-accent", "rounded-lg");
-      setTimeout(() => el.classList.remove("ring-1", "ring-accent", "rounded-lg"), 1600);
-    },
-    [scrollContainerRef],
-  );
-
   const isNew = session === null && newSessionCwd !== null;
   const sessionTitle = isNew ? "新会话" : session?.name || session?.firstMessage || "会话";
   const cwd = isNew ? newSessionCwd : session?.cwd || "";
@@ -375,9 +360,6 @@ export function ChatView({
     [handleBuiltinSlashCommand, handleSend],
   );
 
-  const sessionTree = data?.tree ?? null;
-  const hasTree = !isNew && !!sessionTree && sessionTree.length > 0;
-
   /* ---------- 会话文件预览：write/edit 工具成功写入的文件 ---------- */
   const toolResults = useMemo(() => {
     const map = new Map<string, ToolResultMessage>();
@@ -401,8 +383,8 @@ export function ChatView({
     return out.reverse(); // 最新写入在前
   }, [messages, toolResults, cwd]);
 
-  /* 右栏 tab 组的可用项数：窄屏无观测、无写入、无分支时整组隐藏 */
-  const railTabCount = (railAllowed ? 1 : 0) + (writtenFiles.length > 0 ? 1 : 0) + (hasTree ? 1 : 0);
+  /* 右栏 tab 组的可用项数：窄屏无观测、无写入时整组隐藏 */
+  const railTabCount = (railAllowed ? 1 : 0) + (writtenFiles.length > 0 ? 1 : 0);
 
   /**
    * 实际展示的面板：rightPanel 是用户意图，这里再按可用条件兜底 ——
@@ -413,13 +395,11 @@ export function ChatView({
   const shownPanel: RightPanel =
     rightPanel === null
       ? null
-      : rightPanel === "tree" && hasTree
-        ? "tree"
-        : rightPanel === "files" && filesAvailable
-          ? "files"
-          : railAllowed
-            ? "observatory"
-            : null;
+      : rightPanel === "files" && filesAvailable
+        ? "files"
+        : railAllowed
+          ? "observatory"
+          : null;
   /** 观测栏是否展开（宽度过渡用；只有观测栏常驻挂载） */
   const railOpen = shownPanel === "observatory";
   /** 右栏整体是否可见（顶栏开关的图标与 tooltip 用） */
@@ -432,19 +412,12 @@ export function ChatView({
       if (shownPanel === "observatory") localStorage.setItem(OBSERVATORY_KEY, "0");
       return;
     }
-    const available = (p: Exclude<RightPanel, null>) =>
-      p === "observatory" ? railAllowed : p === "files" ? filesAvailable : hasTree;
     const preferred = lastRailPanelRef.current;
-    const next = available(preferred)
-      ? preferred
-      : available("observatory")
-        ? "observatory"
-        : available("files")
-          ? "files"
-          : "tree";
+    const next: Exclude<RightPanel, null> =
+      preferred === "files" && filesAvailable ? "files" : railAllowed ? "observatory" : "files";
     setRightPanel(next);
     if (next === "observatory") localStorage.setItem(OBSERVATORY_KEY, "1");
-  }, [railVisible, shownPanel, railAllowed, filesAvailable, hasTree]);
+  }, [railVisible, shownPanel, railAllowed, filesAvailable]);
   const [previewPath, setPreviewPath] = useState<string | null>(null);
   const openFilePreview = useCallback(
     (path: string) => {
@@ -686,13 +659,12 @@ export function ChatView({
     />
   );
 
-  /* 右栏三个面板共用的头部标签栏（观测 / 文件 / 树 + 收起）：一处定义，各面板通过 header 插槽渲染 */
+  /* 右栏两个面板共用的头部标签栏（观测 / 文件 + 收起）：一处定义，各面板通过 header 插槽渲染 */
   const railHeader = (
     <RailTabs
       active={shownPanel}
       railAllowed={railAllowed}
       fileCount={writtenFiles.length}
-      treeNodes={sessionTree ? countTreeNodes(sessionTree) : undefined}
       onSelect={selectPanel}
       onClose={closeRail}
     />
@@ -867,21 +839,9 @@ export function ChatView({
         {!isEmpty && statusBar}
         {!isEmpty && chatInputEl}
           </div>
-          {/* 右侧只有一个槽位：会话树 / 文件预览 / 观测栏三选一。rightPanel 是用户意图，
+          {/* 右侧只有一个槽位：文件预览 / 观测栏二选一。rightPanel 是用户意图，
               shownPanel 已按可用条件兜底（不可用则回退观测 / 收起）。 */}
-          {shownPanel === "tree" && sessionTree ? (
-            <TreePanel
-              docked
-              tree={sessionTree}
-              activeLeafId={activeLeafId}
-              onNavigate={(id) => void handleNavigate(id)}
-              onClose={closeRail}
-              header={railHeader}
-              width={railPanelWidth}
-              grow={growRailPanel}
-              reset={resetRailPanel}
-            />
-          ) : shownPanel === "files" && writtenFiles.length > 0 ? (
+          {shownPanel === "files" && writtenFiles.length > 0 ? (
             <FilePreviewPanel
               files={writtenFiles}
               selected={previewPath}

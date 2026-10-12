@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { cn } from "@/components/lib/utils";
 
 /** 右侧槽位可承载的面板（与 ChatView 的 RightPanel 同集合，去掉 null） */
-export type RailPanel = "tree" | "files" | "observatory";
+export type RailPanel = "files" | "observatory";
 
 /** 单个文字标签：占满头部高度，底部 2px 下划线（透明时不显示） */
 const TAB_CLASS =
@@ -13,20 +13,19 @@ const ACTIVE_CLASS = "border-accent font-medium text-accent";
 const IDLE_CLASS = "text-dim hover:text-fg";
 
 /**
- * 右栏面板头部的标签栏（观测 / 文件 / 树 + 收起）。
+ * 右栏面板头部的标签栏（观测 / 文件 + 收起）。
  *
- * 三个右栏面板（会话树 / 文件预览 / 观测栏）共用同一个头部：不再各写标题行，
+ * 两个右栏面板（文件预览 / 观测栏）共用同一个头部：不再各写标题行，
  * 而是把面板切换收进这一个 segmented 控件里。点 tab = 直接切页（右栏保持打开），
  * 收起统一走右侧的 ×（以及顶栏的 rail-toggle）。
  *
  * 由 ChatView 组装后通过各面板的 `header` 插槽渲染 —— 面板自己只管内容与宽度，
- * 头部归一个来源，避免三处样式漂移。
+ * 头部归一个来源，避免两处样式漂移。
  */
 export function RailTabs({
   active,
   railAllowed,
   fileCount,
-  treeNodes,
   onSelect,
   onClose,
 }: {
@@ -36,8 +35,6 @@ export function RailTabs({
   railAllowed: boolean;
   /** 文件 tab 计数；<= 0 时不出现 */
   fileCount: number;
-  /** 树 tab 节点数；undefined / <= 0 时不出现 */
-  treeNodes?: number;
   /** 切换面板（右栏保持打开） */
   onSelect: (panel: RailPanel) => void;
   /** 收起整个右栏 */
@@ -69,19 +66,6 @@ export function RailTabs({
           >
             文件
             <span className="text-[10px] tabular-nums opacity-65">{fileCount}</span>
-          </button>
-        )}
-        {treeNodes !== undefined && treeNodes > 0 && (
-          <button
-            data-testid="rail-tab-tree"
-            onClick={() => onSelect("tree")}
-            title="会话树：浏览分支、跳转到任意历史点继续"
-            aria-label="会话树：浏览分支、跳转到任意历史点继续"
-            aria-pressed={active === "tree"}
-            className={cn(TAB_CLASS, active === "tree" ? ACTIVE_CLASS : IDLE_CLASS)}
-          >
-            树
-            <span className="text-[10px] tabular-nums opacity-65">{treeNodes}</span>
           </button>
         )}
       </div>
