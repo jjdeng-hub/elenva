@@ -170,29 +170,42 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   }, [draftKeyProp]);
 
   /* 草稿持久化：把文本 + 附件一起写盘。
-     附件超 3MB 或触发 localStorage 配额时不静默、不炸 —— 仅内存保留 + 一次性提示。 */
+     附件超 3MB 或触发 localStorage 配额时不静默、不炸，且**文本照存**——
+     不能因为图大/配额不足就把文字草稿一起丢；仅图片降级为内存保留 + 一次性提示。 */
+  const warnDraftOnce = useCallback((message: string) => {
+    if (draftQuotaWarnedRef.current) return;
+    draftQuotaWarnedRef.current = true;
+    onNotice?.(message);
+  }, [onNotice]);
+
   const writeDraftFor = useCallback((key: string, nextText: string, nextImages: StoredDraftImage[]) => {
+    const write = (text: string, images: StoredDraftImage[]) => {
+      if (!text && images.length === 0) localStorage.removeItem(`elenva-draft:${key}`);
+      else localStorage.setItem(`elenva-draft:${key}`, JSON.stringify({ value: text, images }));
+    };
     const total = nextImages.reduce((n, img) => n + img.data.length, 0);
     if (total > DRAFT_MAX_IMAGE_BYTES) {
-      if (!draftQuotaWarnedRef.current) {
-        draftQuotaWarnedRef.current = true;
-        onNotice?.("图片附件较大，仅在本会话内保留，未随草稿持久化（切换会话后可能丢失）");
+      // 附件过大：图片不持久化，但文本照存
+      warnDraftOnce("图片附件较大，未随草稿持久化（仅在本会话内保留，切换会话后可能丢失）");
+      try {
+        write(nextText, []);
+      } catch {
+        warnDraftOnce("草稿保存失败（存储空间不足）");
       }
       return;
     }
     try {
-      if (!nextText && nextImages.length === 0) {
-        localStorage.removeItem(`elenva-draft:${key}`);
-      } else {
-        localStorage.setItem(`elenva-draft:${key}`, JSON.stringify({ value: nextText, images: nextImages }));
-      }
+      write(nextText, nextImages);
     } catch {
-      if (!draftQuotaWarnedRef.current) {
-        draftQuotaWarnedRef.current = true;
-        onNotice?.("草稿保存失败（存储空间不足），图片附件仅在本会话内保留");
+      // 配额异常：先退到只写文本；仍写不进去才彻底放弃 + 提示
+      try {
+        write(nextText, []);
+        if (nextImages.length > 0) warnDraftOnce("草稿保存空间不足，图片附件未随草稿持久化");
+      } catch {
+        warnDraftOnce("草稿保存失败（存储空间不足）");
       }
     }
-  }, [onNotice]);
+  }, [warnDraftOnce]);
 
   const persistDraft = useCallback((nextText: string, nextImages: AttachedImage[]) => {
     const key = draftKeyRef.current;
