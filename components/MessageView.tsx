@@ -467,12 +467,14 @@ function BashExecutionCard({ message, sessionId }: { message: BashExecutionMessa
                   {loadingFull ? <Loader2 size={10} className="anim-spin" /> : <FileCode2 size={10} />} 查看完整输出
                 </button>
               )}
-              <a
-                href={`/api/agent/${encodeURIComponent(sessionId ?? "")}/bash-output?download=1&path=${encodeURIComponent(message.fullOutputPath)}`}
-                className="btn btn-sm btn-ghost text-warn"
-              >
-                <Download size={10} /> 下载
-              </a>
+              {sessionId && (
+                <a
+                  href={`/api/agent/${encodeURIComponent(sessionId)}/bash-output?download=1&path=${encodeURIComponent(message.fullOutputPath)}`}
+                  className="btn btn-sm btn-ghost text-warn"
+                >
+                  <Download size={10} /> 下载
+                </a>
+              )}
             </div>
           )}
           {fullError && <div className="border-t border-line-soft px-3 py-1.5 text-[11px] text-danger">{fullError}</div>}

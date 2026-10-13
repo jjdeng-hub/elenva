@@ -102,7 +102,17 @@ export function FilePreviewPanel({
       // 新会话的 cwd 可能尚未进入服务端 5s 授权根目录缓存，403 时自动重试一次
       for (let attempt = 0; attempt < 2; attempt++) {
         const res = await fetch(`/api/files/${encodePath(path)}?type=read`, { cache: "no-store" });
-        data = (await res.json()) as ReadChunk & { error?: string };
+        try {
+          data = (await res.json()) as ReadChunk & { error?: string };
+        } catch (error) {
+          // 服务端返回了非 JSON（500 直出文本层 / 反代 502 HTML）：报服务错误并带上状态码，
+          // 不要伪装成「网络错误」把排障方向带偏。
+          if (error instanceof SyntaxError) {
+            setContent({ content: `读取失败（服务错误 HTTP ${res.status}）` });
+            return;
+          }
+          throw error;
+        }
         if (!(res.status === 403 && attempt === 0)) break;
         await new Promise((r) => setTimeout(r, 1200));
       }

@@ -19,8 +19,9 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
+import { toast } from "@/components/ui/dialog";
 import { Resizer } from "@/components/ui/Resizer";
 import { formatCost, formatDuration, formatTokens } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
@@ -727,6 +728,8 @@ function SubagentSection({
 }) {
   const [runs, setRuns] = useState<SubagentRun[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** 由轮询 effect 注入的立即刷新函数：中止成功后用它拉真实状态，而不是乐观置 failed */
+  const refreshRef = useRef<() => void>(() => {});
 
   const active = runs.filter((r) => r.status === "running" || r.status === "starting");
 
@@ -743,6 +746,7 @@ function SubagentSection({
         })
         .catch(() => { /* 网络抖动保留上次快照 */ });
     };
+    refreshRef.current = load;
     load();
     const timer = setInterval(load, 5000);
     return () => {
@@ -754,18 +758,25 @@ function SubagentSection({
   const abort = async (sessionId: string) => {
     setBusyId(sessionId);
     try {
-      await fetch(`/api/subagents/${encodeURIComponent(sessionId)}`, {
+      const res = await fetch(`/api/subagents/${encodeURIComponent(sessionId)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "abort" }),
       });
-      setRuns((prev) => prev.map((r) => (r.sessionId === sessionId ? { ...r, status: "failed" } : r)));
+      if (!res.ok) {
+        toast(`中止子代理失败（HTTP ${res.status}）`);
+        return;
+      }
+      // 不乐观置 failed：服务端可能还在收尾，立即刷新以真实状态为准
+      refreshRef.current();
+    } catch {
+      toast("中止子代理失败（网络错误）");
     } finally {
       setBusyId(null);
     }
   };
 
-  /* 没有子代理运行时**不渲染**：零占位，避免给大多数不瘸子代理的会话添噪 */
+  /* 没有子代理运行时**不渲染**：零占位，避免给大多数不用子代理的会话添噪 */
   if (runs.length === 0) return null;
 
   return (

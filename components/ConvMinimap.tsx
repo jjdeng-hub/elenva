@@ -10,6 +10,11 @@ const MIN_ENTRIES = 3;
 /** 悬停/预览文本的最大长度 */
 const PREVIEW_CHARS = 160;
 
+/** 折叠态细轨的几何（与下方 className 保持一致：h-[3px] / gap-1 / py-3） */
+const RAIL_BAR_H = 3;
+const RAIL_GAP = 4;
+const RAIL_PAD_Y = 12;
+
 export type UserMessageEntry = { index: number; text: string };
 
 /**
@@ -39,6 +44,22 @@ export function buildUserMessageEntries(messages: AgentMessage[]): UserMessageEn
 
 function preview(text: string): string {
   return text.length > PREVIEW_CHARS ? `${text.slice(0, PREVIEW_CHARS)}…` : text;
+}
+
+/**
+ * 超容量时均匀采样：保首尾 + 等距。容量足够时原样返回（短会话逐条渲染不变）。
+ * 容量为 1（极矮窗口的退化情形）时只能保首：此时「不超出可容纳数、不出裁切条」优先于保尾。
+ */
+export function sampleEntries(entries: UserMessageEntry[], capacity: number): UserMessageEntry[] {
+  if (entries.length === 0 || capacity >= entries.length) return entries;
+  if (capacity <= 1) return [entries[0]];
+  const out: UserMessageEntry[] = [];
+  const last = entries.length - 1;
+  for (let i = 0; i < capacity; i++) {
+    const e = entries[Math.round((i * last) / (capacity - 1))];
+    if (out.length === 0 || out[out.length - 1].index !== e.index) out.push(e);
+  }
+  return out;
 }
 
 /**
@@ -109,6 +130,48 @@ export function ConvMinimap({
     if (panel && row) centerElementInContainer(panel, row);
   }, [open, activeIdx]);
 
+  /* ---------- 折叠态细轨：按可容纳数采样 ----------
+     细轨高度有限，条目超出可容纳数时若逐条渲染，后面的条会被裁掉且永远点不到。
+     这里测量可用高度算出容量，超出则均匀采样（保首尾 + 等距）；
+     当前标记落到距当前位置最近的采样条；悬停展开面板仍全量。 */
+  const railWrapRef = useRef<HTMLDivElement | null>(null);
+  const [railCapacity, setRailCapacity] = useState(0);
+  useEffect(() => {
+    const el = railWrapRef.current;
+    if (!el) return;
+    const measure = () => {
+      const h = el.clientHeight - RAIL_PAD_Y * 2;
+      setRailCapacity(Math.max(1, Math.floor((h + RAIL_GAP) / (RAIL_BAR_H + RAIL_GAP))));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measure);
+      return () => window.removeEventListener("resize", measure);
+    }
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [entries.length]);
+
+  const sampled = useMemo(
+    () => sampleEntries(entries, railCapacity > 0 ? railCapacity : entries.length),
+    [entries, railCapacity],
+  );
+  /** 当前标记最近的采样条下标（-1 = 无） */
+  const activeSampledIdx = useMemo(() => {
+    if (activeIdx < 0 || sampled.length === 0) return -1;
+    let best = sampled[0].index;
+    let bestDist = Math.abs(best - activeIdx);
+    for (const e of sampled) {
+      const d = Math.abs(e.index - activeIdx);
+      if (d < bestDist) {
+        bestDist = d;
+        best = e.index;
+      }
+    }
+    return best;
+  }, [sampled, activeIdx]);
+
   if (entries.length < MIN_ENTRIES) return null;
 
   const jump = (index: number) => {
@@ -121,6 +184,7 @@ export function ConvMinimap({
        透明区域（含整条全高的中间层）不挡消息文本与滚动条 */
     <div className="pointer-events-none absolute inset-y-0 right-3 z-20 flex items-center py-2">
       <div
+        ref={railWrapRef}
         className="pointer-events-none flex h-full items-center"
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => {
@@ -178,8 +242,8 @@ export function ConvMinimap({
             WebkitMaskImage: "linear-gradient(to bottom, transparent, black 10%, black 90%, transparent)",
           }}
         >
-          {entries.map((e) => {
-            const active = e.index === activeIdx;
+          {sampled.map((e) => {
+            const active = e.index === activeSampledIdx;
             const hovered = e.index === hoverIdx;
             return (
               <button
