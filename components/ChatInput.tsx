@@ -63,6 +63,55 @@ const fileToAttachedImage = (file: File): Promise<AttachedImage | null> =>
     reader.readAsDataURL(file);
   });
 
+/** 草稿中图片附件的持久化体积上限：图片 base64 总量超过它就不进 localStorage（仅内存保留） */
+const DRAFT_MAX_IMAGE_BYTES = 3 * 1024 * 1024;
+
+type StoredDraftImage = { data: string; mimeType: string };
+
+/**
+ * 读草稿：新格式是 JSON `{ value, images }`；旧格式是纯文本。
+ * 先尝试 JSON 解析，解析失败（或不是带 value 的对象）时按旧纯文本草稿处理。
+ */
+function readDraft(key: string): { text: string; images: AttachedImage[] } {
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(`elenva-draft:${key}`);
+  } catch {
+    return { text: "", images: [] };
+  }
+  if (raw === null) return { text: "", images: [] };
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      !Array.isArray(parsed) &&
+      typeof (parsed as { value?: unknown }).value === "string"
+    ) {
+      const payload = parsed as { value: string; images?: unknown };
+      const images: AttachedImage[] = Array.isArray(payload.images)
+        ? payload.images
+            .filter(
+              (img): img is StoredDraftImage =>
+                !!img &&
+                typeof img === "object" &&
+                typeof (img as { data?: unknown }).data === "string" &&
+                typeof (img as { mimeType?: unknown }).mimeType === "string",
+            )
+            .map((img) => ({
+              data: img.data,
+              mimeType: img.mimeType,
+              previewUrl: `data:${img.mimeType};base64,${img.data}`,
+            }))
+        : [];
+      return { text: payload.value, images };
+    }
+  } catch {
+    /* 旧格式纯文本，落到下面 */
+  }
+  return { text: raw, images: [] };
+}
+
 export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput(
   {
     onSend,
@@ -110,29 +159,67 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   /* 草稿 key：可被 rekeyDraft 更新（新会话创建后迁移到正式会话 id） */
   const [draftKey, setDraftKey] = useState(draftKeyProp);
   const draftKeyRef = useRef(draftKeyProp);
+  /** 最新附件与文本（供草稿持久化与卸载回收读取，避免闭包捕获旧值） */
+  const imagesRef = useRef<AttachedImage[]>([]);
+  const textRef = useRef("");
+  /** 附件超限 / 配额不足的提示只弹一次 */
+  const draftQuotaWarnedRef = useRef(false);
   useEffect(() => {
     setDraftKey(draftKeyProp);
     draftKeyRef.current = draftKeyProp;
   }, [draftKeyProp]);
 
-  // 草稿恢复：draftKey 变化（即会话切换重挂载）时读取
+  /* 草稿持久化：把文本 + 附件一起写盘。
+     附件超 3MB 或触发 localStorage 配额时不静默、不炸 —— 仅内存保留 + 一次性提示。 */
+  const writeDraftFor = useCallback((key: string, nextText: string, nextImages: StoredDraftImage[]) => {
+    const total = nextImages.reduce((n, img) => n + img.data.length, 0);
+    if (total > DRAFT_MAX_IMAGE_BYTES) {
+      if (!draftQuotaWarnedRef.current) {
+        draftQuotaWarnedRef.current = true;
+        onNotice?.("图片附件较大，仅在本会话内保留，未随草稿持久化（切换会话后可能丢失）");
+      }
+      return;
+    }
+    try {
+      if (!nextText && nextImages.length === 0) {
+        localStorage.removeItem(`elenva-draft:${key}`);
+      } else {
+        localStorage.setItem(`elenva-draft:${key}`, JSON.stringify({ value: nextText, images: nextImages }));
+      }
+    } catch {
+      if (!draftQuotaWarnedRef.current) {
+        draftQuotaWarnedRef.current = true;
+        onNotice?.("草稿保存失败（存储空间不足），图片附件仅在本会话内保留");
+      }
+    }
+  }, [onNotice]);
+
+  const persistDraft = useCallback((nextText: string, nextImages: AttachedImage[]) => {
+    const key = draftKeyRef.current;
+    if (!key) return;
+    writeDraftFor(key, nextText, nextImages.map(({ data, mimeType }) => ({ data, mimeType })));
+  }, [writeDraftFor]);
+
+  // 草稿恢复：draftKey 变化（即会话切换重挂载）时读取（兼容旧的纯文本格式）
   useEffect(() => {
     if (!draftKey) return;
     setPolishUndo(null);
-    try {
-      setText(localStorage.getItem(`elenva-draft:${draftKey}`) ?? "");
-    } catch { /* ignore */ }
+    const draft = readDraft(draftKey);
+    textRef.current = draft.text;
+    setText(draft.text);
+    setImages((prev) => {
+      prev.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+      imagesRef.current = draft.images;
+      return draft.images;
+    });
   }, [draftKey]);
 
   // 写入草稿：显式走更新函数，避免挂载时空值 effect 覆盖已存草稿
   const updateText = useCallback((v: string) => {
+    textRef.current = v;
     setText(v);
-    const key = draftKeyRef.current;
-    if (!key) return;
-    try {
-      localStorage.setItem(`elenva-draft:${key}`, v);
-    } catch { /* ignore */ }
-  }, []);
+    persistDraft(v, imagesRef.current);
+  }, [persistDraft]);
 
   /* ---------- 图片附件 ---------- */
   const addImages = useCallback(
@@ -151,27 +238,48 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         if (rejected > 0) {
           onNotice?.(`有 ${rejected} 张图片未添加（仅支持图片，且单张不超过 10MB）`);
         }
-        if (ok.length > 0) setImages((prev) => [...prev, ...ok]);
+        if (ok.length > 0) {
+          setImages((prev) => {
+            const next = [...prev, ...ok];
+            imagesRef.current = next;
+            persistDraft(textRef.current, next);
+            return next;
+          });
+        }
       });
     },
-    [images.length, onNotice],
+    [images.length, onNotice, persistDraft],
   );
 
   const removeImage = (index: number) => {
     setImages((prev) => {
       URL.revokeObjectURL(prev[index].previewUrl);
-      return prev.filter((_, i) => i !== index);
+      const next = prev.filter((_, i) => i !== index);
+      imagesRef.current = next;
+      persistDraft(textRef.current, next);
+      return next;
     });
   };
 
   const clearImages = useCallback(() => {
     setImages((prev) => {
       prev.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+      imagesRef.current = [];
+      persistDraft(textRef.current, []);
       return [];
     });
-  }, []);
+  }, [persistDraft]);
 
-  useEffect(() => () => images.forEach((img) => URL.revokeObjectURL(img.previewUrl)), []); // eslint-disable-line react-hooks/exhaustive-deps
+  /* 用 ref 跟踪最新附件与文本：卸载 cleanup 若直接闭包引用，会永远看到挂载时的空数组 */
+  useEffect(() => {
+    imagesRef.current = images;
+  }, [images]);
+  useEffect(() => {
+    textRef.current = text;
+  }, [text]);
+  useEffect(() => () => {
+    imagesRef.current.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+  }, []);
 
   /* ---------- 命令式句柄（hook 通过 chatInputRef 驱动） ---------- */
   const insertAtCaret = useCallback(
@@ -201,10 +309,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       insertIfEmpty: (content) => {
         setText((prev) => {
           if (prev.trim()) return prev;
-          try {
-            const key = draftKeyRef.current;
-            if (key) localStorage.setItem(`elenva-draft:${key}`, content);
-          } catch { /* ignore */ }
+          textRef.current = content;
+          persistDraft(content, imagesRef.current);
           return content;
         });
       },
@@ -237,10 +343,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
       prependText: (t) => {
         setText((prev) => {
           const next = prev ? `${t}\n\n${prev}` : t;
-          try {
-            const key = draftKeyRef.current;
-            if (key) localStorage.setItem(`elenva-draft:${key}`, next);
-          } catch { /* ignore */ }
+          textRef.current = next;
+          persistDraft(next, imagesRef.current);
           return next;
         });
         areaRef.current?.focus();
@@ -262,17 +366,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         if (key === draftKeyRef.current) {
           updateText(t);
           if (imgs?.length) {
-            setImages(
-              imgs.map((img) => ({
-                ...img,
-                previewUrl: `data:${img.mimeType};base64,${img.data}`,
-              })),
-            );
+            const next = imgs.map((img) => ({
+              ...img,
+              previewUrl: `data:${img.mimeType};base64,${img.data}`,
+            }));
+            imagesRef.current = next;
+            setImages(next);
+            persistDraft(t, next);
           }
-        } else {
-          try {
-            localStorage.setItem(`elenva-draft:${key}`, t);
-          } catch { /* ignore */ }
+        } else if (key) {
+          writeDraftFor(key, t, imgs ?? []);
         }
         areaRef.current?.focus();
       },
