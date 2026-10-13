@@ -74,6 +74,7 @@ export function ChatView({
   onOpenSettings,
   onExit,
   onOpenNav,
+  unreadIds,
 }: {
   session: SessionInfo | null;
   newSessionCwd: string | null;
@@ -196,8 +197,8 @@ export function ChatView({
   }, []);
 
   /* 右侧只有一个槽位，所以用**单一状态**而不是三个独立布尔：
-     三个布尔 + 渲染优先级会拼出一个看不见的旧状态 —— 树/文件开着时点观测栏没反应，
-     关掉树之后观测栏又按那个旧状态冒出来。改成单一状态后，谁显示就是谁。 */
+     多个布尔 + 渲染优先级会拼出一个看不见的旧状态 —— 文件开着时点观测栏没反应，
+     关掉文件之后观测栏又按那个旧状态冒出来。改成单一状态后，谁显示就是谁。 */
   const [rightPanel, setRightPanel] = useState<RightPanel>(null);
   useEffect(() => {
     const saved = localStorage.getItem(OBSERVATORY_KEY);
@@ -208,7 +209,7 @@ export function ChatView({
   const lastRailPanelRef = useRef<Exclude<RightPanel, null>>("observatory");
 
   /* 三个右侧面板共用同一宽度：由 ChatView 持有单一持久化状态，再把 width/grow/reset
-     传给具体面板。此前三个面板各自 usePersistedWidth（观测 420 / 树 400 / 文件 340），
+     传给具体面板。此前面板各自 usePersistedWidth（观测 420 / 文件 340），
      切换面板宽度会跳变；统一后拖拽任一面板即同时改变三者。 */
   const {
     width: railPanelWidth,
@@ -221,7 +222,7 @@ export function ChatView({
   /** 面板头标签栏点击：直接切换（右栏保持打开，只换内容页） */
   const selectPanel = useCallback((panel: Exclude<RightPanel, null>) => {
     setRightPanel(panel);
-    // 只有观测栏有持久化偏好；切到树/文件不覆写它
+    // 只有观测栏有持久化偏好；切到文件不覆写它
     if (panel === "observatory") localStorage.setItem(OBSERVATORY_KEY, "1");
   }, []);
   /** 收起整个右栏（面板头的 × 与顶栏开关共用） */
@@ -388,7 +389,7 @@ export function ChatView({
 
   /**
    * 实际展示的面板：rightPanel 是用户意图，这里再按可用条件兜底 ——
-   * 激活的面板失去条件（文件被清空 / 会话树没了）时回退观测，观测也不可用才整栏收起。
+   * 激活的面板失去条件（文件被清空）时回退观测，观测也不可用才整栏收起。
    * 这样顶栏开关、面板头标签栏的激活态与实际内容始终一致。
    */
   const filesAvailable = writtenFiles.length > 0;
@@ -675,6 +676,7 @@ export function ChatView({
       <SessionSidebar
         sessions={sessions}
         runningIds={runningIds}
+        unreadIds={unreadIds}
         selectedId={session?.id ?? null}
         onSelect={onOpenSession}
             onNewChat={onNewChat}
@@ -771,8 +773,8 @@ export function ChatView({
             {/* 状态胶囊（运行中/空闲）已移除（2026-09-21）：运行态在输入框（停止按钮）、
                 输入框上方状态条、页脚、会话列表圆点四处都有信号；常驻的空闲胶囊只是噪音。 */}
             {/* 右栏总开关（镜像左侧会话列表的收起/展开）：点击收起或展开整个右栏。
-                面板切换（观测/文件/树）已移到右栏面板头部的标签栏（RailTabs）。
-                出现条件：可用项为 0（窄屏无观测、无写入、无分支）时不显示。 */}
+                面板切换（观测/文件）已移到右栏面板头部的标签栏（RailTabs）。
+                出现条件：可用项为 0（窄屏无观测、无写入）时不显示。 */}
             {railTabCount > 0 && (
               <button
                 data-testid="rail-toggle"

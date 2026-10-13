@@ -6,6 +6,7 @@ import type { AgentPhase } from "@/hooks/useAgentSession";
 import { cn } from "@/components/lib/utils";
 import { AssistantMessageView, MessageView, useMemoResults, StreamingIndicator } from "@/components/MessageView";
 import { ChatSkeleton, EmptyState } from "@/components/ui/bits";
+import { toast } from "@/components/ui/dialog";
 import { ConvMinimap } from "@/components/ConvMinimap";
 import { formatClock, formatDuration } from "@/lib/format";
 import { centerElementInContainer } from "@/lib/scroll";
@@ -285,11 +286,41 @@ export function ChatWindow({
 
   const flashTarget = (index: number) => {
     const sc = scrollContainerRef.current;
-    const el = sc?.querySelector<HTMLElement>(`[data-idx="${index}"]`);
-    if (!sc || !el) return;
-    centerElementInContainer(sc, el);
-    el.classList.add("ring-1", "ring-accent", "rounded-lg");
-    setTimeout(() => el.classList.remove("ring-1", "ring-accent", "rounded-lg"), 1600);
+    if (!sc) return;
+    const flash = (el: HTMLElement) => {
+      centerElementInContainer(sc, el);
+      el.classList.add("ring-1", "ring-accent", "rounded-lg");
+      setTimeout(() => el.classList.remove("ring-1", "ring-accent", "rounded-lg"), 1600);
+    };
+    const el = sc.querySelector<HTMLElement>(`[data-idx="${index}"]`);
+    if (el) {
+      flash(el);
+      return;
+    }
+    /* 锚点不存在：命中的多半是折叠「过程」区里的 toolCall / toolResult，
+       默认收起态下不渲染 data-idx。先展开所属轮，等一帧渲染后再重试；
+       仍找不到就回退到该轮提问，绝不静默无反应。 */
+    const turn = turns.find((t) => index >= t.start && index < t.end);
+    if (!turn) {
+      toast("这条消息不在当前加载范围内");
+      return;
+    }
+    setTurnOverride((prev) => ({ ...prev, [turn.start]: true }));
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const retrySc = scrollContainerRef.current;
+        const retry = retrySc?.querySelector<HTMLElement>(`[data-idx="${index}"]`);
+        if (retry && retrySc) {
+          flash(retry);
+          return;
+        }
+        const anchor = turn.userIdx !== null
+          ? retrySc?.querySelector<HTMLElement>(`[data-idx="${turn.userIdx}"]`)
+          : null;
+        if (anchor && retrySc) flash(anchor);
+        else toast("这条消息在当前视图里没有可跳转的位置");
+      });
+    });
   };
 
   // Track whether the user is near the bottom

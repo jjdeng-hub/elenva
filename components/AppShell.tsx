@@ -348,8 +348,10 @@ export function AppShell() {
   /* ---------------- 键盘快捷键 ---------------- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      const inField = tag === "INPUT" || tag === "TEXTAREA";
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName;
+      // contentEditable（扩展自定义可编辑区等）也算输入区：按 ? 时应输入问号，不弹总览
+      const inField = tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable === true;
 
       // ?：唤起 / 收起快捷键总览（不带修饰键；输入框内不拦截，避免打不出问号）
       if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey && !inField) {
