@@ -7,22 +7,20 @@ import type { TurnCheckpointsState } from "@/hooks/useTurnCheckpoints";
 import { useDeclaredVerifyCommands } from "@/hooks/useDeclaredVerifyCommands";
 
 /**
- * 输入框上方的本轮状态行 —— 观测栏的**入口**，不是明细本身。
+ * 输入框上方的本轮状态行 —— 观测栏**不在场时的替身**。
  *
- * 明细（改了哪些文件、跑了哪些命令、哪条验证失败）都在右侧观测栏的「本轮」区，
- * 这里只留一行。为什么一行也不肯撤掉（三条都很硬）：
- *   · 观测栏窄屏不可用（<1024px），且**用户可能自己把它关了** —— 明细不能只有那一个入口；
- *   · 「回滚」是纠错动作，要能在看到问题的当下就按，不该先去开面板；
- *   · 一轮结束时用户正好在看输入框附近（刚发完消息），不打扰的成本最低。
+ * 明细（改了哪些文件、跑了哪些命令、哪条验证失败）的家在右侧观测栏的「本轮」区；
+ * 观测栏在时这一行不渲染（同源内容不双显）。它只在观测栏不可见时出场（关栏 / 窄屏 <1024px /
+ * 切到文件面板），承担两件事：
+ *   · **唯一入口**：窄屏时没有观测栏，关栏的场景下明细不能无处可看；
+ *   · **即时纠错**：一轮结束时用户正好在看输入框附近（刚发完消息），结论与回滚不必先开面板。
  *
- * 但文案必须短：结论用 shortHeadline（不带命令），观测栏开着时连「明细」按钮也不给 ——
- * 明细就在右边，再摆一个入口只是多占宽度。
+ * 但文案必须短：结论用 shortHeadline（不带命令）。
  */
 export function TurnFooter({
   turn,
   running,
   cwd,
-  railOpen,
   canOpenRail,
   onOpenRail,
 }: {
@@ -30,8 +28,6 @@ export function TurnFooter({
   running: boolean;
   /** 当前会话的工作目录：用来查项目声明的验证命令（可缺失，缺失时结论退回修复前） */
   cwd?: string;
-  /** 观测栏当前**开着**：明细就在右边，不必再给一个「明细」入口 */
-  railOpen?: boolean;
   /** 观测栏当前可用（窄屏时为 false，此时不显示「明细」入口） */
   canOpenRail?: boolean;
   onOpenRail?: () => void;
@@ -84,7 +80,7 @@ export function TurnFooter({
         </span>
 
         <div className="flex shrink-0 items-center gap-1">
-          {canOpenRail && !railOpen && onOpenRail && (
+          {canOpenRail && onOpenRail && (
             <button
               onClick={onOpenRail}
               className="flex h-6 cursor-pointer items-center gap-1 rounded-md border border-line bg-panel px-1.5 text-[11px] text-muted t-fast hover:text-fg"
