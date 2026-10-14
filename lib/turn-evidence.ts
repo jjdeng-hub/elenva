@@ -44,6 +44,11 @@ export function summarizeTurn(
   fileCount: number,
   createdCount: number,
   commands: readonly TurnCommand[],
+  /**
+   * 项目声明的验证命令片段（护栏 `verifyCommandsByProject`，子串匹配）。
+   * 不传 / 为空数组时行为与修复前**逐字节一致** —— 声明只是补充，不是前置条件。
+   */
+  declaredPatterns?: readonly string[],
 ): TurnEvidenceSummary {
   let failed = 0;
   const checks: TurnCheck[] = [];
@@ -52,7 +57,7 @@ export function summarizeTurn(
 
   for (const command of commands) {
     if (command.failed === true) failed += 1;
-    const classification = classifyVerificationCommand(command.command);
+    const classification = classifyVerificationCommand(command.command, declaredPatterns);
     if (!classification) continue;
     checks.push({
       command: command.command,

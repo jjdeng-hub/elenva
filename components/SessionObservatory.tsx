@@ -26,6 +26,7 @@ import { Resizer } from "@/components/ui/Resizer";
 import { formatCost, formatDuration, formatTokens } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
 import { compactionTrigger, useCompactionSettings } from "@/hooks/useCompactionSettings";
+import { useDeclaredVerifyCommands } from "@/hooks/useDeclaredVerifyCommands";
 import { summarizeTurn, toneClass } from "@/lib/turn-evidence";
 import { verificationKindLabel } from "@/lib/verification-kind";
 import type { TurnCheckpointsState } from "@/hooks/useTurnCheckpoints";
@@ -252,8 +253,10 @@ function TurnSection({
 }) {
   // 「本轮」= 合并后的用户轮（子轮次语义见 useTurnCheckpoints.mergeRound）
   const latest = turn.latestRound;
+  // 项目声明的验证命令：让项目自定义脚本（如 style-converge）也能算「整体验证」
+  const declaredPatterns = useDeclaredVerifyCommands(cwd);
   const summary = latest
-    ? summarizeTurn(latest.fileCount, latest.createdCount, latest.commands)
+    ? summarizeTurn(latest.fileCount, latest.createdCount, latest.commands, declaredPatterns)
     : null;
   /** 命令 → 它作为验证的种类，挂 chip 用 */
   const checkByCommand = new Map(summary?.checks.map((check) => [check.command, check]) ?? []);

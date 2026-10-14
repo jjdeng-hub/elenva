@@ -210,7 +210,7 @@ export function CandidatesPage({
               <select
                 value={cwd}
                 onChange={(e) => setCwd(e.target.value)}
-                className="h-7 max-w-72 cursor-pointer rounded-md border border-line bg-panel-2 px-2 text-[12px] text-fg outline-none"
+                className="h-7 max-w-72 cursor-pointer rounded-md border border-line bg-panel-2 px-2 text-[12px] text-fg outline-none t-fast focus:border-accent/60"
               >
                 {!projects.some((project) => project.path === cwd) && cwd && (
                   <option value={cwd}>{cwd}</option>

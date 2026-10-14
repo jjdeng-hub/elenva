@@ -777,7 +777,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
             <select
               value={verifyCwd}
               onChange={(e) => setVerifyCwd(e.target.value)}
-              className="mt-2 h-7 max-w-full cursor-pointer rounded-md border border-line bg-panel-2 px-2 text-[12px] text-fg outline-none"
+              className="mt-2 h-7 max-w-full cursor-pointer rounded-md border border-line bg-panel-2 px-2 text-[12px] text-fg outline-none t-fast focus:border-accent/60"
             >
               {!projects?.some((project) => project.path === verifyCwd) && verifyCwd && (
                 <option value={verifyCwd}>{verifyCwd}</option>
