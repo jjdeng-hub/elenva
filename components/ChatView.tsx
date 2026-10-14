@@ -833,6 +833,7 @@ export function ChatView({
           <TurnFooter
             turn={turn}
             running={agentRunning || bashRunning}
+            cwd={cwd}
             railOpen={railOpen}
             canOpenRail={railAllowed}
             onOpenRail={showObservatory}

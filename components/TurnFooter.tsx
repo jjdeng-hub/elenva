@@ -4,6 +4,7 @@ import { FileCode2, ListTree, RotateCcw, Terminal } from "lucide-react";
 import { cn } from "@/components/lib/utils";
 import { summarizeTurn, toneClass } from "@/lib/turn-evidence";
 import type { TurnCheckpointsState } from "@/hooks/useTurnCheckpoints";
+import { useDeclaredVerifyCommands } from "@/hooks/useDeclaredVerifyCommands";
 
 /**
  * 输入框上方的本轮状态行 —— 观测栏的**入口**，不是明细本身。
@@ -20,18 +21,23 @@ import type { TurnCheckpointsState } from "@/hooks/useTurnCheckpoints";
 export function TurnFooter({
   turn,
   running,
+  cwd,
   railOpen,
   canOpenRail,
   onOpenRail,
 }: {
   turn: TurnCheckpointsState;
   running: boolean;
+  /** 当前会话的工作目录：用来查项目声明的验证命令（可缺失，缺失时结论退回修复前） */
+  cwd?: string;
   /** 观测栏当前**开着**：明细就在右边，不必再给一个「明细」入口 */
   railOpen?: boolean;
   /** 观测栏当前可用（窄屏时为 false，此时不显示「明细」入口） */
   canOpenRail?: boolean;
   onOpenRail?: () => void;
 }) {
+  // 钩子必须在任何提前 return 之前调用（同一 cwd 只拉一次，模块级缓存）
+  const declaredPatterns = useDeclaredVerifyCommands(cwd);
   // 「本轮」= 合并后的用户轮。内核的 turn 是「一次 LLM 往返」，一轮用户消息常含多个
   // 子轮次，且终答子轮次几乎没有文件/命令 —— 只取最后一个子轮次会让这行在真实工作
   // 轮里几乎永远显示为空（详见 useTurnCheckpoints.mergeRound）。
@@ -40,7 +46,7 @@ export function TurnFooter({
   if (running || !round) return null;
   if (round.fileCount === 0 && round.commands.length === 0) return null;
 
-  const summary = summarizeTurn(round.fileCount, round.createdCount, round.commands);
+  const summary = summarizeTurn(round.fileCount, round.createdCount, round.commands, declaredPatterns);
   const hasWrites = summary.files > 0;
 
   return (
