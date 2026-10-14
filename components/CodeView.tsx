@@ -170,7 +170,7 @@ export function CodeView({
           }}
           title="切换项目 / 工作区"
           data-testid="code-project"
-          className="h-8 max-w-xs cursor-pointer rounded-lg border border-line bg-panel-2 px-2 text-[12px] text-fg outline-none"
+          className="h-8 max-w-xs cursor-pointer rounded-lg border border-line bg-panel-2 px-2 text-[12px] text-fg outline-none t-fast focus:border-accent/60"
         >
           {!roots.includes(cwd) && <option value="">（当前：{cwd || "—"}）</option>}
           {roots.map((r) => {
@@ -194,7 +194,7 @@ export function CodeView({
             value={worktrees.some((w) => w.path === cwd) ? cwd : ""}
             onChange={(e) => e.target.value && setPickedCwd(e.target.value)}
             title="切换工作树"
-            className="h-8 max-w-xs cursor-pointer rounded-lg border border-line bg-panel-2 px-2 text-[12px] text-fg outline-none"
+            className="h-8 max-w-xs cursor-pointer rounded-lg border border-line bg-panel-2 px-2 text-[12px] text-fg outline-none t-fast focus:border-accent/60"
           >
             {!worktrees.some((w) => w.path === cwd) && <option value="">主工作区</option>}
             {worktrees.map((w) => (
