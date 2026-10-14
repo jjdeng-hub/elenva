@@ -828,13 +828,16 @@ export function ChatView({
             onRemember={(text, scope) => void rememberInstruction(text, scope)}
           />
         )}
-        {!isEmpty && <TodoPanel todos={todos} />}
-        {!isEmpty && (
+        {/* 输入区两条（任务条 / 本轮条）是观测栏的**替身**：观测栏可见时其内容已在栏里，
+            再摆一份就是同源双显；关栏 / 窄屏 / 切到文件面板时才出场 —— 那是它们作为
+            唯一入口（窄屏、关栏）与刚跑完一轮的即时结论 / 纠错入口的意义所在。
+            状态条（statusBar）不在此门控内，始终显示。 */}
+        {!isEmpty && !railOpen && <TodoPanel todos={todos} />}
+        {!isEmpty && !railOpen && (
           <TurnFooter
             turn={turn}
             running={agentRunning || bashRunning}
             cwd={cwd}
-            railOpen={railOpen}
             canOpenRail={railAllowed}
             onOpenRail={showObservatory}
           />
