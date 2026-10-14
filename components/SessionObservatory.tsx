@@ -15,6 +15,7 @@ import {
   Loader2,
   ListChecks,
   ListTodo,
+  RotateCcw,
   Share,
   X,
   XCircle,
@@ -39,8 +40,10 @@ import { todoProgress } from "@/extensions/elenva-todo/state";
 /**
  * 右侧观察栏 —— 把「这次会话到底动过什么」变成一眼可见的数据。
  *
- * 定位是**只读观测**：不在里做任何有副作用的操作。
- * 真正的写操作（提交、回滚）留在 Git 变更页 —— 那里能先看 diff 再决定。
+ * 定位是**只读观测**：不在里做有副作用的操作，
+ * 唯一例外是「本轮」区的回滚 —— 纠错动作跟着明细走：观测栏在场时看与动同处（明细在这里，
+ * 回滚也在这里）；观测栏不在场时由输入框上方那一行兜底（两处互斥，不会同时出现）。
+ * 提交类写操作仍在 Git 变更页 —— 那里能先看 diff 再决定。
  *
  * 与文件预览共用右侧同一个槽位：点文件列表进入预览，关闭预览自动回到观测栏。
  */
@@ -77,11 +80,15 @@ function Section({
   title,
   icon,
   meta,
+  action,
   children,
 }: {
   title: string;
   icon: React.ReactNode;
   meta?: React.ReactNode;
+  /** 标题行右侧的动作按钮（如「本轮」区的回滚）：与 meta 合成一个靠右组，
+   *  这样没有 meta 时按钮也不会挤在标题旁 */
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -92,7 +99,12 @@ function Section({
       <div className="flex items-center gap-1.5">
         <span className="shrink-0 text-dim">{icon}</span>
         <span className="text-[11px] font-semibold text-muted">{title}</span>
-        {meta && <span className="ml-auto shrink-0 text-[11px] tabular-nums text-dim">{meta}</span>}
+        {(meta || action) && (
+          <span className="ml-auto flex min-w-0 shrink-0 items-center gap-1.5">
+            {meta && <span className="text-[11px] tabular-nums text-dim">{meta}</span>}
+            {action}
+          </span>
+        )}
       </div>
       <div className="mt-2">{children}</div>
     </div>
@@ -240,7 +252,9 @@ function Empty({ children }: { children: React.ReactNode }) {
  * 这个回答「刚刚这一轮改了什么、跑过什么、验证过没有」。后者才是用户在
  * agent 说完「改完了」时真正想核对的东西。
  *
- * 本区只读：回滚按钮留在输入框上方那行（观测栏的定位是看，不是改）。
+ * 本区默认只读，例外的**回滚按钮就放在区头右侧**：纠错是跟着明细走的动作，
+ * 明细在这里（改了哪几个文件、哪个跳过），回滚就该在这里按，不必折回输入框。
+ * 观测栏不在场时这个按钮随之消失，由输入框上方那行的回滚接手（两处互斥）。
  */
 function TurnSection({
   turn,
@@ -269,6 +283,20 @@ function TurnSection({
         latest && (latest.fileCount > 0 || latest.commands.length > 0)
           ? `${latest.fileCount} 文件 · ${latest.commands.length} 命令`
           : undefined
+      }
+      action={
+        latest && latest.files.length > 0 ? (
+          <button
+            onClick={() => void turn.restore()}
+            disabled={turn.restoring || latest.restorableCount === 0}
+            className="flex h-6 cursor-pointer items-center gap-1 rounded-md border border-line bg-panel px-1.5 text-[11px] text-muted t-fast hover:border-danger/40 hover:text-danger disabled:opacity-50"
+            title="把本轮写入的文件恢复原状"
+            data-testid="rail-rollback-turn"
+          >
+            <RotateCcw size={12} />
+            {turn.restoring ? "回滚中…" : "回滚本轮"}
+          </button>
+        ) : undefined
       }
     >
       {!latest || (latest.fileCount === 0 && latest.commands.length === 0) ? (
