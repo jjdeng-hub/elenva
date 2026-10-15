@@ -46,6 +46,7 @@ import {
 } from "./tool-risk";
 import { isEditToolName, isWriteToolName } from "./tool-names";
 import { cwdKey } from "./paths";
+import { registerPendingApproval, resolvePendingApproval } from "./pending-approvals";
 
 /**
  * 宿主护栏扩展：审批闸门 + 每轮快照 + 计划模式。
@@ -341,13 +342,22 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
           ...(risk.ruleKey ? ["总是允许（保存到项目设置）"] : []),
           "拒绝",
         ];
-        const choice = await ctx.ui.select(
-          `危险操作需要确认\n${risk.reason}\n\n${detail}\n\n工具：${toolName}`,
-          options,
-          // 后台会话（子代理 / 并行试验）弹的卡可能没人在看；没有超时就会永久挂住
-          // 那一轮工具调用。超时按「拒绝」处理 —— 宁可不做，也不静默执行。
-          { timeout: 10 * 60 * 1000 },
-        );
+        // 审批卡还开着的时候，这条会话在「工作台 → 等你」里必须可见。
+        // 登记 / 清理都是旁路：它们自身失败也绝不影响下面的审批判定。
+        registerPendingApproval({ sessionId, kind: "tool", reason: risk.reason, detail });
+        let choice: string | undefined;
+        try {
+          choice = await ctx.ui.select(
+            `危险操作需要确认\n${risk.reason}\n\n${detail}\n\n工具：${toolName}`,
+            options,
+            // 后台会话（子代理 / 并行试验）弹的卡可能没人在看；没有超时就会永久挂住
+            // 那一轮工具调用。超时按「拒绝」处理 —— 宁可不做，也不静默执行。
+            { timeout: 10 * 60 * 1000 },
+          );
+        } finally {
+          // 正常返回 / 超时 / 抛错都要清，否则「等你」里会留一条幽灵条目
+          resolvePendingApproval(sessionId, "tool");
+        }
 
         if (choice === "本会话总是允许" && sessionId && risk.ruleKey) {
           const set = sessionAllow.get(sessionId) ?? new Set<string>();
@@ -506,12 +516,19 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
               isError: true,
             };
           }
-          const choice = await ctx.ui.select(
-            `计划待批准\n${text}`,
-            ["批准，开始执行", "继续修改计划", "先不做"],
-            // 同上：没人看的时候不能永久挂住
-            { timeout: 30 * 60 * 1000 },
-          );
+          // 同工具审批：计划卡开着时也要登记为「等你」，返回后清理
+          registerPendingApproval({ sessionId, kind: "plan", reason: "计划待批准", detail: text });
+          let choice: string | undefined;
+          try {
+            choice = await ctx.ui.select(
+              `计划待批准\n${text}`,
+              ["批准，开始执行", "继续修改计划", "先不做"],
+              // 同上：没人看的时候不能永久挂住
+              { timeout: 30 * 60 * 1000 },
+            );
+          } finally {
+            resolvePendingApproval(sessionId, "plan");
+          }
           if (choice === "批准，开始执行") {
             if (sessionId) writePlanMode(sessionId, false);
             return {
