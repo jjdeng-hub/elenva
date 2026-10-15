@@ -28,6 +28,7 @@ tools/*.mjs
 # 例外：内部状态剥离 / 验证证据汇总的维护性回归自检（非一次性脚本，随仓库分发）
 !tools/internal-state-selftest.mjs
 !tools/turn-evidence-selftest.mjs
+!tools/turn-trends-selftest.mjs
 !tools/checkpoints-selftest.mjs
 tools/*.log
 tools/rev/

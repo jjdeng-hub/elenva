@@ -23,6 +23,7 @@ import { useAgentSession, type AttachedImage, type ChatInputHandle } from "@/hoo
 import { useSessionActions } from "@/hooks/useSessionActions";
 import { usePersistedWidth } from "@/components/ui/Resizer";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
+import { computeTurnTrends } from "@/lib/turn-trends";
 import { useTurnCheckpoints } from "@/hooks/useTurnCheckpoints";
 import { latestTodoState } from "@/lib/todo-view";
 import { resolveLocalFilePath } from "@/lib/file-links";
@@ -384,6 +385,9 @@ export function ChatView({
     }
     return out.reverse(); // 最新写入在前
   }, [messages, toolResults, cwd]);
+
+  /* 近 N 轮趋势：逐轮花费 / 工具 / 失败。只读推导，不参与写入。 */
+  const turnTrends = useMemo(() => computeTurnTrends(messages), [messages]);
 
   /* 右栏 tab 组的可用项数：窄屏无观测、无写入时整组隐藏 */
   const railTabCount = (railAllowed ? 1 : 0) + (writtenFiles.length > 0 ? 1 : 0);
@@ -1008,6 +1012,7 @@ export function ChatView({
               grow={growRailPanel}
               reset={resetRailPanel}
               messages={messages}
+              trends={turnTrends}
               results={toolResults}
               cwd={cwd || ""}
               gitInfo={gitInfo}
