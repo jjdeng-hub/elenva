@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { existsSync } from "fs";
-import { randomUUID } from "crypto";
-import { allowFileRoot } from "@/lib/file-access";
-import { invalidateSessionListCache } from "@/lib/session-reader";
-import { startAgentSession } from "@/lib/agent-runtime";
+import { startNewAgentSession } from "@/lib/session-launch";
 
 const THINKING_LEVELS = new Set<ThinkingLevel>(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 
@@ -60,21 +57,13 @@ export async function POST(req: Request) {
     }
     const explicitThinkingLevel = parseThinkingLevel(thinkingLevel);
 
-    // Must be unique per request: startAgentSession coalesces concurrent callers
-    // that share a key onto one session. Date.now() (ms resolution) collides for
-    // requests in the same millisecond, merging two new sessions into one.
-    const tempKey = `__new__${randomUUID()}`;
-    const { session, realSessionId } = await startAgentSession(tempKey, "", cwd, {
+    // 会话创建路径抽在 lib/session-launch.ts：节律的无头执行也走同一条
+    // （含 files-route 允许根同步 + 会话列表缓存失效），避免两处逻辑跑偏。
+    const { session, realSessionId } = await startNewAgentSession(cwd, {
       ...(toolNames ? { toolNames } : {}),
       ...(provider && modelId ? { initialModel: { provider, modelId } } : {}),
       ...(explicitThinkingLevel ? { thinkingLevel: explicitThinkingLevel } : {}),
     });
-
-    // Keep the files-route allowed-roots cache (see app/api/files/[...path]/route.ts)
-    // in sync so the new cwd is immediately readable via /api/files. Without this,
-    // a file request under a brand-new cwd would 403 for up to the cache TTL.
-    allowFileRoot(cwd);
-    invalidateSessionListCache();
 
     const state = await session.send({ type: "get_state" }) as {
       model?: { id: string; provider: string };
