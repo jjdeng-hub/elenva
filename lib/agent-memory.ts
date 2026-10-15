@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { isAbsolute, join, normalize, resolve, sep } from "node:path";
+import { isAbsolute, join, normalize, resolve, sep, dirname } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getPiSettingsPath } from "./pi-user-settings";
 
@@ -439,4 +439,41 @@ export function writeAgentMemoryFile(id: string, input: AgentMemoryWriteInput): 
     revision: after.revision,
     backup,
   };
+}
+
+/**
+ * 追加一条记忆（不改动其余条目）。
+ *
+ * 语义：读快照 → 追加一条（created/last 由 canonical 序列化器置今天）→ `writeAgentMemoryFile`（带 revision）。
+ * 并发：会话里可能同时在写同一份文件（扩展的 memory_add / 网页端编辑），读→写之间文件被改就会
+ * conflict —— 这时**重读 + 重试一次**，仍冲突才把 conflict 交给调用方。
+ *
+ * `onBeforeWrite` 仅供自测注入：同进程内读与写之间没有异步间隙，跨进程并发无法稳定复现，
+ * 这个钩子让自测能在两读之间改一次文件，确定性地验证重试路径；生产调用不传。
+ */
+export function appendAgentMemoryEntry(
+  id: string,
+  text: string,
+  onBeforeWrite?: () => void,
+): AgentMemoryWriteResult {
+  if (!isAgentMemoryFileId(id)) return { ok: false, code: "unknown-file", error: `未知记忆文件标识：${id}` };
+  const trimmed = typeof text === "string" ? text.trim() : "";
+  if (!trimmed) return { ok: false, code: "invalid", error: "内容不能为空" };
+  if (trimmed.length > MAX_ENTRY_CHARS) {
+    return { ok: false, code: "invalid", error: `单条过长（${trimmed.length} 字符上限 ${MAX_ENTRY_CHARS}），请拆分` };
+  }
+  const entry: AgentMemoryEntry = { text: trimmed, created: null, last: null };
+  // 项目记忆的目录可能要新建（<projectsDir>/<项目>/ 在扩展写过之前并不存在）
+  mkdirSync(dirname(resolveAgentMemoryFilePath(id)), { recursive: true });
+
+  let snapshot = readAgentMemorySnapshot(id);
+  onBeforeWrite?.();
+  let result = writeAgentMemoryFile(id, { entries: [...snapshot.entries, entry], revision: snapshot.revision });
+  if (!result.ok && result.code === "conflict") {
+    // 读→写之间被别的写入改过：以磁盘最新内容为基准再试一次（不覆盖对方刚写的条目）
+    snapshot = readAgentMemorySnapshot(id);
+    onBeforeWrite?.();
+    result = writeAgentMemoryFile(id, { entries: [...snapshot.entries, entry], revision: snapshot.revision });
+  }
+  return result;
 }
