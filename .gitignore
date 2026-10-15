@@ -35,6 +35,7 @@ tools/*.mjs
 !tools/memory-quota-selftest.mjs
 !tools/memory-origins-selftest.mjs
 !tools/memory-conflicts-selftest.mjs
+!tools/memory-suggestions-selftest.mjs
 tools/*.log
 tools/rev/
 # 临时截图：可能拍到记忆全文等私有内容

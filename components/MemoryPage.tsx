@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Brain, CalendarDays, FileText, Gauge, Inbox, Info, Loader2, Pencil, Plus, RefreshCw, Save, Trash2, User } from "lucide-react";
+import { AlertTriangle, Brain, CalendarDays, FileText, Gauge, Inbox, Info, Loader2, Pencil, Plus, RefreshCw, Save, Sparkles, Trash2, User, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { cn } from "@/components/lib/utils";
@@ -88,6 +88,15 @@ type MemoryConflictGroup = {
   file: string;
   label: string;
   pairs: MemoryConflictPair[];
+};
+
+/** 一条整理候选（GET /api/memory/suggestions 的一项）：从工作记录里找到的沉淀线索 */
+type MemorySuggestion = {
+  key: string;
+  sourceFile: string;
+  sourceTitle: string;
+  sourceDate: string | null;
+  line: string;
 };
 
 /** 单文件详情：原始内容（复制用）+ 结构化条目 + 版本 + 配额 */
@@ -211,6 +220,10 @@ function AgentMemoryView({ scrollRef }: { scrollRef: RefObject<HTMLDivElement | 
   const [pendingExpanded, setPendingExpanded] = useState<Record<string, boolean>>({});
   /** 冲突候选（GET /api/memory/conflicts）：与索引一起刷新，只提示不自动合并 */
   const [conflicts, setConflicts] = useState<MemoryConflictGroup[]>([]);
+  /** 整理候选（GET /api/memory/suggestions）：从工作记录里找的沉淀线索，确认后存入记忆 */
+  const [suggestions, setSuggestions] = useState<MemorySuggestion[]>([]);
+  /** 正在存 / 忽略的候选 key（防重复点击） */
+  const [suggestionBusy, setSuggestionBusy] = useState<string | null>(null);
 
   const loadIndex = useCallback(async () => {
     setLoading(true);
@@ -259,6 +272,21 @@ function AgentMemoryView({ scrollRef }: { scrollRef: RefObject<HTMLDivElement | 
   useEffect(() => {
     void loadConflicts();
   }, [loadConflicts, reloadKey]);
+
+  const loadSuggestions = useCallback(async () => {
+    try {
+      const res = await fetch("/api/memory/suggestions", { cache: "no-store" });
+      const d = (await res.json()) as { candidates?: MemorySuggestion[]; error?: string };
+      if (!res.ok) throw new Error(d.error || `加载失败（HTTP ${res.status}）`);
+      setSuggestions(d.candidates ?? []);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSuggestions();
+  }, [loadSuggestions, reloadKey]);
 
   // 首次拿到索引时，若 MEMORY.md 还是空的就落到第一个有内容的文件，避免一进来就是空白
   useEffect(() => {
@@ -381,7 +409,58 @@ function AgentMemoryView({ scrollRef }: { scrollRef: RefObject<HTMLDivElement | 
     [loadPending],
   );
 
+  /** 整理候选 → 润色对话框 → 既有 POST /api/memory（来源账本自动记 web-edit） */
+  const saveSuggestion = useCallback(async (suggestion: MemorySuggestion, fileId: string) => {
+    const edited = await dialogPrompt({
+      title: fileId === "memory" ? "存为全局记忆" : "存为项目记忆",
+      message: "确认措辞后写入记忆；线索来自工作记录，写入不会改动工作记录。",
+      defaultValue: suggestion.line,
+      confirmText: "存入",
+    });
+    if (!edited) return;
+    setSuggestionBusy(suggestion.key);
+    try {
+      const res = await fetch("/api/memory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ file: fileId, text: edited }),
+      });
+      const d = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !d.ok) throw new Error(d.error || `写入失败（HTTP ${res.status}）`);
+      toast("已存为记忆，下一轮起生效");
+      setSuggestions((prev) => prev.filter((s) => s.key !== suggestion.key));
+      setReloadKey((k) => k + 1);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSuggestionBusy(null);
+    }
+  }, []);
+
+  /** 忽略一条候选：落盘忽略清单后静默移除（不弹 toast） */
+  const dismissSuggestionItem = useCallback(async (suggestion: MemorySuggestion) => {
+    setSuggestionBusy(suggestion.key);
+    try {
+      const res = await fetch("/api/memory/suggestions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "dismiss", key: suggestion.key }),
+      });
+      const d = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !d.ok) throw new Error(d.error || `忽略失败（HTTP ${res.status}）`);
+      setSuggestions((prev) => prev.filter((s) => s.key !== suggestion.key));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSuggestionBusy(null);
+    }
+  }, []);
+
   const files = index?.files ?? [];
+  /** 项目级记忆去向（候选来源文件名 stem 能对上项目目录时，才给「存为项目记忆」） */
+  const projectTargets = files
+    .filter((f) => f.kind === "project")
+    .map((f) => ({ id: f.id, name: f.label }));
   const profile = files.filter((f) => f.kind === "user");
   const core = files.filter((f) => f.kind === "memory" || f.kind === "failures");
   const projectsMem = files.filter((f) => f.kind === "project");
@@ -513,6 +592,18 @@ function AgentMemoryView({ scrollRef }: { scrollRef: RefObject<HTMLDivElement | 
           只提示不自动合并 —— 合并是语义判断且不可逆（《深入理解 AI Agent》ch3 L534 保留冲突与
           待确认状态、L202 一次错误的更新/删除会不可逆）。没有候选时整块不渲染。 */}
       {conflicts.length > 0 && <MemoryConflictsBlock groups={conflicts} onGoto={gotoFile} />}
+
+      {/* 整理候选：从工作记录里挑出的沉淀线索（纯静态启发式，零模型调用），确认后
+          一键存进记忆或忽略。只提示不自动写 —— 写记忆是不可逆动作，落不落盘由人决定。 */}
+      {suggestions.length > 0 && (
+        <MemorySuggestionsBlock
+          suggestions={suggestions}
+          projectTargets={projectTargets}
+          busyKey={suggestionBusy}
+          onSave={saveSuggestion}
+          onDismiss={dismissSuggestionItem}
+        />
+      )}
 
       {/* 两个记忆体系的分工。用户会把它们混为一谈（"到底谁在写记忆"），
           这里点明本页是只读的，要改就让 Agent 用 memory_add 改。 */}
@@ -970,6 +1061,118 @@ function MemoryConflictsBlock({ groups, onGoto }: { groups: MemoryConflictGroup[
           </div>
         )),
       )}
+    </div>
+  );
+}
+
+/**
+ * 整理候选块：从工作记录里挑出的「沉淀线索」逐条摆出，供人确认后存入记忆或忽略。
+ * **只提示不自动写**（写记忆不可逆，落不落盘由人决定）——「存为记忆…」复用既有的
+ * 润色对话框 + `POST /api/memory`；忽略只写本机忽略清单，不动工作记录与记忆。
+ * 没有候选时整块不渲染（调用方已判空）。
+ */
+function MemorySuggestionsBlock({
+  suggestions,
+  projectTargets,
+  busyKey,
+  onSave,
+  onDismiss,
+}: {
+  suggestions: MemorySuggestion[];
+  /** 可用的项目级记忆去向（id = `project/<项目名>`） */
+  projectTargets: { id: string; name: string }[];
+  busyKey: string | null;
+  onSave: (suggestion: MemorySuggestion, fileId: string) => void;
+  onDismiss: (suggestion: MemorySuggestion) => void;
+}) {
+  return (
+    <div data-testid="memory-suggestions" className="flex flex-col gap-2 rounded-lg border border-line bg-panel-2 p-3">
+      <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-fg">
+        <Sparkles size={12} className="text-dim" />
+        整理候选 · {suggestions.length} 条
+        <span className="ml-auto text-[10px] font-normal text-dim">
+          从工作记录里找的沉淀线索；确认后存入记忆，不会改动工作记录
+        </span>
+      </div>
+
+      {suggestions.map((item) => {
+        const stem = item.sourceFile.replace(/\.md$/i, "");
+        const project = projectTargets.find((p) => p.id === `project/${stem}`) ?? null;
+        const busy = busyKey === item.key;
+        return (
+          <div
+            key={item.key}
+            data-testid="suggestion-item"
+            className="flex flex-col gap-1.5 rounded-md border border-line-soft bg-panel px-3 py-2"
+          >
+            <div className="flex items-start gap-2">
+              <div className="min-w-0 flex-1">
+                <p className="line-clamp-2 break-words text-[12px] leading-relaxed text-fg">{item.line}</p>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] tabular-nums text-dim">
+                  <span className="truncate">{item.sourceTitle}</span>
+                  {item.sourceDate && <span>{item.sourceDate}</span>}
+                  <span className="truncate font-mono" title={item.sourceFile}>
+                    {item.sourceFile}
+                  </span>
+                </div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+                <Popover
+                  align="right"
+                  trigger={({ toggle }) => (
+                    <button
+                      onClick={toggle}
+                      disabled={busy}
+                      data-testid="suggestion-save"
+                      className="btn btn-primary btn-sm"
+                    >
+                      <Save size={12} /> 存为记忆…
+                    </button>
+                  )}
+                >
+                  {(close) => (
+                    <div className="flex w-56 flex-col p-1">
+                      {project && (
+                        <button
+                          onClick={() => {
+                            close();
+                            onSave(item, project.id);
+                          }}
+                          disabled={busy}
+                          className="cursor-pointer rounded-md px-2 py-1.5 text-left text-[12px] text-fg t-fast hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          存为项目记忆
+                          <span className="block text-[10px] text-dim">{project.name} / MEMORY.md</span>
+                        </button>
+                      )}
+                      <button
+                        onClick={() => {
+                          close();
+                          onSave(item, "memory");
+                        }}
+                        disabled={busy}
+                        className="cursor-pointer rounded-md px-2 py-1.5 text-left text-[12px] text-fg t-fast hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        存为全局记忆
+                        <span className="block text-[10px] text-dim">写入全局 MEMORY.md</span>
+                      </button>
+                    </div>
+                  )}
+                </Popover>
+                <button
+                  onClick={() => onDismiss(item)}
+                  disabled={busy}
+                  data-testid="suggestion-dismiss"
+                  title="忽略这条（写进本机忽略清单，不再提示）"
+                  className="btn btn-icon"
+                >
+                  {busy ? <Loader2 size={12} className="anim-spin" /> : <X size={12} />}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
