@@ -362,6 +362,8 @@ export function SessionSidebar({
       message: "用逗号分隔；最多 8 个、单个不超过 12 字",
       defaultValue: (meta[s.id]?.tags ?? []).join(", "),
       select: true,
+      // 空串是「清空标签」这个有效意图，必须与「取消」（null）分开
+      allowEmpty: true,
     });
     if (input === null) return;
     try {
