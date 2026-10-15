@@ -1,6 +1,6 @@
 {
   "name": "elenva-web",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ELENVA Web —— pi coding agent 的 Web 工作台（个人控制台，自用优先，非 IDE 前端）",
   "license": "MIT",
   "author": "ELENVA",
