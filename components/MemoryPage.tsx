@@ -70,6 +70,26 @@ const ORIGIN_VIA_LABELS: Record<MemoryOrigin["via"], string> = {
   pending: "待审确认",
 };
 
+/** 冲突候选的理由（与 lib/memory-conflicts.ts 的 MemoryConflictReason 对齐，文案即标签） */
+type MemoryConflictReason = "高度重复（建议合并）" | "明显相关" | "表述可能反向";
+
+/** 一对疑似对照（GET /api/memory/conflicts 的一项） */
+type MemoryConflictPair = {
+  aText: string;
+  bText: string;
+  aCreated: string | null;
+  bCreated: string | null;
+  score: number;
+  reasons: MemoryConflictReason[];
+};
+
+/** 一份文件内的候选对照（服务端只在有候选时返回该组） */
+type MemoryConflictGroup = {
+  file: string;
+  label: string;
+  pairs: MemoryConflictPair[];
+};
+
 /** 单文件详情：原始内容（复制用）+ 结构化条目 + 版本 + 配额 */
 type AgentMemoryDetail = {
   file: AgentMemoryFile;
@@ -189,6 +209,8 @@ function AgentMemoryView({ scrollRef }: { scrollRef: RefObject<HTMLDivElement | 
   const [pending, setPending] = useState<PendingMemoryItem[]>([]);
   const [pendingBusy, setPendingBusy] = useState<string | null>(null);
   const [pendingExpanded, setPendingExpanded] = useState<Record<string, boolean>>({});
+  /** 冲突候选（GET /api/memory/conflicts）：与索引一起刷新，只提示不自动合并 */
+  const [conflicts, setConflicts] = useState<MemoryConflictGroup[]>([]);
 
   const loadIndex = useCallback(async () => {
     setLoading(true);
@@ -222,6 +244,21 @@ function AgentMemoryView({ scrollRef }: { scrollRef: RefObject<HTMLDivElement | 
   useEffect(() => {
     void loadPending();
   }, [loadPending, reloadKey]);
+
+  const loadConflicts = useCallback(async () => {
+    try {
+      const res = await fetch("/api/memory/conflicts", { cache: "no-store" });
+      const d = (await res.json()) as { groups?: MemoryConflictGroup[]; error?: string };
+      if (!res.ok) throw new Error(d.error || `加载失败（HTTP ${res.status}）`);
+      setConflicts(d.groups ?? []);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadConflicts();
+  }, [loadConflicts, reloadKey]);
 
   // 首次拿到索引时，若 MEMORY.md 还是空的就落到第一个有内容的文件，避免一进来就是空白
   useEffect(() => {
@@ -471,6 +508,11 @@ function AgentMemoryView({ scrollRef }: { scrollRef: RefObject<HTMLDivElement | 
           （《深入理解 AI Agent》ch3 L219-223 的三层压缩由系统执行；这里对应已登记的
           「超阈值只提醒不自动整理」偏离）。全部文件皆不存在时走下面的空态，这里不渲染。 */}
       {index && !nothingSaved && <MemoryQuotaBlock files={files} onGoto={gotoFile} />}
+
+      {/* 对照检查：同文件内疑似重复 / 表述可能反向的条目对（纯静态启发式，零模型调用）。
+          只提示不自动合并 —— 合并是语义判断且不可逆（《深入理解 AI Agent》ch3 L534 保留冲突与
+          待确认状态、L202 一次错误的更新/删除会不可逆）。没有候选时整块不渲染。 */}
+      {conflicts.length > 0 && <MemoryConflictsBlock groups={conflicts} onGoto={gotoFile} />}
 
       {/* 两个记忆体系的分工。用户会把它们混为一谈（"到底谁在写记忆"），
           这里点明本页是只读的，要改就让 Agent 用 memory_add 改。 */}
@@ -850,6 +892,84 @@ function MemoryQuotaBlock({ files, onGoto }: { files: AgentMemoryFile[]; onGoto:
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** 冲突理由 → chip 档位。行内只显示短标签（「高度重复（建议合并）」显示为「高度重复」）。 */
+const CONFLICT_REASON_STYLE: Record<MemoryConflictReason, { label: string; chip: string; hint?: string }> = {
+  "高度重复（建议合并）": { label: "高度重复", chip: "chip-warn", hint: "建议合并" },
+  明显相关: { label: "明显相关", chip: "chip" },
+  表述可能反向: { label: "表述可能反向", chip: "chip-danger" },
+};
+
+/** 对照用截断：只看个大概，全文在详情卡里（每侧一行、line-clamp-2 兑底） */
+function clipConflictText(text: string, max = 60): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+/**
+ * 对照检查块：把同文件内疑似重复 / 表述可能反向的条目对摆出来，供肉眼对照。
+ * **只提示不合并**（合并是语义判断且不可逆）——「去处理」复用 gotoFile 选中文件并滚到详情，
+ * 改哪条由人决定。没有候选时整块不渲染（调用方已判空）。
+ */
+function MemoryConflictsBlock({ groups, onGoto }: { groups: MemoryConflictGroup[]; onGoto: (id: string) => void }) {
+  const pairsOf = (g: MemoryConflictGroup) => g.pairs;
+  const total = groups.reduce((sum, g) => sum + pairsOf(g).length, 0);
+  const duplicates = groups.reduce(
+    (sum, g) => sum + pairsOf(g).filter((p) => p.reasons.includes("高度重复（建议合并）")).length,
+    0,
+  );
+
+  return (
+    <div data-testid="memory-conflicts" className="flex flex-col gap-2 rounded-lg border border-line bg-panel-2 p-3">
+      <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-fg">
+        <AlertTriangle size={12} className="text-warn" />
+        对照检查 · {total} 对疑似（其中重复 {duplicates} 对）
+        <span className="ml-auto text-[10px] font-normal text-dim">同文件内静态比对，只提示不自动合并</span>
+      </div>
+
+      {groups.map((group) =>
+        pairsOf(group).map((pair, i) => (
+          <div
+            key={`${group.file}-${i}`}
+            data-testid="conflict-pair"
+            className="flex flex-col gap-1.5 rounded-md border border-line-soft bg-panel px-3 py-2"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="chip chip-mono">{group.label}</span>
+              {pair.reasons.map((reason) => {
+                const style = CONFLICT_REASON_STYLE[reason];
+                return (
+                  <span key={reason} className={style.chip} title={style.hint}>
+                    {style.label}
+                  </span>
+                );
+              })}
+              <span className="text-[10px] tabular-nums text-dim">相似 {Math.round(pair.score * 100)}%</span>
+              <button
+                onClick={() => onGoto(group.file)}
+                data-testid="conflict-goto"
+                className="btn btn-subtle btn-sm ml-auto shrink-0"
+              >
+                <Pencil size={12} /> 去处理
+              </button>
+            </div>
+            <div className="flex flex-col gap-1">
+              {[pair.aText, pair.bText].map((text, side) => (
+                <div key={side} className="flex items-baseline gap-2">
+                  <p className="line-clamp-2 min-w-0 flex-1 break-words text-[12px] leading-relaxed text-muted">
+                    {clipConflictText(text)}
+                  </p>
+                  {[pair.aCreated, pair.bCreated][side] && (
+                    <span className="shrink-0 text-[10px] tabular-nums text-dim">{[pair.aCreated, pair.bCreated][side]}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )),
+      )}
     </div>
   );
 }
