@@ -698,6 +698,27 @@ export function ChatView({
     return handler;
   }, [cwd, rememberInstruction]);
 
+  /**
+   * 「沉淀为技能」：把助手一条回复里涉及的做法交给模型，用 `skill_draft` 整理成草稿。
+   * 工具只起草不落盘 —— 真正的入库由用户在草稿卡上点「保存到技能库」完成。
+   */
+  const draftSkillInstruction = useCallback((text: string) => {
+    // 长回复只截前一段：技能沉淀要的是「可复用的做法」，不是逐字逐句把这条回复抄回去
+    const excerpt = text.trim().slice(0, 8000);
+    const instruction = [
+      "把下面这条回复里涉及的做法沉淀成一个可复用的技能草稿。用 skill_draft 工具起草（只起草，不要写任何文件）。要求：",
+      "- 提炼可复用的做法：触发条件 / 步骤 / 坑 / 验证方式；不要复述这一次的具体内容。",
+      "- name 用小写字母 / 数字 / 连字符、≤64；description 一句话说清「何时用这个技能」；body 写完整 SKILL.md 正文（markdown，含标题与分节）。",
+      "- 草稿生成后等用户在界面上确认；不要自行写 SKILL.md。",
+      "",
+      "待沉淀的回复内容：",
+      '"""',
+      excerpt,
+      '"""',
+    ].join("\n");
+    handleSend(instruction);
+  }, [handleSend]);
+
   /* ---------- 计划模式 + 每轮快照 ----------
      计划模式状态存在服务端（内核空闲回收会话后仍然有效）。新会话还没有 id，
      此时开关写入的是「新建会话的默认值」，由 readPlanMode 对未设过的会话回落。 */
@@ -1197,6 +1218,7 @@ export function ChatView({
             loadingEarlier={loadingEarlier}
             onLoadEarlier={handleLoadEarlier}
             onRemember={rememberHandler}
+            onDraftSkill={draftSkillInstruction}
           />
         )}
         {/* 输入区两条（任务条 / 本轮条）是观测栏的**替身**：观测栏可见时其内容已在栏里，

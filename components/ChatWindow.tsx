@@ -158,6 +158,7 @@ export function ChatWindow({
   onOpenFile,
   sessionId,
   onRemember,
+  onDraftSkill,
   hasEarlierMessages,
   loadingEarlier,
   onLoadEarlier,
@@ -185,6 +186,8 @@ export function ChatWindow({
   sessionId?: string | null;
   /** 「记住这条」：把用户的一句话说成长期约定（由 ChatView 落盘到 AGENTS.md） */
   onRemember?: (text: string, scope: "project" | "global") => void;
+  /** 「沉淀为技能」：把助手这条回复整理成 skill_draft 草稿（由 ChatView 发指令） */
+  onDraftSkill?: (text: string) => void;
   /** 服务端还有更早的历史（/context 的 tail 默认为 50，长会话需向上翻页） */
   hasEarlierMessages?: boolean;
   loadingEarlier?: boolean;
@@ -482,6 +485,7 @@ export function ChatWindow({
                           sessionId={sessionId}
                           entryId={entryIds[turn.userIdx] ?? null}
                           onRemember={onRemember}
+                          onDraftSkill={onDraftSkill}
                         />
                         {entryIds[turn.userIdx] && (
                           <button
@@ -515,6 +519,7 @@ export function ChatWindow({
                           sessionId={sessionId}
                           entryIds={entryIds}
                           onRemember={onRemember}
+                          onDraftSkill={onDraftSkill}
                         />
                       ) : (
                         <div key={`a${seg.idx}`} data-idx={seg.idx} className="py-1.5">
@@ -525,6 +530,7 @@ export function ChatWindow({
                             sessionId={sessionId}
                             entryId={entryIds[seg.idx] ?? null}
                             onRemember={onRemember}
+                            onDraftSkill={onDraftSkill}
                           />
                         </div>
                       ),
@@ -590,6 +596,7 @@ function ProcessGroup({
   sessionId,
   entryIds,
   onRemember,
+  onDraftSkill,
 }: {
   indices: number[];
   messages: AgentMessage[];
@@ -602,6 +609,7 @@ function ProcessGroup({
   sessionId?: string | null;
   entryIds: string[];
   onRemember?: (text: string, scope: "project" | "global") => void;
+  onDraftSkill?: (text: string) => void;
 }) {
   const { thinking, tools, failed } = useMemo(
     () => summarizeProcess(messages, results, indices),
@@ -667,6 +675,7 @@ function ProcessGroup({
                   sessionId={sessionId}
                   entryId={entryIds[i] ?? null}
                   onRemember={onRemember}
+                  onDraftSkill={onDraftSkill}
                 />
               </div>
             );

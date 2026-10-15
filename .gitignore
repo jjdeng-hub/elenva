@@ -41,6 +41,7 @@ tools/*.mjs
 !tools/todo-ledger-selftest.mjs
 !tools/schedules-selftest.mjs
 !tools/scheduled-sessions-selftest.mjs
+!tools/skill-drafts-selftest.mjs
 tools/*.log
 tools/rev/
 # 临时截图：可能拍到记忆全文等私有内容

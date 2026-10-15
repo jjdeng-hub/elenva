@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Bookmark, Bot, ChevronDown, Copy, Download, FileCode2, History, Loader2, Search, Square, Terminal, User, Wrench } from "lucide-react";
+import { AlertTriangle, Bookmark, BookmarkPlus, Bot, ChevronDown, Copy, Download, FileCode2, History, Loader2, Save, Search, Square, Terminal, Trash2, User, Wrench } from "lucide-react";
 import { Children, isValidElement, useCallback, useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import { cn } from "@/components/lib/utils";
@@ -23,6 +23,7 @@ import { imageBlockSrc } from "@/lib/image-block";
 import { lineDiff, parseSdkDiff, type ParsedDiffLine } from "@/lib/line-diff";
 import { isEditToolName, isWriteToolName, parseMcpToolName } from "@/lib/tool-names";
 import { normalizePlanSteps, type PlanStep } from "@/lib/plan-steps";
+import { buildSkillMarkdown, readSkillDraft, validateSkillDraft } from "@/lib/skill-drafts";
 import { TodoList } from "@/components/TodoList";
 import { coerceTodoItems, todoProgress, type TodoItem } from "@/extensions/elenva-todo/state";
 
@@ -124,6 +125,7 @@ function toolInputSummary(input: Record<string, unknown> | undefined, rawInput?:
 const HOST_TOOL_LABELS: Record<string, string> = {
   present_plan: "计划",
   todo_write: "任务清单",
+  skill_draft: "技能草稿",
   codemode: "脚本",
   tool_search: "工具搜索",
 };
@@ -224,6 +226,166 @@ function DiffBlock({ lines }: { lines: ParsedDiffLine[] }) {
           <div className="md-diff-gap">… 其余 {lines.length - DIFF_RENDER_CAP} 行未显示</div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * 技能草稿卡（`skill_draft` 工具调用）。
+ *
+ * 模型只出草稿、不写文件（见扩展 `extensions/elenva-skills`）；落盘是人的动作：
+ * 保存 → `POST /api/skills/draft/save`；重名 → 409，卡上提示且不覆盖。
+ * 「已保存」既来自本次保存，也在挂载时用 `GET /api/skills/draft/save?name=`
+ * 做一次磁盘存在性检测 —— 刷新页面后卡片仍显示已保存。
+ */
+function SkillDraftCard({ block, result }: { block: ToolCallContent; result?: ToolResultMessage }) {
+  const draft = readSkillDraft(block.input) ?? readSkillDraft(result?.details);
+  const [open, setOpen] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [discarded, setDiscarded] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const draftName = draft?.name ?? "";
+  const markdown = draft ? buildSkillMarkdown(draft) : "";
+  const validation = draft ? validateSkillDraft(draft) : null;
+
+  // 刷新后仍显示「已保存」：从磁盘存在性检测（不依赖会话状态）
+  useEffect(() => {
+    if (!draftName) return;
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch(`/api/skills/draft/save?name=${encodeURIComponent(draftName)}`, { cache: "no-store" });
+        if (!res.ok) return;
+        const d = (await res.json()) as { exists?: boolean };
+        if (alive && d.exists) setSaved(true);
+      } catch {
+        /* 检测失败不打扰：真要保存时 409 会给出提示 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [draftName]);
+
+  // 工具没给出可用草稿（参数非法 / 还没跑完）：退化卡片，不渲染保存动作
+  if (!draft) {
+    return (
+      <div className="my-1.5 overflow-hidden rounded-lg border border-line bg-panel-2/70">
+        <div className="flex items-center gap-2 px-2.5 py-1.5">
+          <span className="shrink-0 text-dim">
+            <Wrench size={12} />
+          </span>
+          <span className="shrink-0 font-mono text-[12px] text-fg/90">技能草稿</span>
+          {result ? <span className="chip chip-danger shrink-0">未成稿</span> : <Loader2 size={12} className="shrink-0 anim-spin text-accent" />}
+        </div>
+        {result?.isError && (
+          <div className="border-t border-line px-3 py-2 font-mono text-[12px] whitespace-pre-wrap text-danger">
+            {resultText(result)}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  const save = async () => {
+    if (saving || saved) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/skills/draft/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(draft),
+      });
+      const d = (await res.json().catch(() => ({}))) as { error?: string };
+      if (res.status === 409) {
+        setError(d.error ?? "同名技能已存在，未覆盖");
+        return;
+      }
+      if (!res.ok) throw new Error(d.error || `保存失败（HTTP ${res.status}）`);
+      setSaved(true);
+      toast(`已保存到技能库：${draft.name}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const canSave = validation?.ok === true && !saving && !saved && !discarded;
+
+  return (
+    <div className="my-1.5 overflow-hidden rounded-lg border border-line bg-panel-2/70">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left hover:bg-hover/60"
+      >
+        <ChevronDown size={14} className={cn("shrink-0 text-dim transition-transform", open && "rotate-180")} />
+        <span className="shrink-0 text-dim">
+          <Wrench size={12} />
+        </span>
+        <span className="shrink-0 font-mono text-[12px] text-fg/90">技能草稿</span>
+        <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-dim">
+          {draft.name} · {stripControlSequences(draft.description)}
+        </span>
+        {saved ? (
+          <span className="chip chip-success shrink-0">已保存 ✓</span>
+        ) : discarded ? (
+          <span className="chip shrink-0">已丢弃</span>
+        ) : validation?.ok === false ? (
+          <span className="chip chip-warn shrink-0">待修正</span>
+        ) : (
+          <span className="chip chip-accent shrink-0">草稿</span>
+        )}
+      </button>
+      {open && (
+        <div className="border-t border-line">
+          <div className="max-h-[420px] overflow-auto px-3 py-2.5">
+            <div className="mb-1 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+              <span className="text-[11px] font-semibold text-dim">name</span>
+              <span className="font-mono text-[12px] text-fg">{draft.name}</span>
+            </div>
+            <div className="mb-2 text-[12px] text-muted">{draft.description}</div>
+            <pre className="max-h-72 overflow-auto rounded-md border border-line/60 bg-panel px-3 py-2 font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-muted">
+              {draft.body}
+            </pre>
+            {validation?.ok === false && (
+              <div className="mt-2 text-[12px] text-warn">{validation.error}（修正后重试，或直接丢弃）</div>
+            )}
+            {error && <div className="mt-2 text-[12px] text-danger">{error}</div>}
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-line px-3 py-2">
+            {discarded ? (
+              <span className="text-[12px] text-dim">已丢弃（不影响技能库；消息仍在，可刷新找回本卡）</span>
+            ) : (
+              <>
+                <button
+                  onClick={() => void save()}
+                  disabled={!canSave}
+                  className="btn btn-primary btn-sm"
+                  title={validation?.ok === false ? validation.error : "写入技能库（重名不覆盖）"}
+                >
+                  {saving ? <Loader2 size={12} className="anim-spin" /> : <Save size={12} />}
+                  {saved ? "已保存" : "保存到技能库"}
+                </button>
+                <button
+                  onClick={() => {
+                    void copyText(markdown).then(() => toast("已复制 SKILL.md 全文"));
+                  }}
+                  className="btn btn-sm btn-ghost"
+                >
+                  <Copy size={12} /> 复制
+                </button>
+                <button onClick={() => setDiscarded(true)} className="btn btn-sm btn-ghost">
+                  <Trash2 size={12} /> 丢弃
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -688,7 +850,14 @@ function AssistantBlocks({
       );
     } else if (block.type === "toolCall") {
       flush(`t-${i}`);
-      nodes.push(<ToolCallCard key={`tc-${block.toolCallId || i}`} block={block} result={results.get(block.toolCallId)} startedAt={startedAt} onOpenFile={onOpenFile} />);
+      const result = results.get(block.toolCallId);
+      nodes.push(
+        block.toolName === "skill_draft" ? (
+          <SkillDraftCard key={`tc-${block.toolCallId || i}`} block={block} result={result} />
+        ) : (
+          <ToolCallCard key={`tc-${block.toolCallId || i}`} block={block} result={result} startedAt={startedAt} onOpenFile={onOpenFile} />
+        ),
+      );
     }
   });
   flush("t-final");
@@ -847,6 +1016,7 @@ export function AssistantMessageView({
   onOpenFile,
   entryId,
   sessionId,
+  onDraftSkill,
 }: {
   message: AssistantMessage;
   results: Map<string, ToolResultMessage>;
@@ -855,6 +1025,8 @@ export function AssistantMessageView({
   /** 当前消息对应的 session entry id（懒加载完整思考内容用） */
   entryId?: string | null;
   sessionId?: string | null;
+  /** 「沉淀为技能」：把这条回复里的做法整理成 skill_draft 草稿（由 ChatView 发指令） */
+  onDraftSkill?: (text: string) => void;
 }) {
   const emptyTextOnly = message.content.every((b) => b.type === "text" && !b.text.trim());
   if (emptyTextOnly && !streaming) return null;
@@ -886,7 +1058,16 @@ export function AssistantMessageView({
           </div>
         )}
         {!streaming && fullText.trim() && (
-          <div className="mt-1 flex opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="mt-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+            {onDraftSkill && (
+              <button
+                onClick={() => onDraftSkill(fullText)}
+                className="flex h-6 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[11px] text-dim t-fast hover:bg-hover hover:text-fg"
+                title="把这条回复里涉及的做法整理成技能草稿（先起草，确认后才入库）"
+              >
+                <BookmarkPlus size={12} /> 沉淀为技能
+              </button>
+            )}
             <button
               onClick={() => {
                 // 非安全上下文（局域网 http 访问）下 navigator.clipboard 不可用，
@@ -913,6 +1094,7 @@ export function MessageView({
   sessionId,
   entryId,
   onRemember,
+  onDraftSkill,
 }: {
   message: AgentMessage;
   results: Map<string, ToolResultMessage>;
@@ -924,6 +1106,8 @@ export function MessageView({
   entryId?: string | null;
   /** 「记住这条」：把用户的一句话说成约定 / 记忆 / 待审（见 ChatView 的 rememberInstruction） */
   onRemember?(text: string, target: RememberCallbackTarget): void;
+  /** 「沉淀为技能」：把助手这条回复整理成 skill_draft 草稿（见 ChatView 的 draftSkillInstruction） */
+  onDraftSkill?(text: string): void;
 }) {
   if (message.role === "user") {
     // `canProject` 挂在回调上（ChatWindow 只透传 onRemember 一个 prop）
@@ -939,6 +1123,7 @@ export function MessageView({
         onOpenFile={onOpenFile}
         entryId={entryId}
         sessionId={sessionId}
+        onDraftSkill={onDraftSkill}
       />
     );
   }
