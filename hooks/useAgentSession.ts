@@ -246,6 +246,10 @@ export interface ChatInputHandle {
   replaceMessage: (message: UserMessage) => void;
   prependText: (text: string) => void;
   addImages: (files: File[]) => void;
+  /** 读当前输入框文本（只读语义） */
+  getText: () => string;
+  /** 覆盖输入框文本：持久化草稿（图片不动）+ 聚焦 + 光标移到末尾 */
+  setText: (text: string) => void;
   rekeyDraft: (previousKey: string, nextKey: string) => void;
   restoreSubmission: (text: string, images?: Array<{ data: string; mimeType: string }>, targetDraftKey?: string) => void;
 }
