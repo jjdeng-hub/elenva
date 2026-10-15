@@ -22,6 +22,7 @@ import type { AgentMessage, AssistantContentBlock, AssistantMessage, BashExecuti
 import { imageBlockSrc } from "@/lib/image-block";
 import { lineDiff, parseSdkDiff, type ParsedDiffLine } from "@/lib/line-diff";
 import { isEditToolName, isWriteToolName, parseMcpToolName } from "@/lib/tool-names";
+import { normalizePlanSteps, type PlanStep } from "@/lib/plan-steps";
 import { TodoList } from "@/components/TodoList";
 import { coerceTodoItems, todoProgress, type TodoItem } from "@/extensions/elenva-todo/state";
 
@@ -242,6 +243,9 @@ function ToolCallCard({
 }) {
   const isPlan = block.toolName === "present_plan";
   const planText = isPlan ? planTextOf(block.input) : "";
+  /* 步骤读调用参数（归一后），批注读结果 details —— 见 lib/plan-steps.ts */
+  const planSteps = isPlan ? normalizePlanSteps((block.input as { steps?: unknown } | undefined)?.steps) : [];
+  const planNote = isPlan ? planNoteOf(result?.details) : "";
   const isTodo = block.toolName === "todo_write";
   const todoItems = isTodo ? coerceTodoItems((block.input as { todos?: unknown } | undefined)?.todos) : null;
   const mcpTool = parseMcpToolName(block.toolName);
@@ -337,9 +341,20 @@ function ToolCallCard({
       {open && (
         <div className="border-t border-line">
           {isPlan ? (
-            planText && (
+            (planSteps.length > 0 || planText || planNote) && (
               <div className="max-h-[420px] overflow-auto px-3 py-2.5">
-                <Markdown text={planText} />
+                {planSteps.length > 0 && (
+                  <div className="mb-2.5">
+                    <PlanSteps steps={planSteps} />
+                  </div>
+                )}
+                {planText && <Markdown text={planText} />}
+                {planNote && (
+                  <div className="mt-2.5 border-l-2 border-line pl-2.5">
+                    <div className="mb-0.5 text-[11px] font-semibold text-dim">批注</div>
+                    <div className="text-[12px] whitespace-pre-wrap text-dim">{planNote}</div>
+                  </div>
+                )}
               </div>
             )
           ) : isTodo ? (
@@ -584,6 +599,32 @@ function Markdown({ text }: { text: string }) {
       </ReactMarkdown>
     </div>
   );
+}
+
+/** 计划工具卡顶部的「执行计划」小节：序号 + 标题 + 可选细节 */
+function PlanSteps({ steps }: { steps: PlanStep[] }) {
+  return (
+    <>
+      <div className="mb-1 text-[11px] font-semibold text-dim">执行计划</div>
+      <ol className="flex flex-col gap-1">
+        {steps.map((step, i) => (
+          <li key={i} className="flex gap-2">
+            <span className="shrink-0 pt-0.5 font-mono text-[11px] text-dim">{i + 1}.</span>
+            <div className="min-w-0">
+              <div className="text-[13px] font-semibold text-fg">{step.title}</div>
+              {step.detail && <div className="text-[12px] text-dim">{step.detail}</div>}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </>
+  );
+}
+
+/** 计划工具结果里的打回批注（result.details.note）到文本 */
+function planNoteOf(details: unknown): string {
+  const note = (details as { note?: unknown } | undefined)?.note;
+  return typeof note === "string" ? note.trim() : "";
 }
 
 /** 计划工具的结果状态 → 界面措辞 */
