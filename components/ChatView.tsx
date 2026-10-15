@@ -17,6 +17,7 @@ import { ExtensionStrip } from "@/components/ExtensionStrip";
 import { ModelPicker } from "@/components/ModelPicker";
 import { ProjectTrustDialog } from "@/components/ProjectTrustDialog";
 import { SessionTitle } from "@/components/SessionTitle";
+import { SessionGoal } from "@/components/SessionGoal";
 import { SideSessionPane } from "@/components/SideSessionPane";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { WorkspacePicker, type WorkspaceOption } from "@/components/WorkspacePicker";
@@ -1057,13 +1058,20 @@ export function ChatView({
           >
             {sidebarCollapsed ? <PanelLeftOpen size={14} /> : <PanelLeftClose size={14} />}
           </button>
-          <div className="group/title flex min-w-0 flex-1 items-center">
-            <SessionTitle
-              cwdName={cwdName}
-              title={sessionTitle}
-              actions={sessionActions}
-              editable={!isNew && !!session}
-            />
+          <div className="group/title flex min-w-0 flex-1 flex-col justify-center gap-0.5">
+            <div className="flex min-w-0 items-center">
+              <SessionTitle
+                cwdName={cwdName}
+                title={sessionTitle}
+                actions={sessionActions}
+                editable={!isNew && !!session}
+              />
+            </div>
+            {/* 目标（goal）：标题下方一行「这个会话在干什么」，点一下就地改。
+                新会话还没落盘，不显示入口（也没有 id 可挂）。 */}
+            {!isNew && session && (
+              <SessionGoal key={session.id} sessionId={session.id} />
+            )}
           </div>
           <div className="ml-auto flex items-center gap-2.5">
             {/* 会话内搜索 */}

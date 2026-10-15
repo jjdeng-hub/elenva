@@ -3,16 +3,19 @@ import { listAllSessions } from "@/lib/session-reader";
 import { getRunningAgentSessionIds } from "@/lib/agent-runtime";
 import { detectAttentionOverview } from "@/lib/attention";
 import { listPendingApprovals, readQueuedApprovals } from "@/lib/pending-approvals";
+import { computeOverdueTodos, readTodoLedger } from "@/lib/todo-ledger";
 
 export const dynamic = "force-dynamic";
 
 /**
- * 工作台「在跑 / 等我 / 刚完成」的数据源。
+ * 工作台「在跑 / 等我 / 刚完成 / 逾期」的数据源。
  *
  * - items：空闲且被中断 / 工具报错的会话（既有字段，逐字不变）。
  * - pendingApprovals：新增（additive）——live=活审批注册表（可能含运行中会话），
  *   queued=无人值守落下的审批队列。
  * - recentlyCompleted：新增（additive）——近 24h 收尾且无等待信号的会话，top 5。
+ * - overdueTodos：新增（additive）——最老 open 待办 ≥ 72h 的会话（侧账本读取，
+ *   见 lib/todo-ledger.ts；账本损坏只会让这里为空）。
  */
 export async function GET() {
   try {
@@ -27,8 +30,9 @@ export async function GET() {
       if (approval.sessionId) waiting.add(approval.sessionId);
     }
     const recentlyCompleted = completions.filter((c) => !waiting.has(c.sessionId));
+    const overdueTodos = computeOverdueTodos(readTodoLedger());
     return NextResponse.json(
-      { items, pendingApprovals: { live, queued }, recentlyCompleted },
+      { items, pendingApprovals: { live, queued }, recentlyCompleted, overdueTodos },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

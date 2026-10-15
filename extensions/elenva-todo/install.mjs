@@ -33,6 +33,7 @@ if (args.includes("--uninstall")) {
 }
 
 // 只装运行时要用的文件：*.ts + README（不装 selftest / install 自己，避免递归）
+// 注意：滤镜是通配的 —— 新增的 ledger.ts 会被下面的 *.ts 自动带上，无需在此登记。
 const files = fs.readdirSync(HERE).filter((name) => name.endsWith(".ts") || name === "README.md");
 
 fs.mkdirSync(TARGET, { recursive: true });

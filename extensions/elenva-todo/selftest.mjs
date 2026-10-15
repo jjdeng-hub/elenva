@@ -159,5 +159,33 @@ check(
     hookResult.messages[0] === realMsg && String(hookResult.messages[1].content).includes("<elenva_todos>"),
 );
 
+// ── 7. 侧账本（ledger.ts）：首见保留 / 完成即移除 / 幂等 ─────────────────
+const ledger = await jiti.import("./ledger.ts");
+const T0 = "2026-10-01T00:00:00.000Z";
+const T1 = "2026-10-05T00:00:00.000Z";
+check(
+  "账本：条目键归一（压缩空白 + trim）",
+  ledger.normalizeItemKey("  写\t代码\n  并验证  ") === "写 代码 并验证",
+);
+check(
+  "账本：条目键截断到 160 字",
+  ledger.normalizeItemKey("长".repeat(200)).length === 160,
+);
+const ledgerA = ledger.observeLedger({ version: 1, sessions: {} }, "s1", good, T0);
+const stamp0 = ledgerA.sessions.s1["跑测试"];
+check("账本：首次观察盖 firstSeen / lastSeen", stamp0?.firstSeen === T0 && stamp0?.lastSeen === T0);
+check(
+  "账本：只记 open（completed 不入账）",
+  ledgerA.sessions.s1["写代码"] === undefined && Object.keys(ledgerA.sessions.s1).length === 2,
+);
+const ledgerB = ledger.observeLedger(ledgerA, "s1", good, T1);
+check(
+  "账本：重复观察保留 firstSeen、刷新 lastSeen",
+  ledgerB.sessions.s1["跑测试"].firstSeen === T0 && ledgerB.sessions.s1["跑测试"].lastSeen === T1,
+);
+check("账本：幂等（同一时刻两次观察结果一致）", JSON.stringify(ledger.observeLedger(ledgerA, "s1", good, T0)) === JSON.stringify(ledgerA));
+const ledgerC = ledger.observeLedger(ledgerB, "s1", [{ text: "跑测试", status: "completed" }], T1);
+check("账本：完成 / 消失的条目移除，会话空则整条删掉", ledgerC.sessions.s1 === undefined);
+
 console.log(`\nSELFTEST: ${fail === 0 ? "OK" : "FAILED"} — ${pass} 通过 / ${fail} 失败`);
 if (fail > 0) process.exitCode = 1;
