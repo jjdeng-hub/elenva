@@ -1,6 +1,6 @@
 "use client";
 
-import { ListTodo, Loader2 } from "lucide-react";
+import { ListTodo, Loader2, ShieldAlert } from "lucide-react";
 import { useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { basename, formatCost, formatTokens } from "@/lib/format";
@@ -15,10 +15,13 @@ import type { UsageReport } from "@/lib/usage-aggregate";
 export function RunningCards({
   running,
   usage,
+  approvalReasons,
   onOpenSession,
 }: {
   running: SessionInfo[];
   usage: UsageReport | null;
+  /** 该会话正在等待审批时的理由短句（来自 /api/attention 的 live 注册表） */
+  approvalReasons?: Record<string, string>;
   onOpenSession: (s: SessionInfo) => void;
 }) {
   const [previews, setPreviews] = useState<Record<string, string>>({});
@@ -64,6 +67,7 @@ export function RunningCards({
       {running.map((s) => {
         const u = usage?.sessions[s.id];
         const t = todos[s.id];
+        const approval = approvalReasons?.[s.id];
         return (
           <button
             key={s.id}
@@ -76,6 +80,13 @@ export function RunningCards({
               <span className="shrink-0 rounded-sm bg-panel-2 px-1.5 py-0.5 font-mono text-[11px] text-dim">{basename(s.cwd)}</span>
             </div>
             <div className="mt-1 truncate text-[12px] text-muted">{previews[s.id] ?? "正在获取最新动态…"}</div>
+            {approval && (
+              <div className="mt-0.5 flex items-center gap-1.5 text-[12px]" data-testid="approval-wait">
+                <ShieldAlert size={12} className="shrink-0 text-danger" />
+                <span className="shrink-0 font-medium text-danger">等待审批中</span>
+                <span className="min-w-0 truncate text-muted">{approval}</span>
+              </div>
+            )}
             {t && (
               <div className="mt-0.5 flex items-center gap-1.5 text-[12px]" data-testid="running-card-todo">
                 <ListTodo size={12} className={cn("shrink-0", t.done === t.total ? "text-success" : "text-accent")} />
