@@ -17,6 +17,7 @@ import {
   ListTodo,
   RotateCcw,
   Share,
+  TrendingUp,
   X,
   XCircle,
 } from "lucide-react";
@@ -24,7 +25,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
 import { toast } from "@/components/ui/dialog";
 import { Resizer } from "@/components/ui/Resizer";
-import { formatCost, formatDuration, formatTokens } from "@/lib/format";
+import { formatCost, formatDuration, formatTokens, relTime } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
 import { compactionTrigger, useCompactionSettings } from "@/hooks/useCompactionSettings";
 import { useDeclaredVerifyCommands } from "@/hooks/useDeclaredVerifyCommands";
@@ -32,6 +33,7 @@ import { summarizeTurn, toneClass } from "@/lib/turn-evidence";
 import { verificationKindLabel } from "@/lib/verification-kind";
 import type { TurnCheckpointsState } from "@/hooks/useTurnCheckpoints";
 import type { AgentMessage, ToolResultMessage } from "@/lib/types";
+import type { TurnTrendsResult } from "@/lib/turn-trends";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { TodoList } from "@/components/TodoList";
 import { latestTodoState } from "@/lib/todo-view";
@@ -246,6 +248,78 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 /**
+ * 近 N 轮：观测栏里「本轮」与「整场累计」之间的那一层 ——
+ * 回答「最近是不是越跑越稳、钱花在哪几轮、失败多不多」。
+ *
+ * 轮数 < 2 不渲染：一轮谈不上趋势（与上方「本轮」区重复），零轮同理。
+ * 数据源是**活动消息列表**（被压缩掉的历史轮本就不在此列，这正是「近 N 轮」的语义）。
+ */
+function TrendsSection({ trends }: { trends: TurnTrendsResult }) {
+  const { rounds, totals } = trends;
+  if (rounds.length < 2) return null;
+
+  const attempts = totals.toolCalls + totals.failures;
+  const failureRate = attempts > 0 ? (totals.failures / attempts) * 100 : null;
+  const summary = [
+    `合计 ${formatCost(totals.cost)}`,
+    totals.failures > 0 ? `${totals.failures} 次失败` : null,
+  ]
+    .filter((v): v is string => Boolean(v))
+    .join(" · ");
+
+  return (
+    <CollapsibleSection
+      title={`近 ${rounds.length} 轮`}
+      icon={<TrendingUp size={12} />}
+      summary={summary}
+      testId="rail-trends-toggle"
+    >
+      <div
+        className="flex flex-wrap items-baseline gap-x-1.5 rounded-md border border-line-soft bg-panel-2/50 px-2 py-1.5 text-[11px] tabular-nums text-dim"
+        data-testid="trend-totals"
+      >
+        <span className="text-[10px] uppercase tracking-wide">合计</span>
+        <span className="text-fg">{formatCost(totals.cost)}</span>
+        <span>·</span>
+        <span>{totals.toolCalls} 工具</span>
+        <span>·</span>
+        <span className={cn(totals.failures > 0 ? "text-danger" : "text-fg")}>{totals.failures} 失败</span>
+        {failureRate !== null && <span className="text-dim/70">（{failureRate.toFixed(0)}%）</span>}
+      </div>
+      {/* 最新在最上：趋势问题关心的总是「最近怎么样」 */}
+      <div className="mt-1.5 flex flex-col" data-testid="trend-rows">
+        {[...rounds].reverse().map((round) => (
+          <div
+            key={round.index}
+            data-testid="trend-row"
+            title={round.label}
+            className="flex items-baseline gap-1.5 px-0.5 py-0.5 text-[11px] tabular-nums text-dim"
+          >
+            <span className="shrink-0 text-dim/70">#{round.index}</span>
+            {round.startedAt !== undefined && (
+              <>
+                <span className="shrink-0">·</span>
+                <span className="shrink-0">{relTime(new Date(round.startedAt).toISOString())}</span>
+              </>
+            )}
+            <span className="shrink-0">·</span>
+            <span className="text-muted">{formatCost(round.cost)}</span>
+            <span className="shrink-0">·</span>
+            <span className="text-muted">{round.toolCalls} 工具</span>
+            {round.failures > 0 && (
+              <>
+                <span className="shrink-0">·</span>
+                <span className="shrink-0 font-semibold text-danger">{round.failures}✗</span>
+              </>
+            )}
+          </div>
+        ))}
+      </div>
+    </CollapsibleSection>
+  );
+}
+
+/**
  * 本轮：这场会话里「刚才那一步到底动了什么」。
  *
  * 与下方「本会话文件」是**不同粒度**——那个回答「整场会话改过哪些文件」，
@@ -413,6 +487,7 @@ export function SessionObservatory({
   cwd,
   gitInfo,
   sessionStats,
+  trends,
   contextUsage,
   displayModel,
   thinkingLevel,
@@ -443,6 +518,8 @@ export function SessionObservatory({
   grow: (deltaPx: number) => void;
   reset: () => void;
   messages: AgentMessage[];
+  /** 近 N 轮趋势（逐轮 花费 / 工具 / 失败）。由 ChatView 用 computeTurnTrends 推导后传入 */
+  trends: TurnTrendsResult;
   results: Map<string, ToolResultMessage>;
   cwd: string;
   gitInfo: GitInfo;
@@ -691,6 +768,9 @@ export function SessionObservatory({
             <Empty>统计随第一条消息开始累积。</Empty>
           )}
         </CollapsibleSection>
+
+        {/* ---------- 近 N 轮（运行统计与会话信息之间）：逐轮趋势，轮数 < 2 不渲染 ---------- */}
+        <TrendsSection trends={trends} />
 
         {/* ---------- 会话信息（底部折叠区：运行环境 + 会话产物 + 会话文件）----------
             低频信息集中到最后：默认收起，要用时展开。 ---------- */}
