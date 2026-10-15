@@ -98,15 +98,21 @@ function rendersContent(m: AgentMessage): boolean {
 
 /**
  * 不归「过程」管、应该直接在对话里占位的消息。
- * 目前两种：
+ * 目前三类：
  *  · 压缩记录 —— 上下文层的状态变更，塞进折叠过程区就等于又藏起来一次；
  *  · 含 present_plan 的 assistant 消息 —— 计划是要**读懂再决定**的文档，
- *    折进「过程 · 思考 8 次」里用户根本找不到。
+ *    折进「过程 · 思考 8 次」里用户根本找不到；
+ *  · 含 skill_draft 的 assistant 消息 —— 技能草稿卡是要用户点「保存到技能库 /
+ *    丢弃」的**行动卡**，同样不能折进过程区（折进去等于没有保存入口）。
  */
 function isStandaloneMessage(m: AgentMessage): boolean {
   if (m.role === "custom") return m.customType === "compaction" && m.display !== false;
   if (m.role === "assistant") {
-    return m.content.some((block) => block.type === "toolCall" && block.toolName === "present_plan");
+    return m.content.some(
+      (block) =>
+        block.type === "toolCall"
+        && (block.toolName === "present_plan" || block.toolName === "skill_draft"),
+    );
   }
   return false;
 }
