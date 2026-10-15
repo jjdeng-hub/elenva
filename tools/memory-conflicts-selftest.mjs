@@ -44,7 +44,7 @@ const only = (entries) => {
 
 check("① 阈值与上限常量导出且取任务书定稿值", () => {
   assert.equal(CONFLICT_CANDIDATE_THRESHOLD, 0.25);
-  assert.equal(CONFLICT_DUPLICATE_THRESHOLD, 0.5);
+  assert.equal(CONFLICT_DUPLICATE_THRESHOLD, 0.33);
   assert.equal(CONFLICT_NEGATION_OVERLAP_THRESHOLD, 0.3);
   assert.equal(CONFLICT_MAX_PAIRS_PER_FILE, 8);
   for (const word of ["不要", "不用", "别用", "别", "不再", "改用", "换成", "改为", "去掉", "删掉", "停用", "废弃", "不得", "勿", "避免", "严禁", "绝不"]) {
@@ -66,17 +66,28 @@ check("② 分词：ASCII 词 len≥3、连续汉字取 bigram、短串并入整
 
 /* ============================ 阈值两侧 ============================ */
 
-check("③ 高度重复阈值 0.5 恰好命中（判「高度重复（建议合并）」）", () => {
-  // {alpha,bravo,charlie} vs {bravo,charlie,delta}：交 2 / 并 4 = 0.5
-  const pair = only([entry("alpha bravo charlie"), entry("bravo charlie delta")]);
-  assert.equal(pair.score, 0.5);
+/** 造确定长度的 ASCII 词表（len≥3，不会被分词丢掉），用于精确构造 Jaccard 边界值 */
+const words = (prefix, count) => Array.from({ length: count }, (_, i) => `${prefix}${i}`);
+
+check("③ 高度重复门槛 0.33 恰好命中（33/100 → 「高度重复（建议合并）」）", () => {
+  // 交 33 / 并 100 = 0.33（共享 33 词，各自独有 33 / 34 词）
+  const shared = words("common", 33);
+  const pair = only([
+    entry([...shared, ...words("aonly", 33)].join(" ")),
+    entry([...shared, ...words("bonly", 34)].join(" ")),
+  ]);
+  assert.equal(pair.score, 0.33);
   assert.deepEqual(pair.reasons, ["高度重复（建议合并）"]);
 });
 
-check("④ 低于 0.5（实测 0.4）只判「明显相关」", () => {
-  // 交 2 / 并 5 = 0.4
-  const pair = only([entry("alpha bravo charlie delta"), entry("charlie delta echo")]);
-  assert.equal(pair.score, 0.4);
+check("④ 低于 0.33（8/25 = 0.32）只判「明显相关」", () => {
+  // 交 8 / 并 25 = 0.32（共享 8 词，各自独有 8 / 9 词）
+  const shared = words("common", 8);
+  const pair = only([
+    entry([...shared, ...words("aonly", 8)].join(" ")),
+    entry([...shared, ...words("bonly", 9)].join(" ")),
+  ]);
+  assert.equal(pair.score, 0.32);
   assert.deepEqual(pair.reasons, ["明显相关"]);
 });
 

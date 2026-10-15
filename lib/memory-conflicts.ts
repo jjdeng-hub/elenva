@@ -40,8 +40,16 @@ export interface MemoryConflictPair {
 
 /** 候选门槛：Jaccard ≥ 此值才进入对照（低于此值视为无关，不打扰） */
 export const CONFLICT_CANDIDATE_THRESHOLD = 0.25;
-/** 高度重复门槛：≥ 此值判为「高度重复（建议合并）」，否则「明显相关」 */
-export const CONFLICT_DUPLICATE_THRESHOLD = 0.5;
+/**
+ * 高度重复门槛：≥ 此值判为「高度重复（建议合并）」，否则「明显相关」。
+ *
+ * 校准（2026-10-15，真实记忆只读复核）：同题改写的 bigram Jaccard 落在 **0.25–0.35**；
+ * 观察到的最强真重复 = **0.349**（failures.md「不要提及注入块」族），异题的观察上限 = **0.323**
+ * （开源准备两条）→ 取 **0.33** 作两者之间的自然切点。
+ * （原定 0.5，来自初始估计；真实数据 0 条触及，故下调——阈值下调属于「假阳性变多」方向，
+ *   候选仍只提示不自动合并，误报代价是看一眼，不是丢数据。）
+ */
+export const CONFLICT_DUPLICATE_THRESHOLD = 0.33;
 /** 反向 tag 门槛：剔除反向词后 overlap ≥ 此值，且恰有一方含反向词 → 追加「表述可能反向」 */
 export const CONFLICT_NEGATION_OVERLAP_THRESHOLD = 0.3;
 /** 每份文件最多汇报的对照对数（一屏看得完，不做全量两两） */
