@@ -339,6 +339,51 @@ check("cronExprError：合法返回 null，非法给出原因", () => {
 
 /* ============================ runHistory ============================ */
 
+check("runHistory：durationMs 往返与容错", () => {
+  rmSync(getSchedulesPath(), { force: true });
+  const task = createScheduleTask(makeInput());
+  recordScheduleRun(task.id, {
+    at: at(2026, 2, 1, 9, 0),
+    sessionId: "s1",
+    result: "ok",
+    durationMs: 12_345,
+  });
+  recordScheduleRun(task.id, { at: at(2026, 2, 2, 9, 0), sessionId: "s2", result: "ok" });
+  const stored = getScheduleTask(task.id);
+  eq(stored.runHistory[0].durationMs, undefined, "缺省不写 durationMs");
+  eq(stored.runHistory[1].durationMs, 12_345, "durationMs 往返一致");
+  eq(stored.lastRun.durationMs, undefined, "lastRun 与历史同形");
+  deleteScheduleTask(task.id);
+});
+
+check("runHistory：非法 durationMs 读盘丢弃（旧记录 / 手改不报错）", () => {
+  const legacy = {
+    id: "sched-dur",
+    name: "时长容错",
+    enabled: true,
+    schedule: { kind: "hourly", minute: 7 },
+    prompt: "跑",
+    cwd: agentDir,
+    safety: "standard",
+    catchUp: false,
+    timeoutMinutes: null,
+    runHistory: [
+      { at: at(2026, 1, 1, 0, 0), sessionId: "bad-str", result: "ok", durationMs: "12s" },
+      { at: at(2026, 1, 1, 0, 1), sessionId: "bad-neg", result: "ok", durationMs: -5 },
+      { at: at(2026, 1, 1, 0, 2), sessionId: "good", result: "ok", durationMs: 800 },
+    ],
+    createdAt: at(2026, 1, 1, 0, 0),
+    updatedAt: at(2026, 1, 1, 0, 0),
+  };
+  writeFileSync(getSchedulesPath(), JSON.stringify({ version: 1, tasks: [legacy] }), "utf8");
+  const hist = getScheduleTask("sched-dur").runHistory;
+  eq(hist.length, 3, "三条都保留（坏的是 durationMs 不是整条）");
+  eq(hist[0].durationMs, undefined, "字符串时长丢弃");
+  eq(hist[1].durationMs, undefined, "负数时长丢弃");
+  eq(hist[2].durationMs, 800, "合法时长保留");
+  rmSync(getSchedulesPath(), { force: true });
+});
+
 check("runHistory：追加到头部（新→旧）且同步 lastRun", () => {
   rmSync(getSchedulesPath(), { force: true });
   const task = createScheduleTask(makeInput());

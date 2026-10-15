@@ -23,8 +23,17 @@ import { cn } from "@/components/lib/utils";
 import { EmptyState, PageHeader } from "@/components/ui/bits";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { dialogConfirm, toast } from "@/components/ui/dialog";
-import { basename, formatCost, formatTokens, relTime } from "@/lib/format";
-import { cronExprError, describeSchedule, WEEKDAY_NAMES, type Schedule } from "@/lib/schedule-format";
+import { basename, formatCost, formatDuration, formatTokens, relTime } from "@/lib/format";
+import {
+  cronExprError,
+  describeSchedule,
+  normalizeSafety,
+  SAFETY_TIER_META,
+  SAFETY_VALUES,
+  WEEKDAY_NAMES,
+  type Schedule,
+  type ScheduleSafety,
+} from "@/lib/schedule-format";
 
 // ============================================================================
 // 类型（与 /api/schedules 返回对齐）
@@ -37,6 +46,7 @@ type RunEntry = {
   sessionId: string;
   result: RunResult;
   note?: string;
+  durationMs?: number;
 };
 
 type ScheduleDto = {
@@ -47,7 +57,7 @@ type ScheduleDto = {
   prompt: string;
   cwd: string;
   model?: { provider: string; modelId: string };
-  safety: string;
+  safety: ScheduleSafety;
   catchUp: boolean;
   timeoutMinutes: number | null;
   lastFiredAt?: string;
@@ -97,6 +107,21 @@ function absTime(iso: string): string {
 
 function isAbsolutePath(p: string): boolean {
   return p.startsWith("/") || /^[A-Za-z]:[\\/]/.test(p);
+}
+
+/** 列表行里的档位 chip：standard 不显示（占用最小）；只读中性、全权带警示。 */
+function SafetyChip({ safety }: { safety: ScheduleSafety }) {
+  if (safety === "readonly") {
+    return <span className="chip">只读</span>;
+  }
+  if (safety === "full") {
+    return (
+      <span className="chip chip-warn" title={SAFETY_TIER_META.full.hint}>
+        全权
+      </span>
+    );
+  }
+  return null;
 }
 
 function resultChip(run: RunEntry | undefined, running: boolean) {
@@ -157,6 +182,7 @@ type FormState = {
   cron: string;
   prompt: string;
   cwd: string;
+  safety: ScheduleSafety;
 };
 
 const TAB_LABELS: { id: TriggerTab; label: string }[] = [
@@ -178,6 +204,7 @@ function emptyForm(defaultCwd: string | null): FormState {
     cron: "0 9 * * *",
     prompt: "",
     cwd: defaultCwd ?? "",
+    safety: "standard",
   };
 }
 
@@ -187,6 +214,7 @@ function formFromTask(task: ScheduleDto): FormState {
   base.name = task.name;
   base.prompt = task.prompt;
   base.cwd = task.cwd;
+  base.safety = normalizeSafety(task.safety);
   const s = task.schedule;
   base.tab = s.kind;
   if (s.kind === "hourly") base.minute = s.minute;
@@ -470,6 +498,7 @@ export function RhythmPage({ defaultCwd, onOpenSession }: { defaultCwd: string |
         prompt: form.prompt.trim(),
         cwd: form.cwd.trim(),
         schedule: scheduleFromForm(form),
+        safety: form.safety,
       };
       const res = await fetch(form.id ? `/api/schedules/${form.id}` : "/api/schedules", {
         method: form.id ? "PATCH" : "POST",
@@ -542,6 +571,31 @@ export function RhythmPage({ defaultCwd, onOpenSession }: { defaultCwd: string |
               <div className="flex flex-col gap-1.5">
                 <span className="text-[12px] text-dim">触发规则</span>
                 <TriggerEditor form={form} onChange={(patch) => setForm({ ...form, ...patch })} />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <span className="text-[12px] text-dim">安全档</span>
+                <div className="flex w-fit items-center rounded-lg border border-line bg-panel-2 p-0.5">
+                  {SAFETY_VALUES.map((tier) => (
+                    <button
+                      key={tier}
+                      type="button"
+                      aria-pressed={form.safety === tier}
+                      onClick={() => setForm({ ...form, safety: tier })}
+                      className={cn(
+                        "h-7 cursor-pointer rounded-md px-2.5 text-[12px] t-fast",
+                        form.safety === tier
+                          ? tier === "full"
+                            ? "bg-warn/10 font-medium text-warn"
+                            : "bg-active font-medium text-accent"
+                          : "text-muted hover:text-fg",
+                      )}
+                    >
+                      {SAFETY_TIER_META[tier].label}
+                    </button>
+                  ))}
+                </div>
+                <div className="text-[11px] text-dim">{SAFETY_TIER_META[form.safety].hint}</div>
               </div>
 
               <label className="flex flex-col gap-1.5">
@@ -703,6 +757,7 @@ function TaskCard({
               <span className="text-[13px] font-semibold text-fg">{task.name}</span>
             </button>
             {!task.enabled && <span className="chip">已暂停</span>}
+            <SafetyChip safety={task.safety} />
             {resultChip(task.lastRun, task.running)}
           </div>
 
@@ -779,6 +834,11 @@ function RunHistory({
                   {absTime(run.at)}
                 </span>
                 <span className={cn("chip", meta.cls)}>{meta.label}</span>
+                {run.durationMs !== undefined && (
+                  <span className="tabular-nums text-dim" title="本轮运行时长">
+                    {formatDuration(run.durationMs)}
+                  </span>
+                )}
                 {run.note && <span className="min-w-0 flex-1 truncate text-dim">{run.note}</span>}
                 {u && (
                   <span className="tabular-nums text-dim">

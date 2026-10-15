@@ -3,7 +3,7 @@ import { randomBytes } from "node:crypto";
 import { dirname, isAbsolute, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { writePrivateFileAtomicSync } from "./atomic-file";
-import { parseCronExpr, type CronSpec, type Schedule } from "./schedule-format";
+import { normalizeSafety, parseCronExpr, SAFETY_VALUES, type CronSpec, type Schedule, type ScheduleSafety } from "./schedule-format";
 
 /**
  * 节律（模块 3 · 第 4 轮）—— 任务存储与纯函数层。
@@ -39,10 +39,8 @@ const CRON_MAX_DAYS = 366 * 5;
 
 // 触发规则类型与 cron 解析的实现在 lib/schedule-format.ts（纯函数层，客户端可导入）；
 // 这里 re-export，保证既有 `@/lib/schedules` 导入点不变。
-export type { Schedule } from "./schedule-format";
-export { parseCronExpr, describeSchedule, cronExprError, WEEKDAY_NAMES } from "./schedule-format";
-
-export type ScheduleSafety = "standard" | "readonly" | "full";
+export type { Schedule, ScheduleSafety } from "./schedule-format";
+export { parseCronExpr, describeSchedule, cronExprError, WEEKDAY_NAMES, describeSafety, normalizeSafety, SAFETY_TIER_META, SAFETY_VALUES } from "./schedule-format";
 
 export type ScheduleRunResult = "ok" | "failed" | "skipped" | "timeout";
 
@@ -51,6 +49,8 @@ export interface ScheduleLastRun {
   sessionId: string;
   result: ScheduleRunResult;
   note?: string;
+  /** 本轮运行时长（ms）；additive，旧记录 / 取不到时省略 */
+  durationMs?: number;
 }
 
 /** 运行历史条目：与 lastRun 同形（UI 逐条展示） */
@@ -67,8 +67,7 @@ export interface ScheduleTask {
   /** 缺省 = 系统默认模型 */
   model?: { provider: string; modelId: string };
   /** 本轮只实现 standard（危险操作入队）；readonly/full 留字段，下轮实现 */
-  safety: ScheduleSafety;
-  /** 服务未运行时错过的触发是否补跑一次（默认 false = 只记 skipped） */
+  safety: ScheduleSafety;  /** 服务未运行时错过的触发是否补跑一次（默认 false = 只记 skipped） */
   catchUp: boolean;
   /** 单次执行超时（分钟）；null / 缺省 = 不限时 */
   timeoutMinutes: number | null;
@@ -287,8 +286,6 @@ function validateModel(value: unknown): { provider: string; modelId: string } | 
   return { provider: provider.trim(), modelId: modelId.trim() };
 }
 
-const SAFETY_VALUES: ScheduleSafety[] = ["standard", "readonly", "full"];
-
 function validateSafety(value: unknown): ScheduleSafety {
   if (value === undefined) return "standard";
   if (typeof value !== "string" || !SAFETY_VALUES.includes(value as ScheduleSafety)) {
@@ -359,11 +356,15 @@ function normalizeLastRun(value: unknown): ScheduleLastRun | undefined {
   const result = raw.result;
   if (result !== "ok" && result !== "failed" && result !== "skipped" && result !== "timeout") return undefined;
   if (typeof raw.at !== "string" || typeof raw.sessionId !== "string") return undefined;
+  const durationMs = typeof raw.durationMs === "number" && Number.isFinite(raw.durationMs) && raw.durationMs >= 0
+    ? Math.round(raw.durationMs)
+    : undefined;
   return {
     at: raw.at,
     sessionId: raw.sessionId,
     result,
     ...(typeof raw.note === "string" && raw.note ? { note: raw.note } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
   };
 }
 
@@ -389,7 +390,7 @@ function normalizeStoredTask(value: unknown, now: string): ScheduleTask | null {
       return undefined;
     }
   })();
-  const safety = SAFETY_VALUES.includes(raw.safety as ScheduleSafety) ? (raw.safety as ScheduleSafety) : "standard";
+  const safety = normalizeSafety(raw.safety);
   const timeout = (() => {
     try {
       return validateTimeout(raw.timeoutMinutes);
