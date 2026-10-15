@@ -33,6 +33,7 @@ tools/*.mjs
 !tools/compaction-records-selftest.mjs
 !tools/pending-memory-selftest.mjs
 !tools/memory-quota-selftest.mjs
+!tools/memory-origins-selftest.mjs
 tools/*.log
 tools/rev/
 # 临时截图：可能拍到记忆全文等私有内容
