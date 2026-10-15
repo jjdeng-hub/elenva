@@ -333,6 +333,17 @@ function TurnSection({
                       {file.changedSince && (
                         <span className="chip chip-warn shrink-0" title="本轮之后又被改动：回滚会跳过，不会覆盖">被改过</span>
                       )}
+                      {file.restorable && (
+                        <button
+                          onClick={() => void turn.restoreFile(file.path)}
+                          disabled={turn.restoring}
+                          className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-md border border-line bg-panel text-muted opacity-0 t-fast group-hover/turnfile:opacity-100 hover:border-danger/40 hover:text-danger focus-visible:opacity-100 disabled:opacity-50"
+                          title="回滚此文件到本轮前"
+                          data-testid="rail-file-restore"
+                        >
+                          <RotateCcw size={12} />
+                        </button>
+                      )}
                     </div>
                   );
                 })}
