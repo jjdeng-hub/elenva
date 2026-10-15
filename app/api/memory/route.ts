@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  appendAgentMemoryEntry,
   isAgentMemoryFileId,
   listAgentMemoryFiles,
   readAgentMemoryFile,
@@ -13,9 +14,10 @@ export const dynamic = "force-dynamic";
 /**
  * Agent 记忆的读写接口（pi-hermes-memory 落盘的文件）。
  *
- * GET /api/memory            — 记忆文件清单
- * GET /api/memory?file=<id>  — 单个文件（原文 + 结构化条目 + 版本 + 配额），id: user | memory | failures | project/<项目名>
- * PUT /api/memory            — 保存条目：{ file, entries[], revision? }
+ * GET  /api/memory            — 记忆文件清单
+ * GET  /api/memory?file=<id>  — 单个文件（原文 + 结构化条目 + 版本 + 配额），id: user | memory | failures | project/<项目名>
+ * PUT  /api/memory            — 保存条目：{ file, entries[], revision? }
+ * POST /api/memory            — 追加一条：{ file, text }（读快照 → 追加 → 写盘，冲突重试一次）
  *
  * 写入由 lib/agent-memory.ts 统一处理（并发校验 → 配额 → 备份 → 原子写）；
  * SQLite 检索镜像是派生的，扩展会在会话启动时自动对齐（无需本接口参与）。
@@ -42,6 +44,26 @@ export async function GET(req: Request) {
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },
+      { status: 500 },
+    );
+  }
+}
+
+export async function POST(req: Request) {
+  try {
+    const body = (await req.json()) as { file?: unknown; text?: unknown };
+    if (typeof body.file !== "string" || !isAgentMemoryFileId(body.file)) {
+      return NextResponse.json(
+        { ok: false, code: "unknown-file", error: "未知记忆文件标识" },
+        { status: 400 },
+      );
+    }
+    const result = appendAgentMemoryEntry(body.file, typeof body.text === "string" ? body.text : "");
+    const status = result.ok ? 200 : result.code === "conflict" ? 409 : 400;
+    return NextResponse.json(result, { status });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, code: "invalid", error: error instanceof Error ? error.message : String(error) },
       { status: 500 },
     );
   }

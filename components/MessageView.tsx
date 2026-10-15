@@ -656,10 +656,36 @@ function AssistantBlocks({
 
 /* ---------------- messages ---------------- */
 
-export function UserMessageView({ message, onRemember }: {
+/** 「记住这条」的五档去向：约定两个（AGENTS.md）+ 记忆两个（hermes 落盘）+ 待审 */
+export type RememberTarget =
+  | "project-agents"
+  | "global-agents"
+  | "project-memory"
+  | "global-memory"
+  | "pending";
+
+/**
+ * 回调实际会收到的去向值：五档 + 旧的 `project` / `global` 字面量。
+ * 后两个不是新去向，只是为了通过 ChatWindow 那个**未改动**的 prop 类型
+ * （它声明的是 `"project" | "global"`）：调用点只发五档，收到旧字面量时归一到约定项。
+ */
+export type RememberCallbackTarget = RememberTarget | "project" | "global";
+
+/**
+ * 「记住这条」回调。除处理去向外还挂了 `canProject`：
+ * 会话没有工作目录时要禁用两项项目去向，而 ChatWindow 只透传这一个 prop
+ * （不为多带一个布尔值去改它的入参），所以标记挂在函数本身上。
+ */
+export type RememberHandler = ((text: string, target: RememberCallbackTarget) => void) & {
+  canProject?: boolean;
+};
+
+export function UserMessageView({ message, onRemember, canProject = true }: {
   message: UserMessage;
-  /** 「记住这条」：把本轮里的纠正沉淀成项目/全局约定（写入 AGENTS.md） */
-  onRemember?: (text: string, scope: "project" | "global") => void;
+  /** 「记住这条」：把本轮里的纠正沉淀成约定 / 记忆 / 待审（见各去向的写盘实现） */
+  onRemember?: (text: string, target: RememberTarget) => void;
+  /** 会话有没有工作目录：没有时项目相关去向禁用（title 里说明原因） */
+  canProject?: boolean;
 }) {
   const text = typeof message.content === "string"
     ? message.content
@@ -694,7 +720,7 @@ export function UserMessageView({ message, onRemember }: {
                 <button
                   onClick={toggle}
                   className="flex h-6 cursor-pointer items-center gap-1 rounded-md border border-line bg-panel-2 px-1.5 text-[11px] text-muted t-fast hover:text-fg"
-                  title="把这条要求记成长期约定（写入 AGENTS.md，新会话生效）"
+                  title="把这条要求沉淀成约定或记忆（也可以先入待审）"
                 >
                   <Bookmark size={12} />
                   记住
@@ -702,13 +728,16 @@ export function UserMessageView({ message, onRemember }: {
               )}
             >
               {(close) => (
-                <div className="flex w-56 flex-col p-1">
+                <div className="flex w-64 flex-col p-1">
                   <button
                     onClick={() => {
                       close();
-                      onRemember(text, "project");
+                      onRemember(text, "project-agents");
                     }}
-                    className="cursor-pointer rounded-md px-2 py-1.5 text-left text-[12px] text-fg t-fast hover:bg-hover"
+                    disabled={!canProject}
+                    title={canProject ? undefined : "当前会话没有工作目录"}
+                    data-testid="remember-project-agents"
+                    className="cursor-pointer rounded-md px-2 py-1.5 text-left text-[12px] text-fg t-fast hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     记进项目约定
                     <span className="block text-[10px] text-dim">写入当前项目的 AGENTS.md</span>
@@ -716,12 +745,48 @@ export function UserMessageView({ message, onRemember }: {
                   <button
                     onClick={() => {
                       close();
-                      onRemember(text, "global");
+                      onRemember(text, "global-agents");
                     }}
+                    data-testid="remember-global-agents"
                     className="cursor-pointer rounded-md px-2 py-1.5 text-left text-[12px] text-fg t-fast hover:bg-hover"
                   >
                     记进全局约定
                     <span className="block text-[10px] text-dim">对所有项目生效</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      close();
+                      onRemember(text, "project-memory");
+                    }}
+                    disabled={!canProject}
+                    title={canProject ? undefined : "当前会话没有工作目录"}
+                    data-testid="remember-project-memory"
+                    className="cursor-pointer rounded-md px-2 py-1.5 text-left text-[12px] text-fg t-fast hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    存为项目记忆
+                    <span className="block text-[10px] text-dim">写入当前项目的 MEMORY.md，下一轮起生效</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      close();
+                      onRemember(text, "global-memory");
+                    }}
+                    data-testid="remember-global-memory"
+                    className="cursor-pointer rounded-md px-2 py-1.5 text-left text-[12px] text-fg t-fast hover:bg-hover"
+                  >
+                    存为全局记忆
+                    <span className="block text-[10px] text-dim">跨项目的事实与教训，下一轮起生效</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      close();
+                      onRemember(text, "pending");
+                    }}
+                    data-testid="remember-pending"
+                    className="cursor-pointer rounded-md px-2 py-1.5 text-left text-[12px] text-fg t-fast hover:bg-hover"
+                  >
+                    先入待审
+                    <span className="block text-[10px] text-dim">稍后在「记忆」页确认去向</span>
                   </button>
                 </div>
               )}
@@ -816,10 +881,14 @@ export function MessageView({
   sessionId?: string | null;
   /** 供思考内容按需拉取（/api/sessions/[id]/entries/[entryId]/thinking） */
   entryId?: string | null;
-  /** 「记住这条」：把用户的一句话说成约定（见 lib/context-files 的 append） */
-  onRemember?: (text: string, scope: "project" | "global") => void;
+  /** 「记住这条」：把用户的一句话说成约定 / 记忆 / 待审（见 ChatView 的 rememberInstruction） */
+  onRemember?(text: string, target: RememberCallbackTarget): void;
 }) {
-  if (message.role === "user") return <UserMessageView message={message} onRemember={onRemember} />;
+  if (message.role === "user") {
+    // `canProject` 挂在回调上（ChatWindow 只透传 onRemember 一个 prop）
+    const canProject = (onRemember as RememberHandler | undefined)?.canProject !== false;
+    return <UserMessageView message={message} onRemember={onRemember} canProject={canProject} />;
+  }
   if (message.role === "assistant") {
     return (
       <AssistantMessageView

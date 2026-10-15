@@ -1,13 +1,14 @@
 "use client";
 
-import { AlertTriangle, Brain, CalendarDays, FileText, Info, Loader2, Pencil, Plus, RefreshCw, Save, Trash2, User } from "lucide-react";
+import { AlertTriangle, Brain, CalendarDays, FileText, Inbox, Info, Loader2, Pencil, Plus, RefreshCw, Save, Trash2, User } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { EmptyState, PageHeader } from "@/components/ui/bits";
-import { toast } from "@/components/ui/dialog";
+import { toast, dialogConfirm, dialogPrompt } from "@/components/ui/dialog";
+import { Popover } from "@/components/ui/popover";
 import { CopyButton } from "@/components/ui/widgets";
-import { formatSize, relTime } from "@/lib/format";
+import { basename, formatSize, relTime } from "@/lib/format";
 
 type ContextFileEntry = {
   id: string;
@@ -60,6 +61,23 @@ type AgentMemoryDetail = {
 };
 
 type MemoryTab = "agent" | "instructions";
+
+/** 待审条目（GET /api/memory/pending 的一项） */
+type PendingMemoryItem = {
+  id: string;
+  text: string;
+  createdAt: string;
+  source?: { sessionId?: string | null; cwd?: string | null };
+};
+
+/** resolve 的四个去向：约定走 AGENTS.md，记忆走 hermes 落盘 */
+type PendingResolveTarget = "project-agents" | "global-agents" | "project-memory" | "global-memory";
+const PENDING_TARGETS: { id: PendingResolveTarget; label: string; hint: string }[] = [
+  { id: "project-agents", label: "记进项目约定", hint: "写入当前项目的 AGENTS.md" },
+  { id: "global-agents", label: "记进全局约定", hint: "写入全局 AGENTS.md" },
+  { id: "project-memory", label: "存为项目记忆", hint: "写入当前项目的 MEMORY.md" },
+  { id: "global-memory", label: "存为全局记忆", hint: "写入全局 MEMORY.md" },
+];
 
 /**
  * 记忆页：两个体系。
@@ -142,6 +160,10 @@ function AgentMemoryView() {
   const [saving, setSaving] = useState(false);
   const detailSeq = useRef(0);
   const pickedInitial = useRef(false);
+  /** 待审队列（从对话里「记住 → 先入待审」攒下） */
+  const [pending, setPending] = useState<PendingMemoryItem[]>([]);
+  const [pendingBusy, setPendingBusy] = useState<string | null>(null);
+  const [pendingExpanded, setPendingExpanded] = useState<Record<string, boolean>>({});
 
   const loadIndex = useCallback(async () => {
     setLoading(true);
@@ -160,6 +182,21 @@ function AgentMemoryView() {
   useEffect(() => {
     void loadIndex();
   }, [loadIndex, reloadKey]);
+
+  const loadPending = useCallback(async () => {
+    try {
+      const res = await fetch("/api/memory/pending", { cache: "no-store" });
+      const d = (await res.json()) as { items?: PendingMemoryItem[]; error?: string };
+      if (!res.ok) throw new Error(d.error || `加载失败（HTTP ${res.status}）`);
+      setPending(d.items ?? []);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadPending();
+  }, [loadPending, reloadKey]);
 
   // 首次拿到索引时，若 MEMORY.md 还是空的就落到第一个有内容的文件，避免一进来就是空白
   useEffect(() => {
@@ -222,6 +259,66 @@ function AgentMemoryView() {
     [detail],
   );
 
+  /** 待审 → 确认去向：仅写入成功才从队列移出（服务端负责，失败会保留） */
+  const resolvePending = useCallback(
+    async (item: PendingMemoryItem, target: PendingResolveTarget) => {
+      const meta = PENDING_TARGETS.find((t) => t.id === target);
+      const edited = await dialogPrompt({
+        title: meta?.label ?? "写入待审",
+        message: meta ? `${meta.hint}。确认措辞后写入，这条会从待审移出。` : undefined,
+        defaultValue: item.text,
+        confirmText: "写入",
+      });
+      if (!edited) return;
+      setPendingBusy(item.id);
+      try {
+        const res = await fetch("/api/memory/pending", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "resolve", id: item.id, target, text: edited }),
+        });
+        const d = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!res.ok || !d.ok) throw new Error(d.error || `写入失败（HTTP ${res.status}）`);
+        toast(target.endsWith("agents") ? "已记入约定，新会话生效" : "已存为记忆，下一轮起生效");
+        await loadPending();
+        setReloadKey((k) => k + 1);
+      } catch (e) {
+        toast(e instanceof Error ? e.message : String(e));
+      } finally {
+        setPendingBusy(null);
+      }
+    },
+    [loadPending],
+  );
+
+  const discardPending = useCallback(
+    async (item: PendingMemoryItem) => {
+      const ok = await dialogConfirm({
+        title: "丢弃这条待审？",
+        message: "只从待审队列移除，不会写入任何文件。",
+        confirmText: "丢弃",
+        danger: true,
+      });
+      if (!ok) return;
+      setPendingBusy(item.id);
+      try {
+        const res = await fetch("/api/memory/pending", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "discard", id: item.id }),
+        });
+        const d = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!res.ok || !d.ok) throw new Error(d.error || `丢弃失败（HTTP ${res.status}）`);
+        await loadPending();
+      } catch (e) {
+        toast(e instanceof Error ? e.message : String(e));
+      } finally {
+        setPendingBusy(null);
+      }
+    },
+    [loadPending],
+  );
+
   const files = index?.files ?? [];
   const profile = files.filter((f) => f.kind === "user");
   const core = files.filter((f) => f.kind === "memory" || f.kind === "failures");
@@ -234,6 +331,101 @@ function AgentMemoryView() {
 
   return (
     <div className="flex flex-col gap-3">
+      {/* 待审队列：从对话里「记住 → 先入待审」攒下的条目 —— 确认去向或丢弃。
+          只在有条目时出现，空队列不占位置。 */}
+      {pending.length > 0 && (
+        <div data-testid="memory-pending" className="flex flex-col gap-2 rounded-lg border border-line bg-panel-2 p-3">
+          <div className="flex items-center gap-2 text-[12px] font-medium text-fg">
+            <Inbox size={12} className="text-dim" />
+            待审 ({pending.length})
+            <span className="ml-auto text-[10px] font-normal text-dim">
+              对话里「记住 → 先入待审」攒下的，确认去向或丢弃
+            </span>
+          </div>
+          {pending.map((item) => {
+            const long = item.text.split("\n").length > 3 || item.text.length > 180;
+            const expanded = pendingExpanded[item.id] === true;
+            const busy = pendingBusy === item.id;
+            return (
+              <div
+                key={item.id}
+                data-testid="pending-item"
+                className="flex flex-col gap-1.5 rounded-md border border-line-soft bg-panel px-3 py-2"
+              >
+                <div className="flex items-start gap-2">
+                  <div
+                    className={cn(
+                      "min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-fg",
+                      long && !expanded && "line-clamp-3",
+                    )}
+                  >
+                    {item.text}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1">
+                    <Popover
+                      align="right"
+                      trigger={({ toggle }) => (
+                        <button onClick={toggle} disabled={busy} data-testid="pending-write" className="btn btn-primary btn-sm">
+                          <Save size={12} /> 写入…
+                        </button>
+                      )}
+                    >
+                      {(close) => (
+                        <div className="flex w-56 flex-col p-1">
+                          {PENDING_TARGETS.map((t) => {
+                            const noCwd = t.id.startsWith("project-") && !item.source?.cwd;
+                            return (
+                              <button
+                                key={t.id}
+                                onClick={() => {
+                                  close();
+                                  void resolvePending(item, t.id);
+                                }}
+                                disabled={noCwd}
+                                title={noCwd ? "该待审缺少项目目录" : undefined}
+                                className="cursor-pointer rounded-md px-2 py-1.5 text-left text-[12px] text-fg t-fast hover:bg-hover disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {t.label}
+                                <span className="block text-[10px] text-dim">{noCwd ? "缺少项目目录" : t.hint}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </Popover>
+                    <button
+                      onClick={() => void discardPending(item)}
+                      disabled={busy}
+                      data-testid="pending-discard"
+                      title="丢弃这条待审"
+                      className="btn btn-icon"
+                    >
+                      {busy ? <Loader2 size={12} className="anim-spin" /> : <Trash2 size={12} />}
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-[10px] tabular-nums text-dim">
+                  <span>{relTime(item.createdAt)}</span>
+                  {item.source?.cwd && (
+                    <span className="truncate font-mono" title={item.source.cwd}>
+                      {basename(item.source.cwd)}
+                    </span>
+                  )}
+                  {long && (
+                    <button
+                      onClick={() => setPendingExpanded((prev) => ({ ...prev, [item.id]: !expanded }))}
+                      className="ml-auto cursor-pointer text-accent t-fast hover:underline"
+                    >
+                      {expanded ? "收起" : "展开"}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       {/* 两个记忆体系的分工。用户会把它们混为一谈（"到底谁在写记忆"），
           这里点明本页是只读的，要改就让 Agent 用 memory_add 改。 */}
       <div className="rounded-lg border border-line-soft bg-panel-2 px-3 py-2 text-[11px] leading-relaxed text-dim">
