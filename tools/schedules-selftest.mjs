@@ -23,6 +23,8 @@ const {
   computeNextRunAt,
   nextRunAtForTask,
   parseCronExpr,
+  describeSchedule,
+  cronExprError,
   validateSchedule,
   assertScheduleRunnable,
   listScheduleTasks,
@@ -36,6 +38,7 @@ const {
   SCHEDULE_NAME_MAX,
   SCHEDULE_PROMPT_MAX,
   MAX_SCHEDULES,
+  RUN_HISTORY_CAP,
 } = lib;
 
 let fail = 0;
@@ -308,6 +311,119 @@ check("存储：任务总数上限 50", () => {
   }
   writeFileSync(path, JSON.stringify({ version: 1, tasks }), "utf8");
   throws(() => createScheduleTask(makeInput({ cwd: agentDir })), "第 51 条应拒绝");
+});
+
+/* ============================ describeSchedule / cronExprError ============================ */
+
+check("describeSchedule：hourly / daily / weekly / cron 各形态", () => {
+  eq(describeSchedule({ kind: "hourly", minute: 15 }), "每小时（第 15 分）", "hourly");
+  eq(describeSchedule({ kind: "daily", at: "08:30" }), "每天 08:30", "daily");
+  eq(describeSchedule({ kind: "daily", at: "9:05" }), "每天 09:05", "daily 补零");
+  eq(describeSchedule({ kind: "weekly", weekday: 1, at: "09:00" }), "每周一 09:00", "weekly 周一");
+  eq(describeSchedule({ kind: "weekly", weekday: 0, at: "09:00" }), "每周日 09:00", "weekly 周日=0");
+  eq(describeSchedule({ kind: "weekly", weekday: 3, at: "20:00" }), "每周三 20:00", "weekly 周中");
+  eq(describeSchedule({ kind: "cron", expr: "0 8 * * *" }), "cron：0 8 * * *", "cron");
+});
+
+check("describeSchedule：空 / 未知不抛错", () => {
+  eq(describeSchedule(null), "未设置", "null");
+  eq(describeSchedule(undefined), "未设置", "undefined");
+  eq(describeSchedule({ kind: "bogus" }), "未知规则", "未知 kind");
+});
+
+check("cronExprError：合法返回 null，非法给出原因", () => {
+  eq(cronExprError("*/15 9-17 * * 1"), null, "合法表达式");
+  assert(cronExprError("60 * * * *"), "分钟 60 应有错误原因");
+  assert(cronExprError("0 8 * *"), "缺字段应有错误原因");
+});
+
+/* ============================ runHistory ============================ */
+
+check("runHistory：追加到头部（新→旧）且同步 lastRun", () => {
+  rmSync(getSchedulesPath(), { force: true });
+  const task = createScheduleTask(makeInput());
+  recordScheduleRun(task.id, { at: at(2026, 2, 1, 9, 0), sessionId: "s1", result: "ok" });
+  recordScheduleRun(task.id, { at: at(2026, 2, 2, 9, 0), sessionId: "s2", result: "failed", note: "虚构失败" });
+  recordScheduleRun(task.id, { at: at(2026, 2, 3, 9, 0), sessionId: "s3", result: "skipped" });
+  const stored = getScheduleTask(task.id);
+  eq(stored.runHistory.length, 3, "历史条数");
+  eq(stored.runHistory[0].sessionId, "s3", "最新在最前");
+  eq(stored.runHistory[2].sessionId, "s1", "最旧在最后");
+  eq(stored.runHistory[0].note, undefined, "无 note 不写");
+  eq(stored.runHistory[1].note, "虚构失败", "note 保留");
+  eq(stored.lastRun.sessionId, "s3", "lastRun 同步为最新");
+  deleteScheduleTask(task.id);
+});
+
+check("runHistory：cap 20（超限丢最旧）", () => {
+  const task = createScheduleTask(makeInput());
+  for (let i = 1; i <= 25; i++) {
+    recordScheduleRun(task.id, { at: at(2026, 3, 1, 0, i), sessionId: `s${i}`, result: "ok" });
+  }
+  const stored = getScheduleTask(task.id);
+  eq(stored.runHistory.length, RUN_HISTORY_CAP, "截断到 cap");
+  eq(stored.runHistory[0].sessionId, "s25", "头部仍是最新");
+  eq(stored.runHistory[RUN_HISTORY_CAP - 1].sessionId, "s6", "最旧 5 条被丢弃");
+  deleteScheduleTask(task.id);
+});
+
+check("runHistory：旧任务缺字段容错 + 坏条目逐条丢弃", () => {
+  const legacy = {
+    id: "sched-legacy",
+    name: "旧任务",
+    enabled: true,
+    schedule: { kind: "hourly", minute: 7 },
+    prompt: "跑",
+    cwd: agentDir,
+    safety: "standard",
+    catchUp: false,
+    timeoutMinutes: null,
+    createdAt: at(2026, 1, 1, 0, 0),
+    updatedAt: at(2026, 1, 1, 0, 0),
+  };
+  writeFileSync(getSchedulesPath(), JSON.stringify({ version: 1, tasks: [legacy] }), "utf8");
+  eq(getScheduleTask("sched-legacy").runHistory, undefined, "缺字段不强行补");
+  recordScheduleRun("sched-legacy", { at: at(2026, 1, 2, 7, 0), sessionId: "sx", result: "ok" });
+  eq(getScheduleTask("sched-legacy").runHistory.length, 1, "旧任务第一次记录即建历史");
+
+  const withBad = {
+    ...legacy,
+    runHistory: [
+      { at: at(2026, 1, 3, 7, 0), sessionId: "good", result: "ok" },
+      { at: at(2026, 1, 3, 8, 0), result: "ok" },
+      { at: at(2026, 1, 3, 9, 0), sessionId: "bad-result", result: "yolo" },
+      "nonsense",
+    ],
+  };
+  writeFileSync(getSchedulesPath(), JSON.stringify({ version: 1, tasks: [withBad] }), "utf8");
+  const hist = getScheduleTask("sched-legacy").runHistory;
+  eq(hist.length, 1, "只留合法条目");
+  eq(hist[0].sessionId, "good", "留下的是合法的");
+});
+
+check("runHistory：读盘时也按 cap 截断", () => {
+  const entries = Array.from({ length: RUN_HISTORY_CAP + 10 }, (_, i) => ({
+    at: at(2026, 4, 1, 0, i % 60),
+    sessionId: `s${i}`,
+    result: "ok",
+  }));
+  const task = {
+    id: "sched-cap",
+    name: "超长历史",
+    enabled: true,
+    schedule: { kind: "hourly", minute: 7 },
+    prompt: "跑",
+    cwd: agentDir,
+    safety: "standard",
+    catchUp: false,
+    timeoutMinutes: null,
+    runHistory: entries,
+    createdAt: at(2026, 1, 1, 0, 0),
+    updatedAt: at(2026, 1, 1, 0, 0),
+  };
+  writeFileSync(getSchedulesPath(), JSON.stringify({ version: 1, tasks: [task] }), "utf8");
+  eq(getScheduleTask("sched-cap").runHistory.length, RUN_HISTORY_CAP, "读盘截断到 cap");
+  rmSync(getSchedulesPath(), { force: true });
 });
 
 /* ============================ 收尾 ============================ */

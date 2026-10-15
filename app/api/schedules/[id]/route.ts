@@ -7,7 +7,7 @@ import {
   type ScheduleTaskPatch,
   type ScheduleTask,
 } from "@/lib/schedules";
-import { ensureSchedulerStarted, getRunningScheduleTaskIds } from "@/lib/scheduler";
+import { ensureSchedulerStarted, getRunningScheduleTaskIds, getScheduleRuns } from "@/lib/scheduler";
 
 export const dynamic = "force-dynamic";
 
@@ -18,7 +18,11 @@ function decorate(task: ScheduleTask) {
   } catch {
     nextRunAt = null;
   }
-  return { ...task, nextRunAt, running: getRunningScheduleTaskIds().has(task.id) };
+  const running = getRunningScheduleTaskIds().has(task.id);
+  const runningSessionId = running
+    ? (getScheduleRuns().find((run) => run.taskId === task.id)?.sessionId ?? null)
+    : null;
+  return { ...task, nextRunAt, running, runningSessionId };
 }
 
 const NOT_FOUND = "找不到该节律任务";

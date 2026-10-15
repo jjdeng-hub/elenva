@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { dirname, isAbsolute, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { writePrivateFileAtomicSync } from "./atomic-file";
+import { parseCronExpr, type CronSpec, type Schedule } from "./schedule-format";
 
 /**
  * 节律（模块 3 · 第 4 轮）—— 任务存储与纯函数层。
@@ -30,15 +31,16 @@ export const SCHEDULE_NAME_MAX = 40;
 export const SCHEDULE_PROMPT_MAX = 4000;
 /** 触发规则文件 */
 export const SCHEDULES_FILE = "elenva-schedules.json";
+/** 运行历史最多保留多少条（新→旧，超限丢最旧） */
+export const RUN_HISTORY_CAP = 20;
 
 /** cron 求值最多向前找 5 年，超出即认为该规则永不命中。 */
 const CRON_MAX_DAYS = 366 * 5;
 
-export type Schedule =
-  | { kind: "hourly"; minute: number }
-  | { kind: "daily"; at: string }
-  | { kind: "weekly"; weekday: number; at: string }
-  | { kind: "cron"; expr: string };
+// 触发规则类型与 cron 解析的实现在 lib/schedule-format.ts（纯函数层，客户端可导入）；
+// 这里 re-export，保证既有 `@/lib/schedules` 导入点不变。
+export type { Schedule } from "./schedule-format";
+export { parseCronExpr, describeSchedule, cronExprError, WEEKDAY_NAMES } from "./schedule-format";
 
 export type ScheduleSafety = "standard" | "readonly" | "full";
 
@@ -50,6 +52,9 @@ export interface ScheduleLastRun {
   result: ScheduleRunResult;
   note?: string;
 }
+
+/** 运行历史条目：与 lastRun 同形（UI 逐条展示） */
+export type ScheduleRunEntry = ScheduleLastRun;
 
 export interface ScheduleTask {
   id: string;
@@ -70,6 +75,8 @@ export interface ScheduleTask {
   /** 上次触发（含补跑 / 跳过）的时间，用于推算下一次 */
   lastFiredAt?: string;
   lastRun?: ScheduleLastRun;
+  /** 运行历史（新→旧，cap RUN_HISTORY_CAP）；additive，旧任务没有此字段照常工作 */
+  runHistory?: ScheduleRunEntry[];
   createdAt: string;
   updatedAt: string;
 }
@@ -93,88 +100,8 @@ export type ScheduleTaskPatch = Partial<Pick<
 >>;
 
 // ============================================================================
-// cron 解析
+// cron 求值（解析在 lib/schedule-format.ts）
 // ============================================================================
-
-interface CronSpec {
-  minutes: Set<number>;
-  hours: Set<number>;
-  doms: Set<number>;
-  months: Set<number>;
-  dows: Set<number>;
-  domRestricted: boolean;
-  dowRestricted: boolean;
-}
-
-function parseField(raw: string, min: number, max: number, label: string): { values: Set<number>; restricted: boolean } {
-  const text = raw.trim();
-  if (!text) throw new Error(`cron 的${label}字段不能为空`);
-  const values = new Set<number>();
-  for (const part of text.split(",")) {
-    const piece = part.trim();
-    if (!piece) throw new Error(`cron 的${label}字段有空项`);
-    const slash = piece.indexOf("/");
-    const rangeText = slash >= 0 ? piece.slice(0, slash) : piece;
-    let step = 1;
-    if (slash >= 0) {
-      const stepText = piece.slice(slash + 1);
-      if (!/^\d+$/.test(stepText) || Number(stepText) < 1) {
-        throw new Error(`cron 的${label}字段步长不合法：${piece}`);
-      }
-      step = Number(stepText);
-    }
-    let start: number;
-    let end: number;
-    if (rangeText === "*") {
-      start = min;
-      end = max;
-    } else if (/^\d+$/.test(rangeText)) {
-      start = Number(rangeText);
-      // `N/step` 与 cron 惯例一致：从 N 起、到上界为止
-      end = slash >= 0 ? max : start;
-    } else {
-      const range = /^(\d+)-(\d+)$/.exec(rangeText);
-      if (!range) throw new Error(`cron 的${label}字段不合法：${piece}`);
-      start = Number(range[1]);
-      end = Number(range[2]);
-    }
-    if (start < min || end > max || start > end) {
-      throw new Error(`cron 的${label}字段超出范围（${min}-${max}）：${piece}`);
-    }
-    for (let value = start; value <= end; value += step) values.add(value);
-  }
-  if (values.size === 0) throw new Error(`cron 的${label}字段没有有效取值`);
-  return { values, restricted: text !== "*" };
-}
-
-/**
- * 解析 5 字段 cron：`分 时 日 月 周`。支持 `*`、`N`、星号加 `/n` 步长（含 `N-M/s`）、
- * `N-M`、逗号列表。**不支持**名称 / 宏等非标扩展（`@daily`、`JAN`、`MON`）——
- * 要日/周语义请直接用 daily / weekly 形态。
- */
-export function parseCronExpr(expr: string): CronSpec {
-  if (typeof expr !== "string") throw new Error("cron 表达式必须是字符串");
-  const fields = expr.trim().split(/\s+/);
-  if (fields.length !== 5) {
-    throw new Error(`cron 需要 5 个字段（分 时 日 月 周），收到 ${fields.length} 个`);
-  }
-  const [minute, hour, dom, month, dow] = fields;
-  const minutes = parseField(minute, 0, 59, "分");
-  const hours = parseField(hour, 0, 23, "时");
-  const doms = parseField(dom, 1, 31, "日");
-  const months = parseField(month, 1, 12, "月");
-  // 周字段：0=周日（同时接受 7=周日这一常见写法）
-  const dowRaw = parseField(dow.replace(/\b7\b/g, "0"), 0, 6, "周");
-  return {
-    minutes: minutes.values,
-    hours: hours.values,
-    doms: doms.values,
-    months: months.values,
-    dows: dowRaw.values,
-    domRestricted: doms.restricted,
-    dowRestricted: dowRaw.restricted,
-  };
-}
 
 /** 周内某天是否命中：标准 cron —— 日 / 周都受限时取「或」，否则取受限的那一个。 */
 function cronDayMatches(date: Date, spec: CronSpec): boolean {
@@ -414,6 +341,18 @@ function validIsoOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" && value ? value : undefined;
 }
 
+/** 运行历史容错归一：坏条目逐条丢弃，只留合法项，最多 RUN_HISTORY_CAP 条。 */
+function normalizeRunHistory(value: unknown): ScheduleRunEntry[] {
+  if (!Array.isArray(value)) return [];
+  const out: ScheduleRunEntry[] = [];
+  for (const item of value) {
+    const entry = normalizeLastRun(item);
+    if (entry) out.push(entry);
+    if (out.length >= RUN_HISTORY_CAP) break;
+  }
+  return out;
+}
+
 function normalizeLastRun(value: unknown): ScheduleLastRun | undefined {
   if (!value || typeof value !== "object") return undefined;
   const raw = value as Record<string, unknown>;
@@ -458,6 +397,7 @@ function normalizeStoredTask(value: unknown, now: string): ScheduleTask | null {
       return null;
     }
   })();
+  const runHistory = normalizeRunHistory(raw.runHistory);
   return {
     id: raw.id,
     name,
@@ -471,6 +411,7 @@ function normalizeStoredTask(value: unknown, now: string): ScheduleTask | null {
     timeoutMinutes: timeout,
     ...(validIsoOrUndefined(raw.lastFiredAt) ? { lastFiredAt: raw.lastFiredAt as string } : {}),
     ...(normalizeLastRun(raw.lastRun) ? { lastRun: normalizeLastRun(raw.lastRun) as ScheduleLastRun } : {}),
+    ...(runHistory.length > 0 ? { runHistory } : {}),
     createdAt: typeof raw.createdAt === "string" && raw.createdAt ? raw.createdAt : now,
     updatedAt: typeof raw.updatedAt === "string" && raw.updatedAt ? raw.updatedAt : now,
   };
@@ -617,7 +558,11 @@ export function markScheduleFired(id: string, atISO: string, agentDir?: string):
   return mutateScheduleTask(id, (task) => ({ ...task, lastFiredAt: atISO }), agentDir);
 }
 
-/** 记录一次运行结果（结束时写回）。 */
+/** 记录一次运行结果（结束时写回）：写 lastRun（兼容）并追加到 runHistory 头部（cap RUN_HISTORY_CAP）。 */
 export function recordScheduleRun(id: string, lastRun: ScheduleLastRun, agentDir?: string): ScheduleTask | undefined {
-  return mutateScheduleTask(id, (task) => ({ ...task, lastRun }), agentDir);
+  return mutateScheduleTask(id, (task) => ({
+    ...task,
+    lastRun,
+    runHistory: [lastRun, ...(task.runHistory ?? [])].slice(0, RUN_HISTORY_CAP),
+  }), agentDir);
 }
