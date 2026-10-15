@@ -32,6 +32,7 @@ import type { SessionInfo, ToolResultMessage } from "@/lib/types";
 import type { CompactionRecord } from "@/lib/compaction-records";
 import { basename, formatCost, formatTokens } from "@/lib/format";
 import { toast, dialogConfirm, dialogPrompt } from "@/components/ui/dialog";
+import type { RememberCallbackTarget, RememberHandler, RememberTarget } from "@/components/MessageView";
 import type { SessionTemplate } from "@/lib/templates";
 
 const SIDEBAR_COLLAPSED_KEY = "elenva-chat-sidebar-collapsed";
@@ -577,39 +578,119 @@ export function ChatView({
     return null;
   }, [messages]);
 
-  /* ---------- 「记住这条」：把纠正沉淀成约定 ---------- */
-  const rememberInstruction = useCallback(async (text: string, scope: "project" | "global") => {
-    if (scope === "project" && !cwd) {
-      toast("当前会话没有工作目录，无法写入项目约定");
+  /* ---------- 「记住这条」：约定 ×2（原样）+ 记忆 ×2 + 先入待审 ---------- */
+  const rememberInstruction = useCallback(async (text: string, target: RememberCallbackTarget) => {
+    // 旧字面量（project / global）归一为新去向：调用点只发五档，这里只是兑底
+    const resolved: RememberTarget =
+      target === "project" ? "project-agents" : target === "global" ? "global-agents" : target;
+
+    /* 约定两项：原流程逐字不变（AGENTS.md，走 /api/context-files） */
+    if (resolved === "project-agents" || resolved === "global-agents") {
+      if (resolved === "project-agents" && !cwd) {
+        toast("当前会话没有工作目录，无法写入项目约定");
+        return;
+      }
+      const isProject = resolved === "project-agents";
+      const edited = await dialogPrompt({
+        title: isProject ? "记进项目约定" : "记进全局约定",
+        message: isProject
+          ? "追加到当前项目的 AGENTS.md，新会话生效。可以先把这句话改成你真正想让 agent 记住的措辞。"
+          : "追加到全局 AGENTS.md（~/.pi/agent/AGENTS.md），对所有项目生效。",
+        defaultValue: text.trim(),
+        placeholder: "例如：改完代码后先跑 npm test 再汇报",
+        confirmText: "记住",
+      });
+      if (!edited) return;
+      try {
+        const res = await fetch("/api/context-files", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            file: isProject ? "project-agents" : "global-agents",
+            text: edited,
+            ...(isProject ? { cwd } : {}),
+          }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { error?: string; duplicated?: boolean; path?: string };
+        if (!res.ok) throw new Error(data.error || `保存失败（HTTP ${res.status}）`);
+        toast(data.duplicated ? "这条已经在约定里了" : "已记入约定，新会话生效");
+      } catch (error) {
+        toast(error instanceof Error ? error.message : "记住失败");
+      }
       return;
     }
+
+    /* 记忆两项：追加到 pi-hermes-memory 落盘的文件（走 /api/memory 的 POST） */
+    if (resolved === "project-memory" || resolved === "global-memory") {
+      const isProject = resolved === "project-memory";
+      if (isProject && !cwd) {
+        toast("当前会话没有工作目录，无法写入项目记忆");
+        return;
+      }
+      const projectName = isProject && cwd ? basename(cwd) : "";
+      const edited = await dialogPrompt({
+        title: isProject ? "存为项目记忆" : "存为全局记忆",
+        message: isProject
+          ? `追加到当前项目的 MEMORY.md（project/${projectName}），下一轮起生效。可以先把这句话改成你真正想让 agent 记住的措辞。`
+          : "追加到全局 MEMORY.md（跨项目的事实与教训），下一轮起生效。",
+        defaultValue: text.trim(),
+        placeholder: "例如：这台机器上包管理器用 npm 不要用 pnpm",
+        confirmText: "记住",
+      });
+      if (!edited) return;
+      try {
+        const res = await fetch("/api/memory", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file: isProject ? `project/${projectName}` : "memory", text: edited }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!res.ok || !data.ok) throw new Error(data.error || `保存失败（HTTP ${res.status}）`);
+        toast("已存为记忆，下一轮起生效");
+      } catch (error) {
+        toast(error instanceof Error ? error.message : "记住失败");
+      }
+      return;
+    }
+
+    /* 先入待审：不直接落盘，之后到「记忆」页确认去向 */
     const edited = await dialogPrompt({
-      title: scope === "project" ? "记进项目约定" : "记进全局约定",
-      message: scope === "project"
-        ? "追加到当前项目的 AGENTS.md，新会话生效。可以先把这句话改成你真正想让 agent 记住的措辞。"
-        : "追加到全局 AGENTS.md（~/.pi/agent/AGENTS.md），对所有项目生效。",
+      title: "先入待审",
+      message: "放进待审队列，稍后到「记忆」页逐条确认写到哪一层（项目/全局 × 约定/记忆）。",
       defaultValue: text.trim(),
-      placeholder: "例如：改完代码后先跑 npm test 再汇报",
-      confirmText: "记住",
+      placeholder: "例如：以后提交信息都用中文",
+      confirmText: "放入待审",
     });
     if (!edited) return;
     try {
-      const res = await fetch("/api/context-files", {
+      const res = await fetch("/api/memory/pending", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          file: scope === "project" ? "project-agents" : "global-agents",
+          action: "add",
           text: edited,
-          ...(scope === "project" ? { cwd } : {}),
+          source: { sessionId: session?.id ?? null, cwd },
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as { error?: string; duplicated?: boolean; path?: string };
-      if (!res.ok) throw new Error(data.error || `保存失败（HTTP ${res.status}）`);
-      toast(data.duplicated ? "这条已经在约定里了" : "已记入约定，新会话生效");
+      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!res.ok || !data.ok) throw new Error(data.error || `保存失败（HTTP ${res.status}）`);
+      toast("已放入待审（到「记忆」页里确认）");
     } catch (error) {
       toast(error instanceof Error ? error.message : "记住失败");
     }
-  }, [cwd]);
+  }, [cwd, session?.id]);
+
+  /**
+   * 「记住这条」回调。`canProject` 挂在函数上：MessageView 用它禁用两项项目去向，
+   * 而 ChatWindow 只透传 onRemember 一个 prop（不为一个布尔值去扩它的入参）。
+   */
+  const rememberHandler = useMemo<RememberHandler>(() => {
+    const handler = ((text: string, target: RememberCallbackTarget) => {
+      void rememberInstruction(text, target);
+    }) as RememberHandler;
+    handler.canProject = Boolean(cwd);
+    return handler;
+  }, [cwd, rememberInstruction]);
 
   /* ---------- 计划模式 + 每轮快照 ----------
      计划模式状态存在服务端（内核空闲回收会话后仍然有效）。新会话还没有 id，
@@ -1102,7 +1183,7 @@ export function ChatView({
             hasEarlierMessages={hasEarlierMessages}
             loadingEarlier={loadingEarlier}
             onLoadEarlier={handleLoadEarlier}
-            onRemember={(text, scope) => void rememberInstruction(text, scope)}
+            onRemember={rememberHandler}
           />
         )}
         {/* 输入区两条（任务条 / 本轮条）是观测栏的**替身**：观测栏可见时其内容已在栏里，
