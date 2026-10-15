@@ -686,12 +686,14 @@ export function SessionObservatory({
         <SubagentSection parentSessionId={sessionStats?.sessionId} onOpenSubagents={onOpenSubagents} />
 
         {/* ---------- 上下文窗口（独立区块）---------- */}
-        {contextUsage ? (
-          <Section
-            title="上下文窗口"
-            icon={<Layers size={12} />}
-            meta={pct !== null ? `${pct}%` : undefined}
-          >
+        <Section
+          title="上下文窗口"
+          icon={<Layers size={12} />}
+          meta={contextUsage && pct !== null ? `${pct}%` : undefined}
+        >
+          {/* 占用率相关的头部内容需要 contextUsage；压缩记录不需要（见下） */}
+          {contextUsage ? (
+            <>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-panel-2">
               <div
                 className={cn(
@@ -745,14 +747,14 @@ export function SessionObservatory({
                 )}
               </div>
             )}
-            {/* 无压缩历史时不渲染：与现状逐像素一致 */}
-            {compactions.length > 0 && <CompactionRecords records={compactions} />}
-          </Section>
-        ) : (
-          <Section title="上下文窗口" icon={<Layers size={12} />}>
+            </>
+          ) : (
             <Empty>暂无上下文数据。</Empty>
-          </Section>
-        )}
+          )}
+          {/* 压缩记录来自会话文件里**已落盘**的 compaction 条目，与会话是否驻留运行态无关，
+              因此独立于 contextUsage 分支：占用率没有时它照常可见。无压缩时不渲染。 */}
+          {compactions.length > 0 && <CompactionRecords records={compactions} />}
+        </Section>
 
         {/* ---------- Git（压成一行：分支 · 状态 + 打开入口）---------- */}
         {gitInfo?.isRepo ? (
