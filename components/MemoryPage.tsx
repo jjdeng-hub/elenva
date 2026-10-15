@@ -46,11 +46,28 @@ type AgentMemoryIndex = {
   files: AgentMemoryFile[];
 };
 
+/** 一条记忆的来路（additive；没记过来源的旧条目没这个字段） */
+type MemoryOrigin = {
+  via: "agent" | "web-edit" | "remember" | "pending";
+  at: string;
+  sessionId?: string;
+  cwd?: string;
+};
+
 /** 一条记忆（GET /api/memory?file= 返回的结构化视图） */
 type MemoryEntry = {
   text: string;
   created: string | null;
   last: string | null;
+  origin?: MemoryOrigin;
+};
+
+/** 来源 via 的中文名（账本口径见 lib/memory-origins.ts） */
+const ORIGIN_VIA_LABELS: Record<MemoryOrigin["via"], string> = {
+  agent: "Agent 写入",
+  "web-edit": "网页编辑",
+  remember: "记住菜单",
+  pending: "待审确认",
 };
 
 /** 单文件详情：原始内容（复制用）+ 结构化条目 + 版本 + 配额 */
@@ -659,6 +676,23 @@ function AgentMemoryView({ scrollRef }: { scrollRef: RefObject<HTMLDivElement | 
                             <div className="mt-1 text-[10px] tabular-nums text-dim">
                               建于 {entry.created}
                               {entry.last && entry.last !== entry.created ? ` · 最近 ${entry.last}` : ""}
+                            </div>
+                          )}
+                          {entry.origin && (
+                            <div className="mt-1 text-[10px] tabular-nums text-dim">
+                              来源：{ORIGIN_VIA_LABELS[entry.origin.via]} · {relTime(entry.origin.at)}
+                              {entry.origin.sessionId && (
+                                <>
+                                  {" · "}
+                                  <a
+                                    href={`#chat/${encodeURIComponent(entry.origin.sessionId)}`}
+                                    title={entry.origin.sessionId}
+                                    className="underline decoration-dotted underline-offset-2 hover:text-fg"
+                                  >
+                                    #{entry.origin.sessionId.slice(0, 8)}
+                                  </a>
+                                </>
+                              )}
                             </div>
                           )}
                         </>
