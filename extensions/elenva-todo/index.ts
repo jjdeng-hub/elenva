@@ -33,6 +33,7 @@ import {
   validateTodoWrite,
   type TodoItem,
 } from "./state.js";
+import { observeTodos } from "./ledger.js";
 
 const TOOL_NAME = "todo_write";
 
@@ -85,12 +86,16 @@ export default function elenvaTodo(pi: ExtensionAPI): void {
         { description: "完整清单（全量提交，最多 20 项，按执行顺序排列）" },
       ),
     }),
-    execute: async (_toolCallId, params, _signal, _onUpdate, _ctx) => {
+    execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       const result = validateTodoWrite(params);
       if (!result.ok) {
         throw new Error(`任务清单未更新：${result.error}。清单保持原样；修正后请重新调用 todo_write 全量提交。`);
       }
       current = result.todos;
+      // 侧账本（旁路）：记录 open 待办的首见 / 末见，供服务端算「逾期」。
+      // 观察点是 todo_write 成功时 —— firstSeen 从「扩展第一次看到它」起算。
+      // observeTodos 内部全程吞错：账本写不进去也不能影响本次写入。
+      observeTodos(ctx?.sessionManager?.getSessionId?.() ?? null, result.todos);
       return {
         content: [{ type: "text", text: renderTodoChecklist(result.todos) }],
         details: { todos: result.todos, updatedAt: Date.now() },
