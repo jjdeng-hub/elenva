@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, GitBranch, Menu, Search, X } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, GitBranch, Menu, Plus, Search, X } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentStatusBar } from "@/components/AgentStatusBar";
@@ -28,7 +28,8 @@ import { latestTodoState } from "@/lib/todo-view";
 import { resolveLocalFilePath } from "@/lib/file-links";
 import type { SessionInfo, ToolResultMessage } from "@/lib/types";
 import { basename, formatCost, formatTokens } from "@/lib/format";
-import { toast, dialogPrompt } from "@/components/ui/dialog";
+import { toast, dialogConfirm, dialogPrompt } from "@/components/ui/dialog";
+import type { SessionTemplate } from "@/lib/templates";
 
 const SIDEBAR_COLLAPSED_KEY = "elenva-chat-sidebar-collapsed";
 const OBSERVATORY_KEY = "elenva-chat-observatory";
@@ -581,6 +582,141 @@ export function ChatView({
   /* ---------- 品牌空态：无消息时居中展示 logo + 标语 + 输入框，开始对话后贴底 ---------- */
   const isEmpty = !loading && !error && messages.length === 0 && !streamState.isStreaming && !searchOpen;
 
+  /* ---------- 会话模板（常用任务一键起）----------
+     模板是服务端数据（~/.pi/agent/elenva-templates.json）：空态时拉一次并渲染
+     一条芯片栏；应用只做两件事 —— 选工作区 + 覆盖输入文本，不发消息。 */
+  const [templates, setTemplates] = useState<SessionTemplate[]>([]);
+  const templatesLoadedRef = useRef(false);
+
+  const loadTemplates = useCallback(async () => {
+    try {
+      const r = await fetch("/api/templates", { cache: "no-store" });
+      if (!r.ok) return;
+      const data = (await r.json()) as { templates?: SessionTemplate[] };
+      setTemplates(Array.isArray(data.templates) ? data.templates : []);
+    } catch {
+      /* 失败静默：当作没有模板，不打扰 */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isNew || !isEmpty || templatesLoadedRef.current) return;
+    templatesLoadedRef.current = true;
+    void loadTemplates();
+  }, [isNew, isEmpty, loadTemplates]);
+
+  const applyTemplate = useCallback(async (tpl: SessionTemplate) => {
+    if ((chatInputRef.current?.getText() ?? "").trim()) {
+      const ok = await dialogConfirm({
+        title: "应用模板",
+        message: `将替换当前输入内容？`,
+      });
+      if (!ok) return;
+    }
+    onPickWorkspace?.(tpl.cwd);
+    chatInputRef.current?.setText(tpl.prompt);
+    toast(`已应用模板「${tpl.name}」`);
+  }, [onPickWorkspace]);
+
+  const saveTemplate = useCallback(async () => {
+    const prompt = chatInputRef.current?.getText() ?? "";
+    if (!prompt.trim()) {
+      toast("先在输入框写点内容，再存为模板");
+      return;
+    }
+    const firstLine = prompt.trim().split("\n")[0].trim();
+    const name = await dialogPrompt({
+      title: "存为模板",
+      message: "模板会记住当前工作区与输入内容，下次在新会话里一键带出。",
+      defaultValue: firstLine.slice(0, 20),
+      placeholder: "模板名称",
+    });
+    if (name === null) return;
+    try {
+      const r = await fetch("/api/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "create", name, cwd: effectivePicked ?? null, prompt }),
+      });
+      const data = (await r.json().catch(() => ({}))) as { error?: string };
+      if (!r.ok) {
+        toast(data.error || "保存模板失败");
+        return;
+      }
+      await loadTemplates();
+      toast(`已保存模板「${name}」`);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "保存模板失败");
+    }
+  }, [effectivePicked, loadTemplates]);
+
+  const removeTemplate = useCallback(async (tpl: SessionTemplate) => {
+    const ok = await dialogConfirm({
+      title: "删除模板",
+      message: `删除模板「${tpl.name}」？此操作不可撤销。`,
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const r = await fetch("/api/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete", id: tpl.id }),
+      });
+      const data = (await r.json().catch(() => ({}))) as { error?: string };
+      if (!r.ok) {
+        toast(data.error || "删除模板失败");
+        return;
+      }
+      await loadTemplates();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "删除模板失败");
+    }
+  }, [loadTemplates]);
+
+  /* 空态模板条：没有任何模板时也显示，保证「存为模板」可发现 */
+  const templateBar = (
+    <div data-testid="template-bar" className="mb-2 flex flex-wrap items-center gap-1.5 px-1">
+      <span className="text-[11px] text-dim">模板</span>
+      {templates.map((tpl) => {
+        const preview = tpl.prompt.length > 80 ? `${tpl.prompt.slice(0, 80)}…` : tpl.prompt;
+        return (
+          <span key={tpl.id} className="group/tpl inline-flex items-center">
+            <button
+              type="button"
+              data-testid="template-chip"
+              onClick={() => void applyTemplate(tpl)}
+              title={`${preview}\n工作区：${tpl.cwd ?? "默认工作区"}`}
+              className="chip max-w-48 cursor-pointer t-fast hover:border-accent/40 hover:text-fg"
+            >
+              <span className="truncate">{tpl.name}</span>
+            </button>
+            <button
+              type="button"
+              data-testid="template-chip-delete"
+              aria-label={`删除模板 ${tpl.name}`}
+              onClick={() => void removeTemplate(tpl)}
+              className="ml-1 flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-md text-dim opacity-0 t-fast hover:text-danger group-hover/tpl:opacity-100 focus-visible:opacity-100"
+            >
+              <X size={10} />
+            </button>
+          </span>
+        );
+      })}
+      <button
+        type="button"
+        data-testid="template-save"
+        aria-label="存为模板"
+        onClick={() => void saveTemplate()}
+        title="把当前工作区与输入内容存为模板"
+        className="chip cursor-pointer t-fast hover:border-accent/40 hover:text-fg"
+      >
+        <Plus size={12} />
+        <span>存为模板</span>
+      </button>
+    </div>
+  );
+
   /* 过程态状态条：重试 / 压缩 / shell 执行 / 模型错误 —— 之前全靠内核静默推进 */
   const statusBar = (
     <AgentStatusBar
@@ -799,6 +935,7 @@ export function ChatView({
             <div className="mt-6 text-[14px] font-semibold tracking-[0.06em] text-fg">在确定性中寻找出口</div>
             <div className="mt-3 h-[3px] w-10 rounded-full bg-accent" />
             <div className="relative mt-9 w-full max-w-[var(--chat-col)]">
+              {isNew && templateBar}
               {statusBar}
               {chatInputEl}
             </div>

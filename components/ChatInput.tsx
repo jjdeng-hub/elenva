@@ -362,6 +362,18 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
         });
         areaRef.current?.focus();
       },
+      // 只读：取最新文本（textRef 不受闭包过期影响）
+      getText: () => textRef.current,
+      // 覆盖语义：不做增量拼接；图片附件不动，草稿照常持久化，光标落到末尾
+      setText: (t) => {
+        updateText(t);
+        requestAnimationFrame(() => {
+          const el = areaRef.current;
+          if (!el) return;
+          el.focus();
+          el.setSelectionRange(t.length, t.length);
+        });
+      },
       addImages: (files) => addImages(files),
       rekeyDraft: (previousKey, nextKey) => {
         try {
