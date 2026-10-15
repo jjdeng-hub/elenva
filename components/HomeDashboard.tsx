@@ -1,11 +1,12 @@
 "use client";
 
-import { AlertTriangle, Cpu, Gauge, KeyRound, Loader2, Play } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Cpu, Gauge, KeyRound, Loader2, Play } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
 import { basename, formatCost, formatTokens, relTime, timeLabel } from "@/lib/format";
 import type { UsageReport } from "@/lib/usage-aggregate";
-import type { AttentionItem } from "@/lib/attention";
+import type { AttentionItem, RecentCompletion } from "@/lib/attention";
+import type { PendingApproval, QueuedApproval } from "@/lib/pending-approvals";
 import type { SystemStatus } from "@/lib/system-status";
 import type { SessionInfo } from "@/lib/types";
 import { UsageAnalysis } from "@/components/home/UsageAnalysis";
@@ -40,9 +41,34 @@ function displayTitle(s: SessionInfo): string {
   return s.name || cleanTitle(s.firstMessage) || "(无标题)";
 }
 
-/** 需关注原因 → 短标签（与会话流表格同一口径）。 */
-function attentionLabel(a: AttentionItem): string {
-  return a.reasons.includes("interrupted") ? "被中断" : "工具报错";
+/**
+ * 「等你处理」的四种来源：活审批最急（会话可能还在跑），其次中断 / 报错，
+ * 最后是无人值守落下的审批队列。同会话多信号时保留优先级最高的一条。
+ */
+type WaitSource = "approval-live" | "interrupted" | "error" | "approval-queued";
+
+const WAIT_LABELS: Record<WaitSource, string> = {
+  "approval-live": "等待审批",
+  interrupted: "被中断",
+  error: "工具报错",
+  "approval-queued": "审批队列",
+};
+const WAIT_PRIORITY: Record<WaitSource, number> = {
+  "approval-live": 0,
+  interrupted: 1,
+  error: 1,
+  "approval-queued": 2,
+};
+
+interface WaitItem {
+  sessionId: string;
+  source: WaitSource;
+  detail: string;
+}
+
+interface PendingApprovalsPayload {
+  live?: PendingApproval[];
+  queued?: QueuedApproval[];
 }
 
 /** 本机快照卡的一行：dim 标签 + 值（tone 控制颜色）。 */
@@ -87,7 +113,7 @@ type TabKey = "all" | "running" | "attention" | "idle";
 const TABS: { key: TabKey; label: string }[] = [
   { key: "all", label: "全部" },
   { key: "running", label: "运行中" },
-  { key: "attention", label: "需关注" },
+  { key: "attention", label: "等我" },
   { key: "idle", label: "空闲" },
 ];
 
@@ -181,18 +207,32 @@ export function HomeDashboard({
     };
   }, [sessions]);
 
-  // 需关注（被中断 / 工具报错）
+  // 「等你处理」两源（被中断 / 工具报错 / 等待审批 / 审批队列）+ 「最近完成」：
+  // 同一个 /api/attention 轮询（5s 节奏，与运行卡一致；不新增第二处轮询）。
   const [attention, setAttention] = useState<AttentionItem[]>([]);
+  const [pendingApprovals, setPendingApprovals] = useState<{ live: PendingApproval[]; queued: QueuedApproval[] }>({
+    live: [],
+    queued: [],
+  });
+  const [completions, setCompletions] = useState<RecentCompletion[]>([]);
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/attention", { cache: "no-store" })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { items?: AttentionItem[] } | null) => {
-        if (!cancelled && data?.items) setAttention(data.items);
-      })
-      .catch(() => {});
+    const load = () => {
+      fetch("/api/attention", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data: { items?: AttentionItem[]; pendingApprovals?: PendingApprovalsPayload; recentlyCompleted?: RecentCompletion[] } | null) => {
+          if (cancelled || !data) return;
+          setAttention(data.items ?? []);
+          setPendingApprovals({ live: data.pendingApprovals?.live ?? [], queued: data.pendingApprovals?.queued ?? [] });
+          setCompletions(data.recentlyCompleted ?? []);
+        })
+        .catch(() => {});
+    };
+    load();
+    const timer = setInterval(load, 5000);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, [sessions]);
 
@@ -209,10 +249,38 @@ export function HomeDashboard({
     for (const item of sessions) map.set(item.id, item);
     return map;
   }, [sessions]);
-  const attentionRows = useMemo(
-    () => attention.map((a) => ({ a, s: sessionsById.get(a.sessionId) })),
-    [attention, sessionsById],
-  );
+  // 「等你处理」两源合计：活审批 + 中断/报错 + 审批队列（按会话去重，最高优先级胜出）
+  const waitItems = useMemo<WaitItem[]>(() => {
+    const byId = new Map<string, WaitItem>();
+    const put = (item: WaitItem) => {
+      const prev = byId.get(item.sessionId);
+      if (!prev || WAIT_PRIORITY[item.source] < WAIT_PRIORITY[prev.source]) byId.set(item.sessionId, item);
+    };
+    for (const p of pendingApprovals.live) {
+      put({ sessionId: p.sessionId, source: "approval-live", detail: p.reason || p.detail });
+    }
+    for (const a of attention) {
+      put({
+        sessionId: a.sessionId,
+        source: a.reasons.includes("interrupted") ? "interrupted" : "error",
+        detail: a.detail,
+      });
+    }
+    for (const q of pendingApprovals.queued) {
+      if (!q.sessionId) continue;
+      put({ sessionId: q.sessionId, source: "approval-queued", detail: q.reason || q.detail || q.toolName || "" });
+    }
+    return [...byId.values()];
+  }, [pendingApprovals, attention]);
+  const waitCount = waitItems.length;
+  const waitById = useMemo(() => new Set(waitItems.map((w) => w.sessionId)), [waitItems]);
+
+  // 运行卡用：会话 → 等待审批的理由短句
+  const approvalReasons = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const p of pendingApprovals.live) map[p.sessionId] = p.reason || p.detail || "等待审批";
+    return map;
+  }, [pendingApprovals]);
 
   // 本机快照派生值（卡片是只读展示，阈值与系统页一致：磁盘/内存 ≥90% 报警）
   const snap = useMemo(() => {
@@ -254,17 +322,17 @@ export function HomeDashboard({
   const tabbed = useMemo(() => {
     const sorted = [...sessions].sort((a, b) => (b.modified || "").localeCompare(a.modified || ""));
     if (tab === "running") return sorted.filter((s) => runningIds.has(s.id));
-    if (tab === "attention") return sorted.filter((s) => attentionById.has(s.id));
+    if (tab === "attention") return sorted.filter((s) => waitById.has(s.id) && !runningIds.has(s.id));
     if (tab === "idle") return sorted.filter((s) => !runningIds.has(s.id));
     // 全部：运行中的会话已由上方「实时卡」承载（带 5s 轮询的最新动态），
     // 这里不再重复成行 —— 同一会话在同一屏出现两次会被当成 bug。
     return sorted.filter((s) => !runningIds.has(s.id));
-  }, [sessions, runningIds, tab, attentionById]);
+  }, [sessions, runningIds, tab, attentionById, waitById]);
 
   const tabCount = (key: TabKey) => {
     if (key === "all") return sessions.length;
     if (key === "running") return runningIds.size;
-    if (key === "attention") return attention.length;
+    if (key === "attention") return waitCount;
     return sessions.length - runningIds.size;
   };
 
@@ -304,23 +372,24 @@ export function HomeDashboard({
               {stats.running > 0 && <span className="size-1.5 rounded-full bg-accent anim-pulse-dot" />}
               运行中 {stats.running}
             </span>
-            <span className={cn(attention.length > 0 ? "font-semibold text-warn" : "text-dim")}>需关注 {attention.length}</span>
+            <span className={cn(waitCount > 0 ? "font-semibold text-warn" : "text-dim")}>等你处理 {waitCount}</span>
             {/* 今日/累计 token 与成本不在此重复 —— 它们是右栏「今日概览」卡的职责 */}
             <span className="ml-auto text-dim">
               {stats.total} 会话 · {stats.projects} 项目
             </span>
           </div>
 
-        {/* 需关注清单：从「一个计数」升为「可直接动作的行」——被中断 / 工具报错的会话
-            在这里就能一键回到现场，不用先切到会话流再筛 tab。0 项时整条不渲染。 */}
-        {attention.length > 0 && (
+        {/* 等你处理：两源合计（被中断 / 工具报错 / 等待审批 / 审批队列）。
+            活审批排在最前且用 danger 色 —— 它是最硬的一种「等你」，会话可能还在跑。
+            0 项时整条不渲染。 */}
+        {waitCount > 0 && (
           <div
             className="anim-fade-up mt-3 rounded-card border border-warn/30 bg-panel px-3.5 py-2.5"
             data-testid="attention-band"
           >
             <div className="flex items-center gap-2">
               <AlertTriangle size={14} className="shrink-0 text-warn" />
-              <span className="text-[12px] font-semibold text-warn">需要处理（{attention.length}）</span>
+              <span className="text-[12px] font-semibold text-warn">等你处理（{waitCount}）</span>
               <button
                 onClick={() => setTab("attention")}
                 className="ml-auto cursor-pointer text-[12px] font-medium text-accent t-fast hover:text-accent-hover"
@@ -329,22 +398,31 @@ export function HomeDashboard({
               </button>
             </div>
             <div className="mt-1 flex flex-col">
-              {attentionRows.slice(0, 3).map(({ a, s: sess }) => (
-                <button
-                  key={a.sessionId}
-                  onClick={() => sess && onOpenSession(sess)}
-                  className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-left t-fast hover:bg-hover"
-                >
-                  <span className="size-1.5 shrink-0 rounded-full bg-warn anim-pulse-dot" />
-                  <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg">
-                    {sess ? displayTitle(sess) : a.sessionId.slice(0, 8)}
-                  </span>
-                  <span className="shrink-0 rounded-sm border border-warn/30 bg-warn/10 px-1.5 py-0.5 text-[10px] font-medium text-warn">
-                    {attentionLabel(a)}
-                  </span>
-                  <span className="ml-1 hidden max-w-[34%] shrink-0 truncate text-[11px] text-dim xl:inline">{a.detail}</span>
-                </button>
-              ))}
+              {waitItems.slice(0, 3).map((w) => {
+                const sess = sessionsById.get(w.sessionId);
+                const danger = w.source === "approval-live";
+                return (
+                  <button
+                    key={w.sessionId}
+                    onClick={() => sess && onOpenSession(sess)}
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-left t-fast hover:bg-hover"
+                  >
+                    <span className={cn("size-1.5 shrink-0 rounded-full anim-pulse-dot", danger ? "bg-danger" : "bg-warn")} />
+                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg">
+                      {sess ? displayTitle(sess) : w.sessionId.slice(0, 8)}
+                    </span>
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] font-medium",
+                        danger ? "border-danger/30 bg-danger/10 text-danger" : "border-warn/30 bg-warn/10 text-warn",
+                      )}
+                    >
+                      {WAIT_LABELS[w.source]}
+                    </span>
+                    <span className="ml-1 hidden max-w-[34%] shrink-0 truncate text-[11px] text-dim xl:inline">{w.detail}</span>
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
@@ -456,7 +534,7 @@ export function HomeDashboard({
                 其余页签用实时卡），保证同一会话只出现一次 */}
             {tab !== "running" && (
               <div className="shrink-0">
-                <RunningCards running={runningSessions} usage={usage} onOpenSession={onOpenSession} />
+                <RunningCards running={runningSessions} usage={usage} approvalReasons={approvalReasons} onOpenSession={onOpenSession} />
               </div>
             )}
             {/* 表格区：卡内滚动。固定高度由外层决定，条数少了空着、多了滚，卡片本身不变形 */}
@@ -476,7 +554,7 @@ export function HomeDashboard({
                 {tabbed.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-10 text-center text-[13px] text-dim">
-                      {tab === "attention" ? "没有需要关注的会话" : "暂无会话，点击右上角「新建会话」开始"}
+                      {tab === "attention" ? "没有等你处理的会话" : "暂无会话，点击右上角「新建会话」开始"}
                     </td>
                   </tr>
                 )}
@@ -592,6 +670,38 @@ export function HomeDashboard({
             )}
           </div>
         </div>
+
+        {/* 最近完成：近 24h 收尾、无任何等待信号的会话（最后一条实质消息是 assistant），
+            按活动时间倒序 top 5。无则整节不渲染。 */}
+        {completions.length > 0 && (
+          <div className="card mt-3.5 px-4 py-3.5" data-testid="recent-completions">
+            <div className="flex items-center justify-between">
+              <h2 className="flex items-center gap-1.5 text-[14px] font-semibold">
+                <CheckCircle2 size={14} className="text-success" /> 最近完成
+              </h2>
+              <span className="text-[12px] text-dim">近 24 小时</span>
+            </div>
+            <div className="mt-1.5 flex flex-col">
+              {completions.map((c) => {
+                const sess = sessionsById.get(c.sessionId);
+                const reply = c.detail.length > 60 ? `${c.detail.slice(0, 60)}…` : c.detail;
+                return (
+                  <button
+                    key={c.sessionId}
+                    onClick={() => sess && onOpenSession(sess)}
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-md border-b border-line-soft px-1.5 py-2 text-left t-fast last:border-b-0 hover:bg-hover"
+                  >
+                    <span className="min-w-0 shrink-0 max-w-[36%] truncate text-[12px] font-medium text-fg">
+                      {sess ? displayTitle(sess) : c.sessionId.slice(0, 8)}
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[12px] text-muted">{reply}</span>
+                    <span className="shrink-0 text-[12px] text-dim">{relTime(c.at)}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* 中部两列：模型排行 | 技能（两卡各固定 5 槽，数据量不同也对齐） */}
         <div className="mt-3.5 grid gap-3.5 lg:grid-cols-2">
