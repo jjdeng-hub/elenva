@@ -1,8 +1,8 @@
 "use client";
 
-import { AlertTriangle, Brain, CalendarDays, FileText, Inbox, Info, Loader2, Pencil, Plus, RefreshCw, Save, Trash2, User } from "lucide-react";
+import { AlertTriangle, Brain, CalendarDays, FileText, Gauge, Inbox, Info, Loader2, Pencil, Plus, RefreshCw, Save, Trash2, User } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { cn } from "@/components/lib/utils";
 import { EmptyState, PageHeader } from "@/components/ui/bits";
 import { toast, dialogConfirm, dialogPrompt } from "@/components/ui/dialog";
@@ -32,6 +32,10 @@ type AgentMemoryFile = {
   exists: boolean;
   size: number;
   modified: string | null;
+  /** 当前内容字符数（与详情卡同口径）；文件不存在 = 0 */
+  chars: number;
+  /** 该 kind 的配额上限 */
+  limit: number;
 };
 
 type AgentMemoryIndex = {
@@ -89,9 +93,11 @@ const PENDING_TARGETS: { id: PendingResolveTarget; label: string; hint: string }
  */
 export function MemoryPage({ projects }: { projects: MemoryProject[] }) {
   const [tab, setTab] = useState<MemoryTab>("agent");
+  /** Agent 记忆页的滚动容器：配额块「去整理」用它做瞬时滚动（勿用 scrollIntoView） */
+  const agentScrollRef = useRef<HTMLDivElement | null>(null);
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto">
+    <div ref={agentScrollRef} className="min-h-0 flex-1 overflow-y-auto">
       <div className="page-col-form py-6">
         <PageHeader
           icon={<Brain size={16} />}
@@ -108,7 +114,7 @@ export function MemoryPage({ projects }: { projects: MemoryProject[] }) {
             </div>
           }
         />
-        {tab === "agent" ? <AgentMemoryView /> : <InstructionFilesView projects={projects} />}
+        {tab === "agent" ? <AgentMemoryView scrollRef={agentScrollRef} /> : <InstructionFilesView projects={projects} />}
       </div>
     </div>
   );
@@ -142,7 +148,7 @@ function TabButton({
 
 /* ============================ Agent 记忆（只读） ============================ */
 
-function AgentMemoryView() {
+function AgentMemoryView({ scrollRef }: { scrollRef: RefObject<HTMLDivElement | null> }) {
   const [index, setIndex] = useState<AgentMemoryIndex | null>(null);
   const [activeId, setActiveId] = useState("memory");
   const [detail, setDetail] = useState<AgentMemoryDetail | null>(null);
@@ -160,6 +166,8 @@ function AgentMemoryView() {
   const [saving, setSaving] = useState(false);
   const detailSeq = useRef(0);
   const pickedInitial = useRef(false);
+  /** 详情卡（右侧内容区）：配额块「去整理」的滚动落点 */
+  const detailRef = useRef<HTMLElement | null>(null);
   /** 待审队列（从对话里「记住 → 先入待审」攒下） */
   const [pending, setPending] = useState<PendingMemoryItem[]>([]);
   const [pendingBusy, setPendingBusy] = useState<string | null>(null);
@@ -329,6 +337,21 @@ function AgentMemoryView() {
   /** 落盘占用（含元数据），与扩展的配额口径一致 */
   const capacity = detail && detail.limit > 0 ? detail.chars / detail.limit : 0;
 
+  /** 配额块「去整理」：选中该文件（复用现有详情选中机制）+ 把详情卡滚进视野。
+   *  不用 el.scrollIntoView —— 外层还有 overflow-hidden 容器会被一起程序化滚动（见 lib/scroll.ts 的教训）；
+   *  只动本页自己的滚动容器，瞬时（behavior auto），位移按两个 rect 的差值算。 */
+  const gotoFile = useCallback(
+    (id: string) => {
+      setActiveId(id);
+      const container = scrollRef.current;
+      const target = detailRef.current;
+      if (!container || !target) return;
+      const delta = target.getBoundingClientRect().top - container.getBoundingClientRect().top - 8;
+      container.scrollTop = Math.max(0, container.scrollTop + delta);
+    },
+    [scrollRef],
+  );
+
   return (
     <div className="flex flex-col gap-3">
       {/* 待审队列：从对话里「记住 → 先入待审」攒下的条目 —— 确认去向或丢弃。
@@ -426,6 +449,12 @@ function AgentMemoryView() {
         </div>
       )}
 
+      {/* 配额视图：每个存在的记忆文件一行（占用/上限 + 占比条 + 四档状态），
+          ≥70% 时给合并/清理引导与「去整理」。只读展示 + 引导，不做自动合并/改写
+          （《深入理解 AI Agent》ch3 L219-223 的三层压缩由系统执行；这里对应已登记的
+          「超阈值只提醒不自动整理」偏离）。全部文件皆不存在时走下面的空态，这里不渲染。 */}
+      {index && !nothingSaved && <MemoryQuotaBlock files={files} onGoto={gotoFile} />}
+
       {/* 两个记忆体系的分工。用户会把它们混为一谈（"到底谁在写记忆"），
           这里点明本页是只读的，要改就让 Agent 用 memory_add 改。 */}
       <div className="rounded-lg border border-line-soft bg-panel-2 px-3 py-2 text-[11px] leading-relaxed text-dim">
@@ -502,7 +531,7 @@ function AgentMemoryView() {
             </aside>
 
             {/* 内容 */}
-            <section className="min-w-0 flex-1">
+            <section ref={detailRef} data-testid="memory-detail" className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-4 py-2.5">
                 <span className="flex items-center gap-1.5 font-mono text-[12px] font-medium text-fg">
                   {active?.kind === "user"
@@ -682,6 +711,111 @@ function AgentMemoryView() {
           </div>
         </Card>
       )}
+    </div>
+  );
+}
+
+/** 配额档位（阈值按任务书）：<70% 常规 / 70%–90% 注意 / 90%–100% 快满 / ≥100% 已满 */
+type QuotaLevel = "ok" | "warn" | "near" | "full";
+
+function quotaLevelOf(chars: number, limit: number): QuotaLevel {
+  if (!Number.isFinite(limit) || limit <= 0) return "ok";
+  const ratio = chars / limit;
+  if (ratio >= 1) return "full";
+  if (ratio >= 0.9) return "near";
+  if (ratio >= 0.7) return "warn";
+  return "ok";
+}
+
+const QUOTA_LEVEL_STYLE: Record<QuotaLevel, { label: string; chip: string; bar: string; pct: string }> = {
+  ok: { label: "常规", chip: "chip", bar: "bg-accent", pct: "text-dim" },
+  warn: { label: "注意", chip: "chip-warn", bar: "bg-warn", pct: "text-warn" },
+  near: { label: "快满", chip: "chip-danger", bar: "bg-danger", pct: "text-danger" },
+  full: { label: "已满", chip: "chip-danger", bar: "bg-danger", pct: "text-danger" },
+};
+
+/**
+ * 配额块：每个**存在**的记忆文件一行 —— 占用/上限 + 占比条 + 四档状态；
+ * ≥70% 的行额外给合并/清理引导与「去整理」（选中该文件并滚到详情卡）。
+ * 只读展示 + 引导，**不做**自动合并 / 自动改写（合并是语义判断且不可逆）。
+ */
+function MemoryQuotaBlock({ files, onGoto }: { files: AgentMemoryFile[]; onGoto: (id: string) => void }) {
+  const rows = files.filter((f) => f.exists);
+  if (rows.length === 0) return null;
+  const nearCount = rows.filter((f) => quotaLevelOf(f.chars, f.limit) !== "ok").length;
+
+  return (
+    <div data-testid="memory-quota" className="flex flex-col gap-2 rounded-lg border border-line-soft bg-panel-2 p-3">
+      <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-fg">
+        <Gauge size={12} className="text-dim" />
+        配额 · {rows.length} 个文件
+        <span className="ml-auto text-[10px] font-normal text-dim">
+          {nearCount > 0 ? `${nearCount} 个接近上限` : "占用按落盘原文计（含元数据）"}
+        </span>
+      </div>
+
+      {rows.map((f) => {
+        const level = quotaLevelOf(f.chars, f.limit);
+        const style = QUOTA_LEVEL_STYLE[level];
+        const pct = f.limit > 0 ? Math.round((f.chars / f.limit) * 100) : 0;
+        const over = f.chars - f.limit;
+        return (
+          <div
+            key={f.id}
+            data-testid="quota-row"
+            data-quota-level={level}
+            className="flex flex-col gap-1.5 rounded-md border border-line-soft bg-panel px-3 py-2"
+          >
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="flex min-w-0 items-center gap-1.5 font-mono text-[12px] text-fg">
+                {f.kind === "failures" ? (
+                  <AlertTriangle size={12} className="shrink-0 text-dim" />
+                ) : f.kind === "user" ? (
+                  <User size={12} className="shrink-0 text-dim" />
+                ) : f.kind === "project" ? (
+                  <CalendarDays size={12} className="shrink-0 text-dim" />
+                ) : (
+                  <FileText size={12} className="shrink-0 text-dim" />
+                )}
+                <span className="truncate" title={f.path}>
+                  {f.label}
+                </span>
+              </span>
+              {f.kind === "project" && <span className="chip">项目</span>}
+              <span className="text-[11px] tabular-nums text-dim">
+                {f.chars} / {f.limit} 字符
+              </span>
+              {level === "full" && <span className="chip chip-danger">超限 {over}</span>}
+              <span className="ml-auto flex shrink-0 items-center gap-1.5">
+                <span className="h-1 w-20 overflow-hidden rounded-full bg-panel-2">
+                  <span
+                    className={cn("block h-full rounded-full t-base", style.bar)}
+                    style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+                  />
+                </span>
+                <span className={cn("text-[10px] tabular-nums", style.pct)}>{pct}%</span>
+                <span className={style.chip}>{style.label}</span>
+              </span>
+            </div>
+
+            {level !== "ok" && (
+              <div className="flex flex-wrap items-center gap-2">
+                <p
+                  data-testid="quota-guidance"
+                  className={cn("text-[11px]", level === "full" ? "text-danger" : "text-warn")}
+                >
+                  {level === "full"
+                    ? "已满：写入会被拒绝——先清理再写入。"
+                    : "接近上限——建议合并重复条目或删除过时条目（满额后新写入会被拒绝）。"}
+                </p>
+                <button onClick={() => onGoto(f.id)} data-testid="quota-goto" className="btn btn-subtle btn-sm shrink-0">
+                  <Pencil size={12} /> 去整理
+                </button>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
