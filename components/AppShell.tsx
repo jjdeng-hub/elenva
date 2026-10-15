@@ -10,6 +10,7 @@ import { HomeDashboard } from "@/components/HomeDashboard";
 import { MemoryPage, type MemoryProject } from "@/components/MemoryPage";
 import { ModelsPage } from "@/components/ModelsPage";
 import { PluginsPage } from "@/components/PluginsPage";
+import { RhythmPage } from "@/components/RhythmPage";
 import { SettingsPage } from "@/components/SettingsPage";
 import { ShortcutPanel } from "@/components/ShortcutPanel";
 import { SkillsPage } from "@/components/SkillsPage";
@@ -31,6 +32,7 @@ type SessionsResponse = {
 
 const PAGE_TITLES: Record<string, string> = {
   code: "代码",
+  rhythm: "节律",
   skills: "技能",
   memory: "记忆",
   prompt: "提示词",
@@ -802,6 +804,7 @@ export function AppShell() {
           />
         )}
         {view === "skills" && <SkillsPage defaultCwd={defaultCwd} />}
+        {view === "rhythm" && <RhythmPage defaultCwd={defaultCwd} onOpenSession={openSessionById} />}
         {view === "memory" && <MemoryPage projects={memoryProjects} />}
         {view === "prompt" && <SystemPromptPage defaultCwd={defaultCwd} projects={memoryProjects} />}
         {view === "models" && <ModelsPage />}

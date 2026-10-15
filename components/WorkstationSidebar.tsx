@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  AlarmClock,
   Bot,
   Brain,
   Cpu,
@@ -26,6 +27,8 @@ export type View =
   | "chat"
   /** 代码：文件浏览 + 改动查看 + 提交（由原「Git 变更」与「文件浏览器」合并而来） */
   | "code"
+  /** 节律：按规则自动跑的任务（查看 / 新建 / 编辑 / 运行历史） */
+  | "rhythm"
   | "skills"
   | "memory"
   /** 提示词：模型每轮实际看到的内容（pi 基座 + 宿主层 + 项目指令 + 技能索引） */
@@ -173,6 +176,7 @@ export function WorkstationSidebar({
       <div className={groupCls}>工作区</div>
           <NavItem collapsed={isCollapsed} icon={<ListChecks size={14} />} label="会话" active={view === "chat"} onClick={() => onViewChange("chat")} />
           <NavItem collapsed={isCollapsed} icon={<FolderGit2 size={14} />} label="代码" active={view === "code"} onClick={() => onViewChange("code")} />
+          <NavItem collapsed={isCollapsed} icon={<AlarmClock size={14} />} label="节律" active={view === "rhythm"} onClick={() => onViewChange("rhythm")} />
 
       <div className={groupCls}>资源</div>
           <NavItem collapsed={isCollapsed} icon={<Cpu size={14} />} label="模型" active={view === "models"} onClick={() => onViewChange("models")} />
