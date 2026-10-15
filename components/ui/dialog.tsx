@@ -17,6 +17,14 @@ type DialogOptions = {
   placeholder?: string;
   /** prompt 模式：自动聚焦选中默认值 */
   select?: boolean;
+  /**
+   * prompt 模式：允许「空串」作为一个有效结果。
+   *
+   * 默认（不传）下，trim 后为空会返回 null —— 与「取消」不可区分。对「改名 / 存模板」
+   * 这类场景这没问题（空名字本就不合法），但「清空标签」需要区分「清空」与「取消」：
+   * 因此打开此开关后，确定与回车两条路径都返回 trim 后的字符串（含 ""），取消仍是 null。
+   */
+  allowEmpty?: boolean;
 };
 
 type DialogState = DialogOptions & {
@@ -119,7 +127,8 @@ export function DialogHost() {
             onKeyDown={(e) => {
               if (e.key === "Enter") {
                 e.stopPropagation();
-                close((e.target as HTMLInputElement).value.trim() || null);
+                const value = (e.target as HTMLInputElement).value.trim();
+                close(d.allowEmpty ? value : value || null);
               }
             }}
             className="mt-3.5 h-9 w-full rounded-lg border border-line bg-panel-2 px-3 text-[13px] text-fg outline-none focus:border-accent/60"
@@ -135,7 +144,11 @@ export function DialogHost() {
           </button>
           <button
             ref={okRef}
-            onClick={() => close(d.mode === "prompt" ? (inputRef.current?.value.trim() || null) : true)}
+            onClick={() => {
+              if (d.mode !== "prompt") return close(true);
+              const value = inputRef.current?.value.trim() ?? "";
+              close(d.allowEmpty ? value : value || null);
+            }}
             className={cn(
               "h-8 cursor-pointer rounded-lg px-3.5 text-[12px] font-semibold text-white transition-opacity hover:opacity-90",
               d.danger ? "bg-danger" : "bg-accent",

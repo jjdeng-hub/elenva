@@ -20,6 +20,7 @@ import type { SessionEntry } from "@/lib/types";
 import { readSubagentRun, readSubagentSessionResources, SUBAGENT_META_TYPE } from "@/lib/subagents";
 import { readSessionToolSelection } from "@/lib/session-tool-selection";
 import { dropCheckpoints } from "@/lib/checkpoints";
+import { dropSessionMeta } from "@/lib/session-meta";
 
 export async function GET(
   req: Request,
@@ -226,6 +227,8 @@ export async function DELETE(
     }
     // 会话删了，它的每轮改动快照也没有意义了（否则 ~/.pi/agent 会一直长）
     dropCheckpoints(id);
+    // 同理：会话没了，它的收藏 / 标签也失去指向对象（否则 json 会一直长）
+    dropSessionMeta(id);
     invalidateSessionPathCache(id);
     invalidateSessionListCache();
     return NextResponse.json({ ok: true });

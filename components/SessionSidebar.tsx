@@ -1,17 +1,26 @@
 "use client";
 
-import { Check, ChevronDown, FileUp, Folder, FolderPlus, Loader2, MessageSquarePlus, Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Check, ChevronDown, FileUp, Folder, FolderPlus, Hash, Loader2, MessageSquarePlus, Pencil, Plus, Search, Star, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { Resizer, usePersistedWidth } from "@/components/ui/Resizer";
 import { basename, relTime, timeLabel } from "@/lib/format";
-import { toast } from "@/components/ui/dialog";
+import { dialogPrompt, toast } from "@/components/ui/dialog";
+import type { SessionMeta } from "@/lib/session-meta";
 import type { SessionInfo } from "@/lib/types";
 
 const GROUP_PREVIEW_COUNT = 5;
+/** 行内标签最多显示几个（多出的折成 +N） */
+const TAG_PREVIEW_COUNT = 2;
+/** 过滤行最多列几个在用标签 */
+const TAG_CHIP_LIMIT = 12;
 const DEFAULT_GROUP_KEY = "__default__";
 const MANUAL_EXPANDED_KEY = "elenva-session-groups-expanded";
 const PROJECTS_SECTION_KEY = "elenva-projects-section-open";
+const SESSION_FILTER_KEY = "elenva-session-filter";
+
+/** 侧栏过滤条件：全部 / 只看收藏 / 只看某个标签 */
+type SessionFilter = { kind: "all" | "fav" | "tag"; tag?: string };
 
 /** 用户手动展开/收起过的组（优先于「最近活跃默认展开」规则） */
 function readManualExpanded(): Record<string, boolean> {
@@ -30,6 +39,49 @@ function readProjectsSectionOpen(): boolean {
   } catch {
     return true;
   }
+}
+
+/** 过滤条件持久化：坏数据一律回落「全部」（宁可多显示，不可空列表说不清） */
+function readSessionFilter(): SessionFilter {
+  try {
+    const raw = localStorage.getItem(SESSION_FILTER_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as { kind?: unknown; tag?: unknown };
+      if (parsed?.kind === "fav") return { kind: "fav" };
+      if (parsed?.kind === "tag" && typeof parsed.tag === "string" && parsed.tag) {
+        return { kind: "tag", tag: parsed.tag };
+      }
+    }
+  } catch {
+    /* 忽略坏数据 */
+  }
+  return { kind: "all" };
+}
+
+/** 「修复 bug, 归档，修复 bug」→ ["修复 bug","归档"]（中英文逗号都切、去空、去重保序） */
+function splitTagInput(input: string): string[] {
+  const seen = new Set<string>();
+  const tags: string[] = [];
+  for (const raw of input.split(/[,，]/)) {
+    const tag = raw.trim();
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    tags.push(tag);
+  }
+  return tags;
+}
+
+/** 元数据过滤：标签按原样精确匹配（服务端已按大小写不敏感去重、保留原大小写） */
+function matchesSessionFilter(
+  s: SessionInfo,
+  meta: Record<string, SessionMeta>,
+  filter: SessionFilter,
+): boolean {
+  if (filter.kind === "fav") return meta[s.id]?.fav === true;
+  if (filter.kind === "tag") return (meta[s.id]?.tags ?? []).includes(filter.tag ?? "");
+  return true;
 }
 
 interface SessionGroup {
@@ -87,6 +139,31 @@ export function SessionSidebar({
   useEffect(() => {
     setManual(readManualExpanded());
     setProjectsSectionOpen(readProjectsSectionOpen());
+    setFilter(readSessionFilter());
+  }, []);
+
+  /**
+   * 收藏 / 标签是**服务端元数据**（`~/.pi/agent/elenva-session-meta.json`，见 lib/session-meta.ts）：
+   * 只加载一次，之后的写操作就地更新本地副本（不再全量拉取）。拉不到就当没这层 ——
+   * 「无收藏无标签 = 与今天零差异」，元数据故障不该拖垮会话列表。
+   */
+  const [meta, setMeta] = useState<Record<string, SessionMeta>>({});
+  const [filter, setFilter] = useState<SessionFilter>({ kind: "all" });
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/session-meta", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { meta?: Record<string, SessionMeta> };
+        if (alive && data?.meta && typeof data.meta === "object") setMeta(data.meta);
+      } catch {
+        /* 忽略：没有元数据等于没有收藏 / 标签 */
+      }
+    })();
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const toggleGroup = (key: string) => {
@@ -107,19 +184,21 @@ export function SessionSidebar({
     flat: SessionInfo[];
   }>(() => {
     const q = query.trim().toLowerCase();
+    // 先过滤（收藏 / 标签），再搜索 —— 两个条件叠加时取交集
+    const scoped = sessions.filter((s) => matchesSessionFilter(s, meta, filter));
     const filtered = q
-      ? sessions.filter(
+      ? scoped.filter(
           (s) =>
             (s.name || s.firstMessage || "").toLowerCase().includes(q) ||
             s.cwd.toLowerCase().includes(q),
         )
-      : sessions;
+      : scoped;
 
     const sortDesc = (list: SessionInfo[]) =>
       [...list].sort((a, b) => (b.modified || "").localeCompare(a.modified || ""));
 
-    // 搜索时打平：分组会妨碍扫视命中结果
-    if (q) {
+    // 搜索或过滤激活时打平：分组会妨碍扫视命中结果
+    if (q || filter.kind !== "all") {
       return { defaultGroup: null, projectGroups: [], flat: sortDesc(filtered) };
     }
 
@@ -174,12 +253,128 @@ export function SessionSidebar({
     }
 
     return { defaultGroup, projectGroups, flat: [] };
-  }, [sessions, query]);
+  }, [sessions, query, meta, filter]);
 
   /** 最近活跃的项目（其默认展开；其余收起） */
   const latestProjectKey = useMemo(() => groups.projectGroups[0]?.key ?? null, [groups.projectGroups]);
   const latestProjectKeyRef = useRef(latestProjectKey);
   latestProjectKeyRef.current = latestProjectKey;
+
+  /** 过滤激活 = 打平（与搜索同一条理由） */
+  const filterActive = filter.kind !== "all";
+  const flatMode = query.trim().length > 0 || filterActive;
+  /** 出现过任何收藏或标签吗 —— 没有则过滤行整体不渲染（与今天零视觉差异） */
+  const hasAnyMeta = useMemo(
+    () => Object.values(meta).some((entry) => entry.fav === true || (entry.tags?.length ?? 0) > 0),
+    [meta],
+  );
+  /** 在用标签：按出现次数降序（同频按名称），最多 TAG_CHIP_LIMIT 个 */
+  const tagOptions = useMemo(() => {
+    const counts = new Map<string, { label: string; count: number }>();
+    for (const entry of Object.values(meta)) {
+      for (const tag of entry.tags ?? []) {
+        const key = tag.toLowerCase();
+        const hit = counts.get(key);
+        if (hit) hit.count += 1;
+        else counts.set(key, { label: tag, count: 1 });
+      }
+    }
+    return [...counts.values()]
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "zh"))
+      .slice(0, TAG_CHIP_LIMIT);
+  }, [meta]);
+
+  const chooseFilter = (next: SessionFilter) => {
+    setFilter(next);
+    try {
+      localStorage.setItem(SESSION_FILTER_KEY, JSON.stringify(next));
+    } catch {
+      /* 忽略写入失败 */
+    }
+  };
+
+  /** 本地合并（与 lib/session-meta.ts 的合并语义一致）：空条目直接删 key */
+  const applyLocalMeta = (sessionId: string, patch: { fav?: boolean; tags?: string[] }) => {
+    setMeta((prev) => {
+      const current = prev[sessionId];
+      const fav = patch.fav !== undefined ? patch.fav : current?.fav === true;
+      const tags = patch.tags !== undefined ? patch.tags : current?.tags ?? [];
+      const next = { ...prev };
+      if (!fav && tags.length === 0) {
+        delete next[sessionId];
+        return next;
+      }
+      next[sessionId] = {
+        ...(fav ? { fav: true } : {}),
+        ...(tags.length > 0 ? { tags } : {}),
+        updatedAt: new Date().toISOString(),
+      };
+      return next;
+    });
+  };
+
+  /** 用服务端返回的条目覆盖本地（写操作后的权威值） */
+  const commitServerEntry = (sessionId: string, entry: SessionMeta | null | undefined) => {
+    setMeta((prev) => {
+      const next = { ...prev };
+      if (entry) next[sessionId] = entry;
+      else delete next[sessionId];
+      return next;
+    });
+  };
+
+  const postSessionMeta = async (body: Record<string, unknown>): Promise<SessionMeta | null> => {
+    const res = await fetch("/api/session-meta", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string; entry?: SessionMeta | null };
+    if (!res.ok) throw new Error(data.error || `操作失败（HTTP ${res.status}）`);
+    return data.entry ?? null;
+  };
+
+  /**
+   * 收藏切换：乐观更新（先改本地、再 POST），失败回滚 + toast。
+   * 乐观是为了让 ★ 即时变色 —— 这一下点击的反馈延迟是最刺眼的。
+   */
+  const toggleFav = async (s: SessionInfo) => {
+    const before = meta[s.id];
+    const nextFav = !(before?.fav === true);
+    applyLocalMeta(s.id, { fav: nextFav });
+    try {
+      commitServerEntry(s.id, await postSessionMeta({ action: "set", sessionId: s.id, fav: nextFav }));
+    } catch (e) {
+      setMeta((prev) => {
+        const next = { ...prev };
+        if (before) next[s.id] = before;
+        else delete next[s.id];
+        return next;
+      });
+      toast(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  /** 标签编辑：整串覆盖（服务端规范化与上限校验，超限原样报错、本地不动） */
+  const editTags = async (s: SessionInfo) => {
+    const input = await dialogPrompt({
+      title: "编辑标签",
+      message: "用逗号分隔；最多 8 个、单个不超过 12 字",
+      defaultValue: (meta[s.id]?.tags ?? []).join(", "),
+      select: true,
+      // 空串是「清空标签」这个有效意图，必须与「取消」（null）分开
+      allowEmpty: true,
+    });
+    if (input === null) return;
+    try {
+      commitServerEntry(s.id, await postSessionMeta({ action: "set", sessionId: s.id, tags: splitTagInput(input) }));
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const chipClass = (active: boolean) =>
+    cn("chip cursor-pointer t-fast", active ? "chip-accent" : "hover:border-accent/40 hover:text-fg");
 
   const isExpanded = (key: string, isProject: boolean) => {
     if (key in manual) return manual[key];
@@ -260,6 +455,29 @@ export function SessionSidebar({
     const running = runningIds.has(s.id);
     const editing = renamingId === s.id;
     const title = s.name || s.firstMessage || "(无标题)";
+    const entry = meta[s.id];
+    const isFav = entry?.fav === true;
+    const tags = entry?.tags ?? [];
+
+    /** ★ 一共只渲染一颗：未收藏时躲在 hover 集群里，已收藏时恒显在标题右侧 */
+    const favButton = (className: string) => (
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          void toggleFav(s);
+        }}
+        title={isFav ? "取消收藏" : "收藏"}
+        aria-label={isFav ? "取消收藏" : "收藏"}
+        aria-pressed={isFav}
+        data-testid="session-fav"
+        className={cn(
+          "flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm t-fast hover:bg-hover",
+          className,
+        )}
+      >
+        <Star size={12} className={cn(isFav && "fill-current")} />
+      </button>
+    );
 
     if (editing) {
       return (
@@ -313,6 +531,25 @@ export function SessionSidebar({
         <span className={cn("min-w-0 flex-1 truncate text-[12px]", active ? "text-fg" : "text-fg/85")}>
           {title}
         </span>
+        {/* 已收藏：★ 恒显在标题右侧（再往右才是标签、时间）。
+            放这里而不是 hover 集群里，是因为集群绝对定位在右端、hover 时会把它盖住，
+            那样「想取消收藏」反而点不到。 */}
+        {isFav && favButton("text-accent")}
+        {/* 标签：标题尾部 #tag，最多 TAG_PREVIEW_COUNT 个，多出的折成 +N */}
+        {tags.length > 0 && (
+          <span className="flex shrink-0 items-center gap-1 text-[10px] text-dim">
+            {tags.slice(0, TAG_PREVIEW_COUNT).map((tag) => (
+              <span key={tag} className="max-w-20 truncate" title={`#${tag}`}>
+                #{tag}
+              </span>
+            ))}
+            {tags.length > TAG_PREVIEW_COUNT && (
+              <span title={tags.slice(TAG_PREVIEW_COUNT).map((tag) => `#${tag}`).join(" ")}>
+                +{tags.length - TAG_PREVIEW_COUNT}
+              </span>
+            )}
+          </span>
+        )}
         {/* 右侧一个槽位两用：默认是相对时间，hover 时操作组（绝对定位在同一处）盖上来。
             不并排是因为时间自身长度随「刚刚 / 12 分钟前」变，行宽会跟着抖。 */}
         <span
@@ -322,6 +559,20 @@ export function SessionSidebar({
           {relTime(s.modified)}
         </span>
         <span className="absolute right-2 top-1/2 flex shrink-0 -translate-y-1/2 items-center gap-0.5 opacity-0 t-fast group-hover:opacity-100">
+          {/* 排布 [★][#][✎][🗑]：未收藏时 ★ 在这里（hover 显现），已收藏时它已恒显于标题右侧 */}
+          {!isFav && favButton("text-dim hover:text-accent")}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              void editTags(s);
+            }}
+            title="编辑标签"
+            aria-label="编辑标签"
+            data-testid="session-tags"
+            className="flex size-5 cursor-pointer items-center justify-center rounded-sm text-dim t-fast hover:bg-hover hover:text-fg"
+          >
+            <Hash size={12} />
+          </button>
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -448,6 +699,39 @@ export function SessionSidebar({
         </div>
       )}
 
+      {/* 过滤行：[全部][★ 收藏] + 在用标签。只在真的用过收藏 / 标签时渲染 ——
+          没有它们时整行不存在，侧栏与「没有这功能」时逐像素一致。 */}
+      {hasAnyMeta && (
+        <div className="flex flex-wrap items-center gap-1 px-3 pb-2" data-testid="session-filter-row">
+          <button
+            onClick={() => chooseFilter({ kind: "all" })}
+            data-testid="session-filter-all"
+            className={chipClass(filter.kind === "all")}
+          >
+            全部
+          </button>
+          <button
+            onClick={() => chooseFilter({ kind: "fav" })}
+            data-testid="session-filter-fav"
+            className={chipClass(filter.kind === "fav")}
+          >
+            <Star size={10} className={cn(filter.kind === "fav" && "fill-current")} />
+            收藏
+          </button>
+          {tagOptions.map((tag) => (
+            <button
+              key={tag.label}
+              onClick={() => chooseFilter({ kind: "tag", tag: tag.label })}
+              title={`#${tag.label}（${tag.count} 个会话）`}
+              data-testid="session-filter-tag"
+              className={chipClass(filter.kind === "tag" && filter.tag === tag.label)}
+            >
+              #{tag.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Search */}
       <div className="px-3 pb-2">
         <div className="flex h-7 items-center gap-1.5 rounded-md border border-line bg-panel-2 px-2 text-dim focus-within:border-accent/50">
@@ -464,18 +748,20 @@ export function SessionSidebar({
 
       {/* Session list */}
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
-        {/* 搜索结果：打平 */}
-        {query.trim() && (
+        {/* 搜索结果 / 过滤结果：打平 */}
+        {flatMode && (
           <>
             {groups.flat.length === 0 && (
-              <div className="px-3 py-6 text-center text-[12px] text-dim">无匹配结果</div>
+              <div className="px-3 py-6 text-center text-[12px] text-dim">
+                {filterActive ? "没有匹配的会话" : "无匹配结果"}
+              </div>
             )}
             {groups.flat.map(renderSession)}
           </>
         )}
 
         {/* 默认会话组（非项目目录的会话，平铺、无文件夹名） */}
-        {!query.trim() && groups.defaultGroup && (
+        {!flatMode && groups.defaultGroup && (
           <div className="mb-2">
             <div className="group/hd flex items-center gap-1 rounded-md px-2 py-1 hover:bg-hover">
               <button
@@ -500,7 +786,7 @@ export function SessionSidebar({
         )}
 
         {/* 项目组 */}
-        {!query.trim() && groups.projectGroups.length > 0 && (
+        {!flatMode && groups.projectGroups.length > 0 && (
           <div className="mb-2">
             <div className="flex items-center gap-1.5 px-2 py-1">
               <button
@@ -545,7 +831,7 @@ export function SessionSidebar({
         )}
 
         {/* 空态 */}
-        {!query.trim() && !groups.defaultGroup && groups.projectGroups.length === 0 && (
+        {!flatMode && !groups.defaultGroup && groups.projectGroups.length === 0 && (
           <div className="px-3 py-6 text-center text-[12px] text-dim">
             {sessions.length === 0 ? "暂无会话记录" : ""}
           </div>
