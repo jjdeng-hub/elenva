@@ -9,6 +9,8 @@ import type { AttentionItem, RecentCompletion } from "@/lib/attention";
 import type { PendingApproval, QueuedApproval } from "@/lib/pending-approvals";
 import type { SystemStatus } from "@/lib/system-status";
 import type { SessionInfo } from "@/lib/types";
+import type { SessionMeta } from "@/lib/session-meta";
+import type { OverdueTodoSummary } from "@/lib/todo-ledger";
 import { UsageAnalysis } from "@/components/home/UsageAnalysis";
 import { TodayOverview } from "@/components/home/TodayOverview";
 import { RunningCards } from "@/components/home/RunningCards";
@@ -207,7 +209,21 @@ export function HomeDashboard({
     };
   }, [sessions]);
 
-  // 「等你处理」两源（被中断 / 工具报错 / 等待审批 / 审批队列）+ 「最近完成」：
+  const [meta, setMeta] = useState<Record<string, SessionMeta>>({});
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/session-meta", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { meta?: Record<string, SessionMeta> } | null) => {
+        if (!cancelled && data) setMeta(data.meta ?? {});
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sessions]);
+
+  // 「等你处理」两源（被中断 / 工具报错 / 等待审批 / 审批队列）+ 「最近完成」+ 「逾期」：
   // 同一个 /api/attention 轮询（5s 节奏，与运行卡一致；不新增第二处轮询）。
   const [attention, setAttention] = useState<AttentionItem[]>([]);
   const [pendingApprovals, setPendingApprovals] = useState<{ live: PendingApproval[]; queued: QueuedApproval[] }>({
@@ -215,16 +231,18 @@ export function HomeDashboard({
     queued: [],
   });
   const [completions, setCompletions] = useState<RecentCompletion[]>([]);
+  const [overdueTodos, setOverdueTodos] = useState<OverdueTodoSummary[]>([]);
   useEffect(() => {
     let cancelled = false;
     const load = () => {
       fetch("/api/attention", { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
-        .then((data: { items?: AttentionItem[]; pendingApprovals?: PendingApprovalsPayload; recentlyCompleted?: RecentCompletion[] } | null) => {
+        .then((data: { items?: AttentionItem[]; pendingApprovals?: PendingApprovalsPayload; recentlyCompleted?: RecentCompletion[]; overdueTodos?: OverdueTodoSummary[] } | null) => {
           if (cancelled || !data) return;
           setAttention(data.items ?? []);
           setPendingApprovals({ live: data.pendingApprovals?.live ?? [], queued: data.pendingApprovals?.queued ?? [] });
           setCompletions(data.recentlyCompleted ?? []);
+          setOverdueTodos(data.overdueTodos ?? []);
         })
         .catch(() => {});
     };
@@ -242,6 +260,13 @@ export function HomeDashboard({
     for (const a of attention) map.set(a.sessionId, a);
     return map;
   }, [attention]);
+
+  // 逾期待办：会话 → { 天数, 条数, 样例 }。侧账本读不到时为空，不报错。
+  const overdueById = useMemo(() => {
+    const map = new Map<string, OverdueTodoSummary>();
+    for (const item of overdueTodos) map.set(item.sessionId, item);
+    return map;
+  }, [overdueTodos]);
 
   // 需关注行：附带对应会话对象（用于标题与跳转）
   const sessionsById = useMemo(() => {
@@ -562,14 +587,36 @@ export function HomeDashboard({
                 {tabbed.map((s) => {
                   const running = runningIds.has(s.id);
                   const attn = attentionById.get(s.id);
+                  const overdue = overdueById.get(s.id);
                   return (
                     <tr key={s.id} className="cursor-pointer t-fast hover:bg-hover" onClick={() => onOpenSession(s)}>
                       <td className="border-b border-line-soft px-3 py-2.5">
                         <div className="flex items-center gap-2.5">
                           <Avatar session={s} running={running} />
                           <div className="min-w-0">
-                            <div className="truncate text-[13px] font-semibold">{displayTitle(s)}</div>
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <span className="truncate text-[13px] font-semibold">{displayTitle(s)}</span>
+                              {/* 逾期徽标：只在有值、且该会话没被「等你处理」置顶时出现——
+                                  等待审批 / 中断已有自己的警示位，不再叠一个抢视线。 */}
+                              {overdue && !waitById.has(s.id) && (
+                                <span
+                                  className="chip chip-warn shrink-0"
+                                  data-testid="session-overdue"
+                                  title={`有 ${overdue.count} 条待办超过 3 天未推进：\n${overdue.samples
+                                    .map((sample) => `· ${sample.text}（${sample.days} 天）`)
+                                    .join("\n")}`}
+                                >
+                                  逾期 {overdue.oldestDays} 天
+                                </span>
+                              )}
+                            </div>
                             <div className="truncate text-[12px] text-dim">{s.name ? cleanTitle(s.firstMessage) : ""}</div>
+                            {/* 会话目标（goal）：一行 dim 的自述，窄屏截断、不挤压布局 */}
+                            {meta[s.id]?.goal && (
+                              <div className="truncate text-[12px] text-dim/80" title={meta[s.id]?.goal}>
+                                {meta[s.id]?.goal}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>
