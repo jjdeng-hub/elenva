@@ -47,6 +47,7 @@ import {
 import { isEditToolName, isWriteToolName } from "./tool-names";
 import { cwdKey } from "./paths";
 import { registerPendingApproval, resolvePendingApproval } from "./pending-approvals";
+import { isScheduledSession } from "./scheduled-sessions";
 import { normalizePlanSteps, stepsToMarkdown } from "./plan-steps";
 
 /**
@@ -310,8 +311,12 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
         if (risk.ruleKey && allowRules.includes(risk.ruleKey)) return;
 
         if (!ctx.hasUI) {
-          // 无人值守 / 后台会话：按配置决定「拒绝」还是「入队后继续」
-          if (settings.approvalFallback === "queue") {
+          // 无人值守 / 后台会话：按配置决定「拒绝」还是「入队后继续」。
+          // 节律触发的会话没有人在旁边点确认，**强制入队**（不依赖
+          // approvalFallback，也不得变成静默执行）——这样长任务不会在危险
+          // 操作前面断掉，而风险仍被挂进「等你处理」。
+          const scheduled = sessionId ? isScheduledSession(sessionId) : false;
+          if (scheduled || settings.approvalFallback === "queue") {
             const n = enqueuePendingApproval({
               toolName,
               detail: toolName.startsWith("mcp__")
