@@ -47,7 +47,7 @@ import {
 import { isEditToolName, isWriteToolName } from "./tool-names";
 import { cwdKey } from "./paths";
 import { registerPendingApproval, resolvePendingApproval } from "./pending-approvals";
-import { isScheduledSession } from "./scheduled-sessions";
+import { getScheduledSessionTier, isScheduledSession } from "./scheduled-sessions";
 import { normalizePlanSteps, stepsToMarkdown } from "./plan-steps";
 
 /**
@@ -301,6 +301,34 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
           cwd: runtime.getCwd(),
           allowedRoots: runtime.getAllowedRoots(),
         });
+
+        // 3.0) 节律安全档（模块 3 · 第 6 轮）：仅对 scheduled 会话生效——普通会话
+        // 与 standard 档行为零变化。位置刻意在「风险分类之后、其它审批判定之前」：
+        //   · readonly：写 / 删 / 安装类调用**直接拦下**（不入队、不弹窗、不落盘），
+        //     让模型拿到理由自己调整策略；只读命令照常放行。判据与计划模式同源
+        //     （isPlanModeBlocked + isReadOnlyShellCommand），所以 todo_write 等
+        //     会话簿记类照旧放行。
+        //   · full：明确信任的任务，审批闸门**整体跳过**（破坏性操作直接执行），
+        //     不登记 pending、不入队；其余逻辑（快照 / 证据账本）照旧。
+        //   · standard：不在此处理，落到下面的强制入队分支（现状）。
+        if (sessionId && isScheduledSession(sessionId)) {
+          const tier = getScheduledSessionTier(sessionId);
+          if (tier === "readonly") {
+            const bashCommand = typeof input?.command === "string" ? input.command : "";
+            const readOnlyBash = toolName === "bash" || toolName === "powershell"
+              ? isReadOnlyShellCommand(bashCommand)
+              : false;
+            if (isPlanModeBlocked(toolName) && !readOnlyBash) {
+              return {
+                block: true,
+                reason:
+                  "[只读] 该节律任务配置为只读模式：只做勘察与汇报，本轮不要尝试写入 / 删除 / 执行改动。请改用只读手段继续，收尾时说明需要改动但被只读档拦截。",
+              };
+            }
+          } else if (tier === "full") {
+            return;
+          }
+        }
         // MCP 写操作由独立开关控制：关掉时回到默认（不打扰）；总闸「关闭」时同样不生效
         if (risk.mcpWrite === true && !settings.mcpWriteApproval) return;
         if (!needsApproval(risk, settings.approvalMode)) return;
