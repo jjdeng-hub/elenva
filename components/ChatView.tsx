@@ -39,6 +39,12 @@ const OBSERVATORY_KEY = "elenva-chat-observatory";
 const OBSERVATORY_MIN_WIDTH = 1280;
 /** 并排副屏的最小窗宽：再窄就放不下「对话 + 副屏 >=380px」两列 */
 const SIDE_PANE_MIN_WIDTH = 1440;
+/**
+ * 副屏与观测栏**共存**所需的最小窗宽。
+ * 口径（2026-10-15 补修）：<1700 时二者互斥 —— 观测栏优先，冲突时收起副屏；
+ * ≥1700 才允许并存（对话 | 副屏 | 观测）。1600 宽下三列会把主对话挤到 ~200px，实测不可用。
+ */
+const SIDE_PANE_COEXIST_MIN_WIDTH = 1700;
 
 /** 右侧槽位同时只承载一个面板：文件预览 / 观测栏 */
 type RightPanel = "files" | "observatory" | null;
@@ -262,6 +268,16 @@ export function ChatView({
   }, []);
 
   const [sidePaneOpen, setSidePaneOpen] = useState(sideSessionId != null);
+
+  /* 宽窗才允许副屏与观测栏并存；<1700 互斥（冲突处理见下方 shownPanel 之后的 effect） */
+  const [sideCoexistAllowed, setSideCoexistAllowed] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${SIDE_PANE_COEXIST_MIN_WIDTH}px)`);
+    const apply = () => setSideCoexistAllowed(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
   /** 最近一次观察的会话：收起后再展开时优先回到它 */
   const lastSideRef = useRef<string | null>(sideSessionId ?? null);
   useEffect(() => {
@@ -479,6 +495,33 @@ export function ChatView({
   const railOpen = shownPanel === "observatory";
   /** 右栏整体是否可见（顶栏开关的图标与 tooltip 用） */
   const railVisible = shownPanel !== null;
+
+  /* 窄窗互斥：<1700 时副屏与观测栏不能同时打开 —— 保留观测栏、收起副屏（不写副屏偏好）。
+     只在「观测栏刚被打开」或「视口刚从宽缩到窄」时触发，而非仅当条件成立：
+     否则「窄窗下打开副屏」会先被本 effect 收起，跟方向 1（打开副屏自动收起观测栏）
+     打架，形成「刚开就关」。两条方向合起来 = 窄窗下后开的留、观测栏在冲突时优先：
+       ① 观测栏已开时打开副屏 → 方向 1 收观测栏，副屏留；
+       ② 副屏已开时打开观测栏 → 本 effect 收副屏，观测栏留；
+       ③ 宽窗两者并存，窗口缩到 <1700 → 本 effect 收副屏。
+     ref 初值取当前值，避免深链接/首次挂载时误判为「刚打开」。 */
+  const prevShownPanelRef = useRef<RightPanel>(shownPanel);
+  const prevCoexistRef = useRef(sideCoexistAllowed);
+  useEffect(() => {
+    const observatoryJustShown =
+      prevShownPanelRef.current !== "observatory" && shownPanel === "observatory";
+    const coexistJustLost = prevCoexistRef.current && !sideCoexistAllowed;
+    if (
+      sidePaneOpen &&
+      shownPanel === "observatory" &&
+      !sideCoexistAllowed &&
+      (observatoryJustShown || coexistJustLost)
+    ) {
+      setSidePaneOpen(false);
+      onSelectSide?.(null);
+    }
+    prevShownPanelRef.current = shownPanel;
+    prevCoexistRef.current = sideCoexistAllowed;
+  }, [sidePaneOpen, shownPanel, sideCoexistAllowed, onSelectSide]);
 
   /** 顶栏开关：收起整个右栏，或展开到最近一次的面板（不可用则挑一个可用的） */
   const toggleRail = useCallback(() => {
