@@ -728,7 +728,7 @@ function quotaLevelOf(chars: number, limit: number): QuotaLevel {
 }
 
 const QUOTA_LEVEL_STYLE: Record<QuotaLevel, { label: string; chip: string; bar: string; pct: string }> = {
-  ok: { label: "常规", chip: "chip", bar: "bg-accent", pct: "text-dim" },
+  ok: { label: "常规", chip: "chip", bar: "bg-dim/50", pct: "text-dim" },
   warn: { label: "注意", chip: "chip-warn", bar: "bg-warn", pct: "text-warn" },
   near: { label: "快满", chip: "chip-danger", bar: "bg-danger", pct: "text-danger" },
   full: { label: "已满", chip: "chip-danger", bar: "bg-danger", pct: "text-danger" },
@@ -750,7 +750,7 @@ function MemoryQuotaBlock({ files, onGoto }: { files: AgentMemoryFile[]; onGoto:
         <Gauge size={12} className="text-dim" />
         配额 · {rows.length} 个文件
         <span className="ml-auto text-[10px] font-normal text-dim">
-          {nearCount > 0 ? `${nearCount} 个接近上限` : "占用按落盘原文计（含元数据）"}
+          {nearCount > 0 ? `${nearCount} 个接近或超过上限` : "占用按落盘原文计（含元数据）"}
         </span>
       </div>
 
