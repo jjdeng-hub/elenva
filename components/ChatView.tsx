@@ -642,7 +642,12 @@ export function ChatView({
         const res = await fetch("/api/memory", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ file: isProject ? `project/${projectName}` : "memory", text: edited }),
+          body: JSON.stringify({
+            file: isProject ? `project/${projectName}` : "memory",
+            text: edited,
+            // 来路：记住菜单（纯加字段，写入端记进来源账本）
+            source: { via: "remember", sessionId: session?.id ?? null, cwd: cwd ?? null },
+          }),
         });
         const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
         if (!res.ok || !data.ok) throw new Error(data.error || `保存失败（HTTP ${res.status}）`);

@@ -55,6 +55,7 @@ import { buildIndexBlock, stripIndexMessages } from "./index-block.js";
 import { loadState, recordAccess, recordEvidence, recordToolCall, saveState, stateDirFor } from "./state.js";
 import { runTidy, renderTidyReport } from "./tidy.js";
 import { readAllStores } from "./stores.js";
+import { recordMemoryOrigin } from "./origins.js";
 import { renderSearchResults, searchEntries } from "./search.js";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -150,10 +151,24 @@ export default function elenvaMemory(pi: ExtensionAPI): void {
       }
       if (event.toolName === "memory_add" || event.toolName === "memory_replace") {
         // 内容取自**入参**：这两个工具的返回值不回显正文（只有 "Entry added."）
+        const input = event.input as Record<string, unknown> | undefined;
         const raw = ["content", "new_text", "text"]
-          .map((key) => (event.input as Record<string, unknown> | undefined)?.[key])
+          .map((key) => input?.[key])
           .find((value): value is string => typeof value === "string" && value.trim().length > 0);
-        if (raw && recordEvidence(stores, event.toolName, raw, ctx.cwd) > 0) saveState();
+        if (raw) {
+          if (recordEvidence(stores, event.toolName, raw, ctx.cwd) > 0) saveState();
+          // 来源账本（与网页侧共写同一个文件）：这条是 Agent 在哪个会话里写的
+          const file = originFileForTarget(input?.target, stores.projectName);
+          if (file) {
+            recordMemoryOrigin({
+              file,
+              text: raw,
+              via: "agent",
+              sessionId: safeSessionId(ctx),
+              cwd: ctx.cwd,
+            });
+          }
+        }
       }
     } catch {
       // 计数/留痕失败不影响检索与写入本身
@@ -214,6 +229,24 @@ async function handleTidy(args: string, ctx: ExtensionCommandContext): Promise<v
     const message = error instanceof Error ? error.message : String(error);
     ctx.ui?.notify?.(`记忆整理失败：${message}`, "error");
     console.log(`记忆整理失败：${message}`);
+  }
+}
+
+/** 记忆工具入参的 target → 来源账本的 fileId（与网页侧 lib/agent-memory 的 id 口径一致） */
+function originFileForTarget(target: unknown, projectName: string | null): string | null {
+  if (target === "user") return "user";
+  if (target === "failure") return "failures";
+  if (target === "memory") return "memory";
+  if (target === "project") return projectName ? `project/${projectName}` : null;
+  return null;
+}
+
+/** 会话 id：拿不到（上下文形态不同）就返回 null，不硬凑 */
+function safeSessionId(ctx: ExtensionContext): string | null {
+  try {
+    return ctx.sessionManager?.getSessionId?.() ?? null;
+  } catch {
+    return null;
   }
 }
 

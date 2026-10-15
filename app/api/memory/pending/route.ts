@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { appendAgentMemoryEntry } from "@/lib/agent-memory";
 import { appendContextInstruction } from "@/lib/context-files";
 import { basename } from "@/lib/format";
+import { recordMemoryOrigin } from "@/lib/memory-origins";
 import {
   addPendingMemory,
   findPendingMemory,
@@ -26,6 +27,8 @@ export const dynamic = "force-dynamic";
  *  - project-memory  → 追加到 project/<basename(cwd)>/MEMORY.md（需要 source.cwd）
  *  - global-memory   → 追加到 ~/.pi/agent/pi-hermes-memory/MEMORY.md
  * **只有写入成功才出队**：失败时条目留在队列里，用户可以在记忆页改文字重试。
+ *
+ * 记忆两项写入成功后会在来源账本里记一条 `via:"pending"`（来路：待审确认）。
  */
 
 type ResolveTarget = "project-agents" | "global-agents" | "project-memory" | "global-memory";
@@ -98,6 +101,14 @@ export async function POST(req: Request) {
             { status: result.code === "conflict" ? 409 : 400 },
           );
         }
+        // 写入成功才记来源；sessionId / cwd 沿用这条待审原来的来源
+        recordMemoryOrigin({
+          file: fileId,
+          text,
+          via: "pending",
+          sessionId: item.source?.sessionId ?? null,
+          cwd: item.source?.cwd ?? null,
+        });
       }
 
       // 落盘成功后才出队
