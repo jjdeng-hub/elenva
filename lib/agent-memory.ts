@@ -35,6 +35,10 @@ export interface AgentMemoryFile {
   size: number;
   /** ISO 时间；文件不存在时为 null */
   modified: string | null;
+  /** 当前内容字符数（与详情卡同口径 raw.length）；文件不存在 = 0 */
+  chars: number;
+  /** 该 kind 的配额上限（limitForMemoryKind）；文件不存在也给出 */
+  limit: number;
 }
 
 export interface AgentMemoryIndex {
@@ -134,13 +138,33 @@ export function resolveAgentMemoryFilePath(id: string): string {
   throw new Error(`未知记忆文件标识：${id}`);
 }
 
+/** 文件内容字符数（与详情卡 readAgentMemorySnapshot 的 raw.length 同口径）；读不到 = 0 */
+function countFileChars(path: string): number {
+  try {
+    return readFileSync(path, "utf8").length;
+  } catch {
+    return 0;
+  }
+}
+
 function fileMeta(id: string, label: string, kind: AgentMemoryKind, path: string): AgentMemoryFile {
+  const limit = limitForMemoryKind(kind);
   try {
     const s = statSync(path);
     if (!s.isFile()) throw new Error("not a file");
-    return { id, label, kind, path, exists: true, size: s.size, modified: s.mtime.toISOString() };
+    return {
+      id,
+      label,
+      kind,
+      path,
+      exists: true,
+      size: s.size,
+      modified: s.mtime.toISOString(),
+      chars: countFileChars(path),
+      limit,
+    };
   } catch {
-    return { id, label, kind, path, exists: false, size: 0, modified: null };
+    return { id, label, kind, path, exists: false, size: 0, modified: null, chars: 0, limit };
   }
 }
 
