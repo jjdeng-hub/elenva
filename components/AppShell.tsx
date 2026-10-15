@@ -49,20 +49,28 @@ const WS_AUTO_COLLAPSE_WIDTH = 1280;
 const WS_DRAWER_MAX_WIDTH = 1024;
 
 /* ---------------- hash 路由 ---------------- */
-function parseHash(): { view: View; sessionId: string | null; newCwd: string | null } {
+function parseHash(): { view: View; sessionId: string | null; newCwd: string | null; sideId: string | null } {
   const h = window.location.hash.replace(/^#/, "");
   if (h.startsWith("chat/")) {
     const rest = h.slice(5);
-    if (rest === "new" || rest.startsWith("new?")) {
-      const cwd = rest.startsWith("new?") ? new URLSearchParams(rest.slice(4)).get("cwd") : null;
-      return { view: "chat", sessionId: null, newCwd: cwd };
+    // 查询串只出现在路径之后：`chat/<sid>?side=<sid2>` / `chat/new?cwd=<cwd>`。
+    // 拆开解析，避免把 `?side=` 当成会话 id 的一部分。
+    const qIndex = rest.indexOf("?");
+    const pathPart = qIndex >= 0 ? rest.slice(0, qIndex) : rest;
+    const params = qIndex >= 0 ? new URLSearchParams(rest.slice(qIndex + 1)) : null;
+    // URLSearchParams 已做百分号解码，勿再 decodeURIComponent（会二次解码）
+    const sideId = params?.get("side") || null;
+    if (pathPart === "new") {
+      return { view: "chat", sessionId: null, newCwd: params?.get("cwd") ?? null, sideId: null };
     }
-    if (rest) return { view: "chat", sessionId: decodeURIComponent(rest), newCwd: null };
+    if (pathPart) {
+      return { view: "chat", sessionId: decodeURIComponent(pathPart), newCwd: null, sideId };
+    }
   }
   // 旧深链接兼容：「Git 变更」「文件浏览器」已合并为「代码」
-  if (h === "git" || h === "files") return { view: "code", sessionId: null, newCwd: null };
-  if (h in PAGE_TITLES) return { view: h as View, sessionId: null, newCwd: null };
-  return { view: "home", sessionId: null, newCwd: null };
+  if (h === "git" || h === "files") return { view: "code", sessionId: null, newCwd: null, sideId: null };
+  if (h in PAGE_TITLES) return { view: h as View, sessionId: null, newCwd: null, sideId: null };
+  return { view: "home", sessionId: null, newCwd: null, sideId: null };
 }
 
 /* ---------------- 主 AppShell ---------------- */
@@ -125,6 +133,8 @@ export function AppShell() {
   const [newSessionCwd, setNewSessionCwd] = useState<string | null>(null);
   /** 新会话用户显式选择的工作区（null = 跟随默认工作区；首条消息发送时才落定） */
   const [newChatWorkspace, setNewChatWorkspace] = useState<string | null>(null);
+  /** 并排副屏正在观察的会话 id（仅 chat 视图有义；写进 URL 的 ?side=） */
+  const [sideSessionId, setSideSessionId] = useState<string | null>(null);
 
   /* ---------------- 后台会话完成通知 ----------------
      轮询分工（上一拍基准 prevRunningRef 由本处理独占维护）：
@@ -222,14 +232,20 @@ export function AppShell() {
         const found = list.find((s) => s.id === p.sessionId);
         if (found) {
           setSelected(found);
+          /* 侧会话必须在列表里才恢复；已不存在就忽略并清掉（后续 hash 同步会移除 ?side=） */
+          setSideSessionId(
+            p.sideId && p.sideId !== found.id && list.some((s) => s.id === p.sideId) ? p.sideId : null,
+          );
           setView("chat");
         } else {
+          setSideSessionId(null);
           setView("home");
         }
         hashReady.current = true;
       };
       tryRestore();
     } else {
+      setSideSessionId(null);
       if (p.view !== "home") setView(p.view);
       if (p.newCwd) {
         setNewSessionCwd(p.newCwd);
@@ -252,11 +268,17 @@ export function AppShell() {
     if (!hashReady.current) return; // 等深链接恢复完成
     let hash = "#home";
     if (view === "chat") {
-      hash = selected
-        ? `#chat/${encodeURIComponent(selected.id)}`
-        : newSessionCwd
+      if (selected) {
+        hash = `#chat/${encodeURIComponent(selected.id)}`;
+        // 仅非空且不同于主会话时附加 side；否则维持原格式 `#chat/<sid>`（逐字节一致）
+        if (sideSessionId && sideSessionId !== selected.id) {
+          hash += `?side=${encodeURIComponent(sideSessionId)}`;
+        }
+      } else {
+        hash = newSessionCwd
           ? `#chat/new?cwd=${encodeURIComponent(newSessionCwd)}`
           : "#chat/new";
+      }
     } else if (view !== "home") {
       hash = `#${view}`;
     }
@@ -272,7 +294,7 @@ export function AppShell() {
       window.history.pushState(null, "", hash);
     }
     syncedHashRef.current = hash;
-  }, [view, selected, newSessionCwd]);
+  }, [view, selected, newSessionCwd, sideSessionId]);
 
   /* 浏览器前进/后退（hashchange 只在真实 hash 跳转时触发，replaceState 不会） */
   useEffect(() => {
@@ -285,6 +307,9 @@ export function AppShell() {
         if (found) {
           setSelected(found);
           setNewSessionCwd(null);
+          setSideSessionId(
+            p.sideId && p.sideId !== found.id && sessions.some((s) => s.id === p.sideId) ? p.sideId : null,
+          );
           setView("chat");
           return;
         }
@@ -293,12 +318,19 @@ export function AppShell() {
           if (f) {
             setSelected(f);
             setNewSessionCwd(null);
+            setSideSessionId(
+              p.sideId && p.sideId !== f.id && list.some((s) => s.id === p.sideId) ? p.sideId : null,
+            );
             setView("chat");
-          } else setView("home");
+          } else {
+            setSideSessionId(null);
+            setView("home");
+          }
         });
         return;
       }
       setSelected(null);
+      setSideSessionId(null);
       setNewSessionCwd(p.newCwd ?? null);
       setNewChatWorkspace(p.newCwd ?? null);
       if (p.view === "chat" && !p.newCwd && defaultCwd) setNewSessionCwd(defaultCwd);
@@ -792,6 +824,8 @@ export function AppShell() {
             sessions={sessions}
             runningIds={runningIds}
             unreadIds={unreadIds}
+            sideSessionId={sideSessionId}
+            onSelectSide={setSideSessionId}
             onOpenNav={isNarrow ? () => setDrawerOpen(true) : undefined}
             onNewChat={handleNewChat}
             onCreateInProject={startChatWithCwd}

@@ -1,6 +1,6 @@
 "use client";
 
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, GitBranch, Menu, Plus, Search, X } from "lucide-react";
+import { Columns2, PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, GitBranch, Menu, Plus, Search, X } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AgentStatusBar } from "@/components/AgentStatusBar";
@@ -17,6 +17,7 @@ import { ExtensionStrip } from "@/components/ExtensionStrip";
 import { ModelPicker } from "@/components/ModelPicker";
 import { ProjectTrustDialog } from "@/components/ProjectTrustDialog";
 import { SessionTitle } from "@/components/SessionTitle";
+import { SideSessionPane } from "@/components/SideSessionPane";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { WorkspacePicker, type WorkspaceOption } from "@/components/WorkspacePicker";
 import { useAgentSession, type AttachedImage, type ChatInputHandle } from "@/hooks/useAgentSession";
@@ -36,6 +37,8 @@ const SIDEBAR_COLLAPSED_KEY = "elenva-chat-sidebar-collapsed";
 const OBSERVATORY_KEY = "elenva-chat-observatory";
 /** 观测栏需要的最小窗宽（与 Tailwind xl 断点对齐） */
 const OBSERVATORY_MIN_WIDTH = 1280;
+/** 并排副屏的最小窗宽：再窄就放不下「对话 + 副屏 >=380px」两列 */
+const SIDE_PANE_MIN_WIDTH = 1440;
 
 /** 右侧槽位同时只承载一个面板：文件预览 / 观测栏 */
 type RightPanel = "files" | "observatory" | null;
@@ -77,6 +80,8 @@ export function ChatView({
   onExit,
   onOpenNav,
   unreadIds,
+  sideSessionId,
+  onSelectSide,
 }: {
   session: SessionInfo | null;
   newSessionCwd: string | null;
@@ -115,6 +120,10 @@ export function ChatView({
   onExit: () => void;
   /** 窄屏下由外壳注入：唤起主侧栏抽屉（宽屏为 undefined，不渲染入口） */
   onOpenNav?: () => void;
+  /** 副屏正在观察的会话 id（由外壳持有，便于写进 URL） */
+  sideSessionId?: string | null;
+  /** 切换副屏会话；传 null 收起副屏 */
+  onSelectSide?: (sessionId: string | null) => void;
 }) {
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const {
@@ -239,6 +248,66 @@ export function ChatView({
     localStorage.setItem(OBSERVATORY_KEY, "1");
     setRightPanel("observatory");
   }, []);
+
+  /* ---------- 并排副屏（只读）----------
+     副屏的开合状态放在 ChatView（外壳只持有 sideSessionId 以便写 URL）。
+     视口 <1440 不提供开关；带 ?side= 深链接进窄窗时只降级为不渲染，URL 保留。 */
+  const [sideAllowed, setSideAllowed] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia(`(min-width: ${SIDE_PANE_MIN_WIDTH}px)`);
+    const apply = () => setSideAllowed(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
+  const [sidePaneOpen, setSidePaneOpen] = useState(sideSessionId != null);
+  /** 最近一次观察的会话：收起后再展开时优先回到它 */
+  const lastSideRef = useRef<string | null>(sideSessionId ?? null);
+  useEffect(() => {
+    if (sideSessionId) lastSideRef.current = sideSessionId;
+  }, [sideSessionId]);
+
+  /* 外壳改 sideSessionId（深链接恢复 / 前进后退）：有值即展开，被清空则收起 */
+  const prevSideIdRef = useRef<string | null>(sideSessionId ?? null);
+  useEffect(() => {
+    if (sideSessionId) setSidePaneOpen(true);
+    else if (prevSideIdRef.current) setSidePaneOpen(false);
+    prevSideIdRef.current = sideSessionId ?? null;
+  }, [sideSessionId]);
+
+  /** 默认副屏会话：优先运行中的（观感最有用），否则列表里第一个别的会话 */
+  const pickDefaultSide = useCallback(() => {
+    const others = sessions.filter((s) => s.id !== session?.id);
+    return others.find((s) => runningIds.has(s.id))?.id ?? others[0]?.id ?? null;
+  }, [sessions, runningIds, session?.id]);
+
+  /** 开关副屏：收起时清掉 side（同步 URL）；展开时先回到上次观察的会话 */
+  const toggleSidePane = useCallback(() => {
+    if (sidePaneOpen) {
+      setSidePaneOpen(false);
+      if (sideSessionId) onSelectSide?.(null);
+      return;
+    }
+    setSidePaneOpen(true);
+    const remembered =
+      lastSideRef.current && sessions.some((s) => s.id === lastSideRef.current)
+        ? lastSideRef.current
+        : null;
+    onSelectSide?.(remembered ?? pickDefaultSide());
+  }, [sidePaneOpen, sideSessionId, onSelectSide, sessions, pickDefaultSide]);
+
+  const closeSidePane = useCallback(() => {
+    setSidePaneOpen(false);
+    onSelectSide?.(null);
+  }, [onSelectSide]);
+
+  /* 打开副屏时收起右栏（一次性，不写偏好 —— 用户随后可自行重开观测栏） */
+  const sideWasOpenRef = useRef(false);
+  useEffect(() => {
+    if (sidePaneOpen && !sideWasOpenRef.current) setRightPanel(null);
+    sideWasOpenRef.current = sidePaneOpen;
+  }, [sidePaneOpen]);
 
   /* 侧栏折叠（响应式默认：窄屏折叠），状态持久化 */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -912,6 +981,19 @@ export function ChatView({
             )}
             {/* 状态胶囊（运行中/空闲）已移除（2026-09-21）：运行态在输入框（停止按钮）、
                 输入框上方状态条、页脚、会话列表圆点四处都有信号；常驻的空闲胶囊只是噪音。 */}
+            {/* 并排副屏开关（<1440 不提供；打开后自动收起右栏） */}
+            {sideAllowed && (
+              <button
+                data-testid="side-pane-toggle"
+                onClick={toggleSidePane}
+                aria-pressed={sidePaneOpen}
+                title="并排盯另一个会话"
+                aria-label="并排盯另一个会话"
+                className={`flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg t-fast hover:bg-hover hover:text-fg ${sidePaneOpen ? "text-accent" : "text-dim"}`}
+              >
+                <Columns2 size={14} />
+              </button>
+            )}
             {/* 右栏总开关（镜像左侧会话列表的收起/展开）：点击收起或展开整个右栏。
                 面板切换（观测/文件）已移到右栏面板头部的标签栏（RailTabs）。
                 出现条件：可用项为 0（窄屏无观测、无写入）时不显示。 */}
@@ -986,6 +1068,17 @@ export function ChatView({
         {!isEmpty && statusBar}
         {!isEmpty && chatInputEl}
           </div>
+          {/* 并排副屏：只读，占在对话列与右栏之间的独立一列。窄窗（<1440）不渲染，
+              但 URL 里的 side 保留（降级不报错）。 */}
+          {sidePaneOpen && sideAllowed && (
+            <SideSessionPane
+              sessionId={sideSessionId ?? null}
+              sessions={sessions}
+              runningIds={runningIds}
+              onSwitch={(id) => onSelectSide?.(id)}
+              onClose={closeSidePane}
+            />
+          )}
           {/* 右侧只有一个槽位：文件预览 / 观测栏二选一。rightPanel 是用户意图，
               shownPanel 已按可用条件兜底（不可用则回退观测 / 收起）。 */}
           {shownPanel === "files" && writtenFiles.length > 0 ? (
