@@ -15,6 +15,7 @@ import {
   ScrollText,
   Server,
   Settings,
+  ShieldCheck,
   Sparkles,
 } from "lucide-react";
 import { useEffect } from "react";
@@ -29,6 +30,8 @@ export type View =
   | "code"
   /** 节律：按规则自动跑的任务（查看 / 新建 / 编辑 / 运行历史） */
   | "rhythm"
+  /** 审批历史：危险操作的批准 / 拒绝 / 超时 / 入队记录（只读） */
+  | "approvals"
   | "skills"
   | "memory"
   /** 提示词：模型每轮实际看到的内容（pi 基座 + 宿主层 + 项目指令 + 技能索引） */
@@ -177,6 +180,7 @@ export function WorkstationSidebar({
           <NavItem collapsed={isCollapsed} icon={<ListChecks size={14} />} label="会话" active={view === "chat"} onClick={() => onViewChange("chat")} />
           <NavItem collapsed={isCollapsed} icon={<FolderGit2 size={14} />} label="代码" active={view === "code"} onClick={() => onViewChange("code")} />
           <NavItem collapsed={isCollapsed} icon={<AlarmClock size={14} />} label="节律" active={view === "rhythm"} onClick={() => onViewChange("rhythm")} />
+          <NavItem collapsed={isCollapsed} icon={<ShieldCheck size={14} />} label="审批历史" active={view === "approvals"} onClick={() => onViewChange("approvals")} />
 
       <div className={groupCls}>资源</div>
           <NavItem collapsed={isCollapsed} icon={<Cpu size={14} />} label="模型" active={view === "models"} onClick={() => onViewChange("models")} />

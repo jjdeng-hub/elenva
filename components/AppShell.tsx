@@ -6,6 +6,7 @@ import { ChatView } from "@/components/ChatView";
 import { DirPicker } from "@/components/DirPicker";
 import { CodeView } from "@/components/CodeView";
 import { CandidatesPage } from "@/components/CandidatesPage";
+import { ApprovalHistoryPage } from "@/components/ApprovalHistoryPage";
 import { HomeDashboard } from "@/components/HomeDashboard";
 import { MemoryPage, type MemoryProject } from "@/components/MemoryPage";
 import { ModelsPage } from "@/components/ModelsPage";
@@ -33,6 +34,7 @@ type SessionsResponse = {
 const PAGE_TITLES: Record<string, string> = {
   code: "代码",
   rhythm: "节律",
+  approvals: "审批历史",
   skills: "技能",
   memory: "记忆",
   prompt: "提示词",
@@ -805,6 +807,7 @@ export function AppShell() {
         )}
         {view === "skills" && <SkillsPage defaultCwd={defaultCwd} />}
         {view === "rhythm" && <RhythmPage defaultCwd={defaultCwd} onOpenSession={openSessionById} />}
+        {view === "approvals" && <ApprovalHistoryPage onOpenSession={openSessionById} />}
         {view === "memory" && <MemoryPage projects={memoryProjects} />}
         {view === "prompt" && <SystemPromptPage defaultCwd={defaultCwd} projects={memoryProjects} />}
         {view === "models" && <ModelsPage />}
