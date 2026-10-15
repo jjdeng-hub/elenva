@@ -145,7 +145,7 @@ async function triggerTask(task: ScheduleTask, options: TriggerOptions): Promise
     return { started: false, note };
   }
 
-  markScheduledSession(realSessionId);
+  markScheduledSession(realSessionId, task.safety);
 
   const run: TaskRun = {
     taskId: task.id,
@@ -222,6 +222,7 @@ function finishRun(run: TaskRun, result: ScheduleRunResult, note?: string): void
       at: new Date().toISOString(),
       sessionId: run.sessionId,
       result,
+      durationMs: Date.now() - run.startedAt,
       ...(note ? { note } : {}),
     });
   } catch (error) {

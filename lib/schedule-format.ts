@@ -19,6 +19,47 @@ export type Schedule =
   | { kind: "weekly"; weekday: number; at: string }
   | { kind: "cron"; expr: string };
 
+/**
+ * 节律安全档（模块 3 · 第 6 轮）—— 定义在纯函数层，让服务端注册表 / 护栏扩展与
+ * 客户端表单都能引用同一份字面量（无 node / 内核依赖）。
+ *
+ * - standard：危险操作强制进「等你处理」队列，不打断本轮（默认）。
+ * - readonly：只做勘察与汇报——写 / 删 / 安装类工具**直接拦下**（不入队、不弹窗）。
+ * - full：明确信任——审批闸门整体跳过，破坏性操作直接执行（慎用）。
+ */
+export type ScheduleSafety = "standard" | "readonly" | "full";
+
+/** 合法档位取值（单一来源；schedule 存储与表单共用）。 */
+export const SAFETY_VALUES: readonly ScheduleSafety[] = ["standard", "readonly", "full"];
+
+/** 档位的人话文案：表单选项与列表 chip 共用（纯函数，可单测）。 */
+export const SAFETY_TIER_META: Record<ScheduleSafety, { label: string; hint: string }> = {
+  standard: {
+    label: "标准（推荐）",
+    hint: "推荐。危险操作进「等你处理」队列，本轮不被打断。",
+  },
+  readonly: {
+    label: "只读",
+    hint: "只做勘察与汇报：写 / 删 / 安装类操作直接拦下，不入队、不弹窗。",
+  },
+  full: {
+    label: "全权（慎用）",
+    hint: "审批闸门整体跳过：破坏性操作直接执行。只给明确信任的任务用。",
+  },
+};
+
+/** 归一化档位：非法 / 缺省一律回落到 standard（存储容错与表单共用）。 */
+export function normalizeSafety(value: unknown): ScheduleSafety {
+  return typeof value === "string" && (SAFETY_VALUES as readonly string[]).includes(value)
+    ? (value as ScheduleSafety)
+    : "standard";
+}
+
+/** 档位展示文案；入参可能来自接口 / 旧数据，非法时回落「标准」。 */
+export function describeSafety(safety: unknown): string {
+  return SAFETY_TIER_META[normalizeSafety(safety)].label;
+}
+
 export interface CronSpec {
   minutes: Set<number>;
   hours: Set<number>;
