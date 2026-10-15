@@ -310,28 +310,34 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
         ];
         if (risk.ruleKey && allowRules.includes(risk.ruleKey)) return;
 
+        // 审批落入「待审批队列」并拦下本次调用。节律 / 无人值守共用同一落点，
+        // 保证两种场景的文案与行为逐字一致。
+        const enqueueApproval = () => {
+          const n = enqueuePendingApproval({
+            toolName,
+            detail: toolName.startsWith("mcp__")
+              ? shortInputJson(input)
+              : shortCommand(typeof input?.command === "string" ? input.command : ""),
+            reason: risk.reason,
+            ruleKey: risk.ruleKey,
+            cwd: runtime.getCwd(),
+            sessionId,
+          });
+          return {
+            block: true as const,
+            reason: `[审批] ${risk.reason} 已加入待审批队列（第 ${n} 项，未执行）。\n不要停下来等：继续做不依赖这一步的部分，收尾时说明这一项卡在哪、需要谁批准。`,
+          };
+        };
+
+        // 节律触发的会话**无人值守**：它虽然带着 UI 能力（ctx.hasUI=true，属普通
+        // 交互式会话类型），但没有任何人坐在旁边点确认 —— 弹窗等于挂死到 10 分钟
+        // 超时拒绝（真机验收跰到过）。所以在 hasUI 判断**之前**就强制入队：
+        // 不弹窗、不拒绝、不看 approvalFallback，风险仍被挂进「等你处理」。
+        if (sessionId && isScheduledSession(sessionId)) return enqueueApproval();
+
         if (!ctx.hasUI) {
-          // 无人值守 / 后台会话：按配置决定「拒绝」还是「入队后继续」。
-          // 节律触发的会话没有人在旁边点确认，**强制入队**（不依赖
-          // approvalFallback，也不得变成静默执行）——这样长任务不会在危险
-          // 操作前面断掉，而风险仍被挂进「等你处理」。
-          const scheduled = sessionId ? isScheduledSession(sessionId) : false;
-          if (scheduled || settings.approvalFallback === "queue") {
-            const n = enqueuePendingApproval({
-              toolName,
-              detail: toolName.startsWith("mcp__")
-                ? shortInputJson(input)
-                : shortCommand(typeof input?.command === "string" ? input.command : ""),
-              reason: risk.reason,
-              ruleKey: risk.ruleKey,
-              cwd: runtime.getCwd(),
-              sessionId,
-            });
-            return {
-              block: true,
-              reason: `[审批] ${risk.reason} 已加入待审批队列（第 ${n} 项，未执行）。\n不要停下来等：继续做不依赖这一步的部分，收尾时说明这一项卡在哪、需要谁批准。`,
-            };
-          }
+          // 无人值守 / 后台会话：按配置决定「拒绝」还是「入队后继续」
+          if (settings.approvalFallback === "queue") return enqueueApproval();
           return {
             block: true,
             reason: `[审批] ${risk.reason}，但当前会话没有可用的确认界面，已拒绝执行。`,
