@@ -317,10 +317,17 @@ export function pruneCheckpoints(sessionId: string, keep = 20, agentDir?: string
  * 最危险的一步是覆盖/删除 —— 所以两类操作都要求「当前内容 == 本轮写入后的
  * 哈希」；不一致说明在本轮之后又被改过（用户手改、其他会话、任何来源），
  * 跳过并如实报告，绝不覆盖。
+ *
+ * `paths` 用于**文件级回滚**：只处理命中的条目，未命中的一动不动。除此之外
+ * 校验、跳过、报告、status 落盘全部与整轮共用同一实现 —— 文件级因此不引入
+ * 任何新的覆盖路径，安全边界与整轮完全一致。匹配口径与下面的 path 比较一致
+ * （`toLowerCase()`，大小写无关）。
  */
 export function restoreCheckpoint(options: {
   sessionId: string;
   turnId: string;
+  /** 只回滚这些路径；省略 = 整轮（与今天逐字节一致） */
+  paths?: string[];
   agentDir?: string;
 }, agentDir?: string): RestoreResult {
   return withSessionLock(options.sessionId, () => {
@@ -330,9 +337,14 @@ export function restoreCheckpoint(options: {
       result.skipped.push({ path: "", reason: "快照不存在" });
       return result;
     }
+    // 文件级回滚的路径过滤：与 recordFilePreImage 的 key 口径一致（resolve + 小写）
+    const onlyPaths = options.paths
+      ? new Set(options.paths.map((path) => resolve(path).toLowerCase()))
+      : null;
     const dir = join(turnDir(options.sessionId, options.turnId, agentDir), "files");
     // 逆序还原：后写入的先撤销，避免同一文件多轮编辑时顺序错乱
     for (const entry of [...checkpoint.files].reverse()) {
+      if (onlyPaths && !onlyPaths.has(entry.path.toLowerCase())) continue;
       if (entry.existed) {
         if (!entry.preImage) {
           result.skipped.push({ path: entry.path, reason: entry.skippedReason ?? "没有备份内容" });

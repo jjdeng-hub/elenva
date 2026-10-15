@@ -60,6 +60,8 @@ export interface TurnCheckpointsState {
   latestRound: TurnRound | null;
   restoring: boolean;
   restore: (turnId?: string) => Promise<void>;
+  /** 文件级回滚：把「本轮」内的单个文件恢复 / 删除（与整轮共用校验与级联） */
+  restoreFile: (path: string) => Promise<void>;
   reload: () => void;
 }
 
@@ -78,16 +80,25 @@ export function mergeRound(checkpoints: readonly TurnCheckpoint[]): TurnRound | 
     round.push(checkpoint);
     if (checkpoint.turnIndex === 0) break;
   }
-  // 旧 → 新遍历，每个路径保留第一次出现（即最早一次触碰）的 existed/restorable
+  // 旧 → 新遍历：每个路径的 existed/restorable 取第一次出现（即最早一次触碰，
+  // 语义正确），但 changedSince 取最后一次触碰的值 —— 同一文件跨子轮次被重写时，
+  // 最早条目的 changedSince 判断的是「更早那次之后是否又被改」，会在本轮范围内误报；
+  // 只有最后一次写入的结果才能判断「本轮之后是否又被改动」。
+  // 实证：真实会话中 components/CodeView.tsx 在子轮 1、4 各写一次，旧口径在其最早条目上误报「被改过」。
   const filesByPath = new Map<string, TurnFile>();
+  const latestByPath = new Map<string, TurnFile>();
   const commands: TurnCommand[] = [];
   for (let i = round.length - 1; i >= 0; i--) {
     for (const file of round[i].files) {
       if (!filesByPath.has(file.path)) filesByPath.set(file.path, file);
+      latestByPath.set(file.path, file);
     }
     commands.push(...round[i].commands);
   }
-  const files = [...filesByPath.values()];
+  const files = [...filesByPath.entries()].map(([path, first]) => ({
+    ...first,
+    changedSince: latestByPath.get(path)?.changedSince,
+  }));
   return {
     checkpoints: round,
     files,
@@ -210,6 +221,67 @@ export function useTurnCheckpoints(
     }
   }, [sessionId, checkpoints, load]);
 
+  const restoreFile = useCallback(async (path: string) => {
+    // 与整轮回滚同构：先 load 取最新，再预告，再「新 → 旧」级联带 paths 过滤
+    const fresh = sessionId ? ((await load(sessionId)) ?? checkpoints) : checkpoints;
+    const round = mergeRound(fresh);
+    const file = round?.files.find((item) => item.path === path);
+    if (!sessionId || !round || !file) return;
+
+    const name = file.path.split(/[\\/]/).pop() ?? file.path;
+    const isNew = !file.existed;
+    const driftWarning = file.changedSince
+      ? "\n\n该文件在本轮之后又被改动，回滚会跳过、不会覆盖。"
+      : "";
+    const ok = await dialogConfirm({
+      title: "回滚此文件",
+      message: (isNew
+        ? `「${name}」为本轮新建，将被删除。`
+        : `将把「${name}」恢复为本轮写入前的内容。`) + driftWarning,
+      confirmText: "回滚",
+      danger: true,
+    });
+    if (!ok) return;
+
+    setRestoring(true);
+    try {
+      const restored: string[] = [];
+      const deleted: string[] = [];
+      const skipped: Array<{ path: string; reason: string }> = [];
+      // 新 → 旧逐个子轮次带 paths 过滤：命中条目共享整轮的校验与报告实现，
+      // 未命中的子轮次原样返回（条目一动不动）。
+      for (const target of round.checkpoints) {
+        const res = await fetch(
+          `/api/sessions/${encodeURIComponent(sessionId)}/checkpoints/restore`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ turnId: target.id, paths: [path] }),
+          },
+        );
+        const data = (await res.json().catch(() => ({}))) as {
+          restored?: string[];
+          deleted?: string[];
+          skipped?: Array<{ path: string; reason: string }>;
+          error?: string;
+        };
+        if (!res.ok) throw new Error(data.error || `回滚失败（HTTP ${res.status}）`);
+        restored.push(...(data.restored ?? []));
+        deleted.push(...(data.deleted ?? []));
+        skipped.push(...(data.skipped ?? []));
+      }
+      if (skipped.length) toast(`跳过「${name}」：${skipped[0].reason}`);
+      else if (isNew && deleted.length) toast(`已删除新建文件「${name}」`);
+      else if (!isNew && restored.length) toast(`已还原「${name}」`);
+      else toast(`「${name}」已是本轮前状态，无需处理`);
+      await load(sessionId);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "回滚失败");
+    } finally {
+      setRestoring(false);
+    }
+  }, [sessionId, checkpoints, load]);
+
   const latestRound = useMemo(() => mergeRound(checkpoints), [checkpoints]);
 
   return {
@@ -217,6 +289,7 @@ export function useTurnCheckpoints(
     latestRound,
     restoring,
     restore,
+    restoreFile,
     reload: () => setReloadKey((value) => value + 1),
   };
 }
