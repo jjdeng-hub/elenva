@@ -39,6 +39,7 @@ tools/*.mjs
 !tools/pending-approvals-selftest.mjs
 !tools/plan-steps-selftest.mjs
 !tools/todo-ledger-selftest.mjs
+!tools/schedules-selftest.mjs
 tools/*.log
 tools/rev/
 # 临时截图：可能拍到记忆全文等私有内容
