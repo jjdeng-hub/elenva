@@ -47,6 +47,7 @@ import {
 import { isEditToolName, isWriteToolName } from "./tool-names";
 import { cwdKey } from "./paths";
 import { registerPendingApproval, resolvePendingApproval } from "./pending-approvals";
+import { normalizePlanSteps, stepsToMarkdown } from "./plan-steps";
 
 /**
  * 宿主护栏扩展：审批闸门 + 每轮快照 + 计划模式。
@@ -75,12 +76,12 @@ export const PLAN_MODE_PROMPT = `## 计划模式（当前开启）
 - 只能做**只读**勘察：read / grep / find / ls，以及只读的 shell 命令
   （如 git status、git diff、ls、rg、npm test）。
 - 任何写入、删除、安装、提交类操作都会被宿主拦截，拦下来再试只是浪费一轮。
-- 勘察完就调用 present_plan 提交计划。计划里只写会影响决策的东西：
-  要改哪些文件、每步做什么、风险在哪、怎么验证。不要复述需求，不要写背景介绍。
-- 计划用 markdown 写：每步一个列表项，一行一件事；文件路径放在反引号里；
-  需要时用小标题分组。总长控制在 15 行以内 —— 用户要在弹窗里**扫一眼**就看懂，
+- 勘察完就调用 present_plan 提交计划。把计划拆成 2~8 条可核对的步骤放进 steps
+  （每条一句话；实现细节放 detail）；plan 写背景与总述，别复述需求。
+- 计划正文用 markdown 写：只写会影响决策的东西（要改哪些文件、风险在哪、怎么验证），
+  文件路径放在反引号里，总长控制在 15 行以内 —— 用户要在弹窗里**扫一眼**就看懂，
   写成一大段散文等于没写。
-- 被要求修改时，改完再次调用 present_plan。`;
+- 被要求修改时，改完再次调用 present_plan（保持步骤结构）；打回时用户会附上逐条批注。`;
 
 /** 「本会话总是允许」的规则缓存，进程内有效 */
 const PENDING_APPROVALS_FILE = "elenva-pending-approvals.jsonl";
@@ -499,16 +500,26 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
       pi.registerTool(defineTool({
         name: "present_plan",
         label: "提交计划",
-        description: "提交一份执行计划等待用户批准。仅在计划模式下使用；批准后即可开始改动。",
+        description: "提交一份执行计划等待用户批准。把计划拆成 2~8 条可核对的步骤放进 steps（每条一句话；实现细节放 detail）；plan 写背景与总述，别复述需求。仅在计划模式下使用；批准后即可开始改动。",
         promptSnippet: "Submit an execution plan for user approval (plan mode)",
         parameters: Type.Object({
           plan: Type.String({
-            description: "计划正文：要改哪些文件、每步做什么、风险、验证方式。不要复述需求。",
+            description: "计划正文（markdown）：背景与总述 —— 要改哪些文件、风险、验证方式。不要复述需求；步骤写进 steps。",
           }),
+          steps: Type.Optional(
+            Type.Array(
+              Type.Object({
+                title: Type.String({ description: "一条可核对的步骤，一句话" }),
+                detail: Type.Optional(Type.String({ description: "该步的实现细节（可选）" })),
+              }),
+              { maxItems: 12, description: "计划步骤（2~8 条为宜）" },
+            ),
+          ),
         }),
         async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
           const sessionId = runtime.getSessionId();
           const text = params.plan.trim();
+          const steps = normalizePlanSteps(params.steps);
           if (!ctx.hasUI) {
             return {
               content: [{ type: "text", text: "当前会话没有可用的确认界面，无法批准计划。" }],
@@ -520,9 +531,13 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
           registerPendingApproval({ sessionId, kind: "plan", reason: "计划待批准", detail: text });
           let choice: string | undefined;
           try {
+            // 有步骤时把步骤排在正文前 —— 弹窗里先看到「要做什么」再看到「背景」
+            const message = steps.length > 0
+              ? `计划待批准\n步骤：\n${stepsToMarkdown(steps)}\n\n${text}`
+              : `计划待批准\n${text}`;
             choice = await ctx.ui.select(
-              `计划待批准\n${text}`,
-              ["批准，开始执行", "继续修改计划", "先不做"],
+              message,
+              ["批准，开始执行", "打回并批注", "先不做"],
               // 同上：没人看的时候不能永久挂住
               { timeout: 30 * 60 * 1000 },
             );
@@ -533,18 +548,37 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
             if (sessionId) writePlanMode(sessionId, false);
             return {
               content: [{ type: "text", text: `用户已批准计划，可以开始执行。\n\n${text}` }],
-              details: { kind: "elenva-plan", status: "approved" },
+              details: { kind: "elenva-plan", status: "approved", steps },
             };
           }
-          if (choice === "继续修改计划") {
+          if (choice === "打回并批注") {
+            // 打回时收一条批注：用户今天只能批准后回聊天里补意见，等于丢掉了「为什么打回」
+            let note: string | undefined;
+            try {
+              note = await ctx.ui.editor("计划批注 —— 修改意见（可按步骤逐条写，例：第 2 步：不要动 X）");
+            } catch (error) {
+              // 编辑器不可用 / 取消：按「无批注打回」处理，审批流程绝不能因此异常中断
+              console.error("[elenva] plan note editor failed:", error);
+              note = undefined;
+            }
+            const trimmed = typeof note === "string" ? note.trim() : "";
+            if (trimmed === "") {
+              return {
+                content: [{ type: "text", text: "用户打回了计划。请修订后再次调用 present_plan（保持步骤结构）。" }],
+                details: { kind: "elenva-plan", status: "revise", steps },
+              };
+            }
             return {
-              content: [{ type: "text", text: "用户要求修改计划：请根据用户的补充意见修订后再次调用 present_plan。" }],
-              details: { kind: "elenva-plan", status: "revise" },
+              content: [{
+                type: "text",
+                text: `用户打回了计划。修改意见：\n${trimmed}\n\n请据此修订后再次调用 present_plan（保持步骤结构）。`,
+              }],
+              details: { kind: "elenva-plan", status: "revise", steps, note: trimmed },
             };
           }
           return {
             content: [{ type: "text", text: "用户暂时不执行该计划：停止改动，等待用户下一步指示。" }],
-            details: { kind: "elenva-plan", status: "rejected" },
+            details: { kind: "elenva-plan", status: "rejected", steps },
           };
         },
       }));
