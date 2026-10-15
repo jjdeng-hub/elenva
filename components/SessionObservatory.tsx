@@ -34,6 +34,7 @@ import { verificationKindLabel } from "@/lib/verification-kind";
 import type { TurnCheckpointsState } from "@/hooks/useTurnCheckpoints";
 import type { AgentMessage, ToolResultMessage } from "@/lib/types";
 import type { TurnTrendsResult } from "@/lib/turn-trends";
+import type { CompactionRecord } from "@/lib/compaction-records";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { TodoList } from "@/components/TodoList";
 import { latestTodoState } from "@/lib/todo-view";
@@ -245,6 +246,57 @@ function CostSettlement({
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <div className="py-1 text-[11px] leading-relaxed text-dim/80">{children}</div>;
+}
+
+/**
+ * 压缩记录：回答「长会话是怎么被压下来的、每次丢了什么」。
+ *
+ * 数据来自文件顺序的线性近似（lib/compaction-records.ts），列表**最新在上**（
+ * 倒序）——刚发生的压缩最值得复盘。点行展开摘要全文，收起时保持一屏可扫。
+ * 无压缩时调用方根本不渲染本组件，因此这里不再做空态。
+ */
+function CompactionRecords({ records }: { records: CompactionRecord[] }) {
+  // 一次只展开一条：观测栏本就窄，多条摘要同时展开会挤走上下文占用率
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const ordered = useMemo(() => [...records].reverse(), [records]);
+  return (
+    <div className="mt-2" data-testid="rail-compaction-records">
+      <div className="text-[11px] font-semibold text-muted">压缩记录 ({records.length})</div>
+      <div className="mt-0.5">
+        {ordered.map((record, index) => {
+          const open = expanded === record.entryId && record.entryId !== "";
+          return (
+            <div key={record.entryId || `compaction-${index}`} className="border-t border-line-soft">
+              <button
+                onClick={() => setExpanded(open ? null : record.entryId)}
+                aria-expanded={open}
+                data-testid="compaction-record"
+                className="flex w-full cursor-pointer items-center gap-1.5 py-1.5 text-left t-fast hover:bg-hover/50"
+              >
+                <ChevronDown
+                  size={10}
+                  className={cn("shrink-0 text-dim transition-transform", open && "rotate-180")}
+                />
+                <span className="min-w-0 flex-1 truncate text-[11px] text-dim">{relTime(record.timestamp)}</span>
+                <span className="shrink-0 text-[11px] tabular-nums text-muted">丢弃 {record.droppedMessages} 条</span>
+                <span className="shrink-0 text-[11px] tabular-nums text-dim">
+                  · 压缩前 {formatTokens(record.tokensBefore)} tokens
+                </span>
+              </button>
+              {open && (
+                <div
+                  data-testid="compaction-record-summary"
+                  className="mb-1.5 max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-panel-2/60 px-2 py-1.5 text-[11px] leading-relaxed text-dim"
+                >
+                  {record.summary || "（无摘要）"}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 /**
@@ -489,6 +541,7 @@ export function SessionObservatory({
   sessionStats,
   trends,
   contextUsage,
+  compactions = [],
   displayModel,
   thinkingLevel,
   onOpenFile,
@@ -525,6 +578,8 @@ export function SessionObservatory({
   gitInfo: GitInfo;
   sessionStats: SessionStatsInfo | null;
   contextUsage: { percent: number | null; contextWindow: number; tokens: number | null } | null;
+  /** 压缩历史（「这次丢了什么」）；无压缩时为空数组，UI 不渲染对应区块 */
+  compactions?: CompactionRecord[];
   displayModel: { provider: string; modelId: string } | null;
   thinkingLevel: string | null;
   onOpenFile: (path: string) => void;
@@ -690,6 +745,8 @@ export function SessionObservatory({
                 )}
               </div>
             )}
+            {/* 无压缩历史时不渲染：与现状逐像素一致 */}
+            {compactions.length > 0 && <CompactionRecords records={compactions} />}
           </Section>
         ) : (
           <Section title="上下文窗口" icon={<Layers size={12} />}>

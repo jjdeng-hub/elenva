@@ -16,6 +16,7 @@ import { getAgentSession } from "@/lib/agent-runtime";
 import { projectTreeForResponse } from "@/lib/project-tree";
 import { computeSessionTotalActiveMs } from "@/lib/session-timing";
 import { computeSessionStats } from "@/lib/session-stats";
+import { collectCompactionRecords } from "@/lib/compaction-records";
 import type { SessionEntry } from "@/lib/types";
 import { readSubagentRun, readSubagentSessionResources, SUBAGENT_META_TYPE } from "@/lib/subagents";
 import { readSessionToolSelection } from "@/lib/session-tool-selection";
@@ -59,6 +60,8 @@ export async function GET(
     // the same aggregation the SDK's getSessionStats() uses. Lets the client
     // keep monotonic token/cost counters across compaction and page reloads.
     const stats = computeSessionStats(entries as unknown as SessionEntry[]);
+    // 压缩历史（「这次丢了什么」）：同一批 entries 顺手算，不额外读盘。
+    const compactions = collectCompactionRecords(entries as unknown as SessionEntry[]);
     const sessionName = sm.getSessionName();
     const firstUserEntry = entries.find((entry) => entry.type === "message" && entry.message.role === "user");
     const firstUserMessage = firstUserEntry?.type === "message" ? firstUserEntry.message : undefined;
@@ -105,6 +108,7 @@ export async function GET(
       tree,
       context,
       stats,
+      compactions,
       totalActiveMs,
       ...(toolNames !== undefined ? { toolNames } : {}),
     });

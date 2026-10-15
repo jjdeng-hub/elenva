@@ -29,6 +29,7 @@ import { useTurnCheckpoints } from "@/hooks/useTurnCheckpoints";
 import { latestTodoState } from "@/lib/todo-view";
 import { resolveLocalFilePath } from "@/lib/file-links";
 import type { SessionInfo, ToolResultMessage } from "@/lib/types";
+import type { CompactionRecord } from "@/lib/compaction-records";
 import { basename, formatCost, formatTokens } from "@/lib/format";
 import { toast, dialogConfirm, dialogPrompt } from "@/components/ui/dialog";
 import type { SessionTemplate } from "@/lib/templates";
@@ -134,6 +135,7 @@ export function ChatView({
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   const {
     loading, error, messages, streamState, agentRunning, agentPhase,
+    data,
     contextUsage, displayModel, modelNames, modelList, modelSwitching,
     thinkingLevel, modelThinkingLevels,
     entryIds, forkingEntryId, isCompacting, slashCommands,
@@ -352,6 +354,15 @@ export function ChatView({
   const sessionTitle = isNew ? "新会话" : session?.name || session?.firstMessage || "会话";
   const cwd = isNew ? newSessionCwd : session?.cwd || "";
   const cwdName = useMemo(() => (cwd && cwd !== "unknown" ? basename(cwd) : ""), [cwd]);
+  /* 压缩历史（「这次丢了什么」）：随 /api/sessions/[id] 的会话数据一起来。
+     加载在 useAgentSession 里完成（loadSession 会把整份 JSON 存进 data），
+     压缩结束（compaction_end）时该 hook 也会重新 loadSession，这里自然更新。
+     data 的类型归 hook 所有，此处只取本功能需要的只读字段，不改其契约。 */
+  const compactionRecords = useMemo<CompactionRecord[]>(() => {
+    const records = (data as { compactions?: CompactionRecord[] } | null)?.compactions;
+    return Array.isArray(records) ? records : [];
+  }, [data]);
+
   // 新会话草稿键固定：工作区切换（cwd 变化）不重挂载、不重键，草稿跟随会话本身
   const draftKey = session?.id ?? "new";
 
@@ -1154,6 +1165,7 @@ export function ChatView({
               gitInfo={gitInfo}
               sessionStats={sessionStats}
               contextUsage={contextUsage}
+              compactions={compactionRecords}
               displayModel={displayModel}
               thinkingLevel={thinkingLevel}
               onOpenFile={openFilePreview}
