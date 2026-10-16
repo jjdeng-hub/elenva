@@ -9,17 +9,17 @@ import { join } from "node:path";
 import { createJiti } from "jiti";
 
 const jiti = createJiti(import.meta.url, { alias: { "@": new URL("../", import.meta.url).pathname } });
+// 纯函数层（客户端可安全导入，不得含 node:*）—— 判定/拼装/解析
 const {
   isValidSkillDraftName,
   validateSkillDraft,
   yamlScalar,
   buildSkillMarkdown,
-  skillDraftDir,
-  skillDraftPath,
-  isSkillDraftTaken,
   readSkillDraft,
   SKILL_DRAFT_NAME_MAX,
 } = await jiti.import("../lib/skill-drafts.ts");
+// 服务端部分（依赖 node:path）—— 路径拼接与重名判定
+const { skillDraftDir, skillDraftPath, isSkillDraftTaken } = await jiti.import("../lib/skill-drafts-server.ts");
 
 let fail = 0;
 const check = (name, fn) => {

@@ -1,16 +1,20 @@
 /**
- * 技能草稿 —— 网页侧（保存接口 + 草稿卡）用的纯函数层。
+ * 技能草稿 —— **客户端可安全导入**的纯函数层（草稿卡与保存接口共用）。
  *
- * 三件事：
+ * 边界（与生产构建对齐）：本文件**不得** import 任何 `node:*` / `fs`。
+ * MessageView 是客户端组件，一旦这条链上出现 `node:path`，webpack 会把 Node 内置
+ * 模块拖进 client bundle，`next build` 报 `UnhandledSchemeError: Reading from "node:path"`。
+ * 路径与重名判定（依赖 `node:path`）放在 `lib/skill-drafts-server.ts`，只许服务端导入。
+ *
+ * 三件事（全部纯函数）：
  * 1. **校验**：直接复用扩展里的零依赖纯模块（同一套规则，见 `extensions/elenva-skills/draft.ts`）；
  * 2. **拼装**：把 `{name, description, body}` 拼成 SKILL.md（frontmatter + 正文），
  *    格式对齐现有技能库（`~/.pi/agent/skills/<name>/SKILL.md`：裸标量 frontmatter、`---` 后空一行）；
- * 3. **路径**：技能库根目录 → `<root>/<name>/SKILL.md`。
+ * 3. **解析**：从工具入参读草稿（UI 容错）。
  *
  * 所有函数都不碰文件系统（写盘在 `app/api/skills/draft/save/route.ts`），
  * 便于 `tools/skill-drafts-selftest.mjs` 直接跑。
  */
-import { join } from "node:path";
 import {
   isValidSkillDraftName,
   SKILL_DRAFT_NAME_MAX,
@@ -28,28 +32,6 @@ export {
   validateSkillDraft,
 };
 export type { SkillDraft, SkillDraftInput, SkillDraftValidation };
-
-/** 技能目录：`<skillsRoot>/<name>` */
-export function skillDraftDir(skillsRoot: string, name: string): string {
-  return join(skillsRoot, name);
-}
-
-/** 技能文件：`<skillsRoot>/<name>/SKILL.md` */
-export function skillDraftPath(skillsRoot: string, name: string): string {
-  return join(skillDraftDir(skillsRoot, name), "SKILL.md");
-}
-
-/**
- * 重名判定：技能目录或 SKILL.md 任一已存在，就认为重名（目录在 = 已有一个同名技能，
- * 可能带附属文件，不能动）。existst 以参数注入，便于纯函数自测。
- */
-export function isSkillDraftTaken(
-  exists: (path: string) => boolean,
-  skillsRoot: string,
-  name: string,
-): boolean {
-  return exists(skillDraftDir(skillsRoot, name)) || exists(skillDraftPath(skillsRoot, name));
-}
 
 /** YAML 里不能作为裸标量开头的字符（`-` 只在开头有歧义，正文里的连字符不受影响） */
 const YAML_UNSAFE_START = /^[-?:,[\]{}#&*!|>'"%@`]/;

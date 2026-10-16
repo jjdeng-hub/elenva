@@ -4,14 +4,8 @@ import { join, resolve, sep } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { writePrivateFileAtomicSync } from "@/lib/atomic-file";
 import { hasJsonContentType, isApiRequestAllowed } from "@/lib/request-security";
-import {
-  buildSkillMarkdown,
-  isSkillDraftTaken,
-  isValidSkillDraftName,
-  skillDraftDir,
-  skillDraftPath,
-  validateSkillDraft,
-} from "@/lib/skill-drafts";
+import { buildSkillMarkdown, isValidSkillDraftName, validateSkillDraft } from "@/lib/skill-drafts";
+import { isSkillDraftTaken, skillDraftDir, skillDraftPath } from "@/lib/skill-drafts-server";
 
 export const dynamic = "force-dynamic";
 
