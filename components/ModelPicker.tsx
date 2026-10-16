@@ -4,10 +4,17 @@ import { Check, ChevronDown, Cpu, Loader2, RefreshCw, Star, Zap } from "lucide-r
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "@/components/ui/dialog";
 import { cn } from "@/components/lib/utils";
+import { useModelNotes } from "@/hooks/useModelNotes";
 import type { ThinkingLevelOption } from "@/hooks/useAgentSession";
 
 type ModelEntry = { id: string; name: string; provider: string };
 type Defaults = { defaultProvider?: string; defaultModel?: string; defaultThinkingLevel?: string };
+
+/** 菜单行只有一行位置：备注过长就截断（按码点），完整文本交给 title。 */
+function noteLine(note: string, max = 60): string {
+  const chars = Array.from(note);
+  return chars.length <= max ? note : `${chars.slice(0, max - 1).join("").trimEnd()}…`;
+}
 
 export function ModelPicker({
   modelList,
@@ -47,6 +54,8 @@ export function ModelPicker({
   const [savingDefault, setSavingDefault] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const ref = useRef<HTMLDivElement | null>(null);
+  // 备注只在菜单真打开时才拉：这个组件在聊天页常驻，不开菜单不必多一个请求。
+  const { notes } = useModelNotes({ enabled: open });
 
   const loadDefaults = useCallback(() => {
     fetch("/api/pi-settings", { cache: "no-store" })
@@ -157,6 +166,7 @@ export function ModelPicker({
                 {models.map((m) => {
                   const key = `${m.provider}/${m.id}`;
                   const active = key === currentKey;
+                  const note = notes[key]?.note;
                   return (
                     <button
                       key={key}
@@ -169,7 +179,15 @@ export function ModelPicker({
                         active ? "text-accent" : "text-fg",
                       )}
                     >
-                      <span className="min-w-0 flex-1 truncate">{m.name || m.id}</span>
+                      <span className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate">{m.name || m.id}</span>
+                        {/* 备注要出现在选型路径上：选模型的那一刻就能看到「擅长什么 / 贵不贵」 */}
+                        {note && (
+                          <span className="mt-0.5 truncate text-[11px] text-dim" title={note}>
+                            {noteLine(note)}
+                          </span>
+                        )}
+                      </span>
                       {active && <Check size={14} className="shrink-0" />}
                     </button>
                   );

@@ -1,10 +1,14 @@
 "use client";
 
-import { Check, Loader2, Plus, RefreshCw, Save, Search, X } from "lucide-react";
+import { Check, Loader2, Pencil, Plus, RefreshCw, Save, Search, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { toast } from "@/components/ui/dialog";
+import { useModelNotes } from "@/hooks/useModelNotes";
+
+/** 与 lib/model-notes.ts 的 MAX_NOTE_LENGTH 一致（客户端不能运行时导入该文件——下半有 node:fs）。 */
+const NOTE_MAX = 200;
 
 type ModelEntry = { id: string; name: string; provider: string };
 type ModelsPayload = {
@@ -73,6 +77,32 @@ export function ModelScopeEditor() {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   /** 一旦用户勾选过，通配模式会被展开成具体模型，需要提示一次。 */
   const [materialized, setMaterialized] = useState(false);
+
+  /* 模型备注：每模型一条自由文本（擅长什么 / 贵不贵），行内展示 + 小铅笔内联编辑。 */
+  const { notes, save: saveNote } = useModelNotes();
+  const [editingRef, setEditingRef] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [savingNote, setSavingNote] = useState(false);
+
+  const openNoteEditor = (ref: string, current: string) => {
+    setEditingRef(ref);
+    setNoteDraft(current);
+  };
+
+  /** Enter 保存 / 清除按钮走同一条路；空串即清除（服务端删键）。 */
+  const commitNote = async (provider: string, modelId: string, note: string) => {
+    setSavingNote(true);
+    try {
+      await saveNote(provider, modelId, note);
+      toast(note.trim() ? "备注已保存" : "备注已清除");
+      setEditingRef(null);
+      setNoteDraft("");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingNote(false);
+    }
+  };
 
   const loadModels = useCallback(async () => {
     try {
@@ -310,27 +340,95 @@ export function ModelScopeEditor() {
                 const ref = refOf(m);
                 const on = selectedRefs.has(ref);
                 const isDefault = ref === defaultRef;
+                const note = notes[ref]?.note;
+                const editing = editingRef === ref;
                 return (
-                  <button
-                    key={ref}
-                    onClick={() => toggle(m)}
-                    className={cn(
-                      "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left t-fast hover:bg-hover",
-                      on ? "text-fg" : "text-dim",
+                  <div key={ref} className="group rounded-md t-fast hover:bg-hover">
+                    <div className="flex w-full items-center gap-2 px-2 py-1.5">
+                      <button
+                        onClick={() => toggle(m)}
+                        className={cn(
+                          "flex min-w-0 flex-1 cursor-pointer items-center gap-2 text-left",
+                          on ? "text-fg" : "text-dim",
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "flex size-3.5 shrink-0 items-center justify-center rounded-sm border",
+                            on ? "border-accent bg-accent text-accent-fg" : "border-line",
+                          )}
+                        >
+                          {on && <Check size={10} />}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[12px]">{m.name || m.id}</span>
+                          {/* 备注就该在选型路径上——藏在详情里等于没写 */}
+                          {note && (
+                            <span className="mt-0.5 block truncate text-[11px] text-dim" title={note}>
+                              {note}
+                            </span>
+                          )}
+                        </span>
+                        {isDefault && <span className="chip chip-accent shrink-0">默认</span>}
+                        <span className="shrink-0 font-mono text-[11px] text-dim">{m.id}</span>
+                      </button>
+                      <button
+                        onClick={() => openNoteEditor(ref, note ?? "")}
+                        title={note ? "编辑备注" : "加备注（擅长什么 / 贵不贵）"}
+                        aria-label={note ? `编辑 ${m.name || m.id} 的备注` : `为 ${m.name || m.id} 添加备注`}
+                        data-testid={`model-note-edit-${ref}`}
+                        className={cn(
+                          "flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md text-dim t-fast hover:bg-panel-2 hover:text-fg",
+                          note ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus-visible:opacity-100",
+                        )}
+                      >
+                        <Pencil size={12} />
+                      </button>
+                    </div>
+                    {editing && (
+                      <div className="flex items-center gap-1.5 pb-2 pl-6 pr-2">
+                        <input
+                          autoFocus
+                          value={noteDraft}
+                          onChange={(e) => setNoteDraft(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && !e.nativeEvent.isComposing) {
+                              e.preventDefault();
+                              void commitNote(m.provider, m.id, noteDraft);
+                            } else if (e.key === "Escape") {
+                              setEditingRef(null);
+                              setNoteDraft("");
+                            }
+                          }}
+                          maxLength={NOTE_MAX}
+                          spellCheck={false}
+                          data-testid={`model-note-input-${ref}`}
+                          placeholder="备注：擅长什么 / 贵不贵（回车保存，Esc 取消）"
+                          className="h-7 min-w-0 flex-1 rounded-md border border-line bg-panel-2 px-2.5 text-[12px] text-fg outline-none focus:border-accent/50"
+                        />
+                        <span className="shrink-0 text-[11px] text-dim">
+                          {Array.from(noteDraft).length}/{NOTE_MAX}
+                        </span>
+                        <button
+                          onClick={() => void commitNote(m.provider, m.id, noteDraft)}
+                          disabled={savingNote}
+                          data-testid={`model-note-save-${ref}`}
+                          className="btn btn-sm btn-primary"
+                        >
+                          保存
+                        </button>
+                        {note && (
+                          <button
+                            onClick={() => void commitNote(m.provider, m.id, "")}
+                            disabled={savingNote}
+                            className="btn btn-sm btn-subtle"
+                          >
+                            清除
+                          </button>
+                        )}
+                      </div>
                     )}
-                  >
-                    <span
-                      className={cn(
-                        "flex size-3.5 shrink-0 items-center justify-center rounded-sm border",
-                        on ? "border-accent bg-accent text-accent-fg" : "border-line",
-                      )}
-                    >
-                      {on && <Check size={10} />}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate text-[12px]">{m.name || m.id}</span>
-                    {isDefault && <span className="chip chip-accent shrink-0">默认</span>}
-                    <span className="shrink-0 font-mono text-[11px] text-dim">{m.id}</span>
-                  </button>
+                  </div>
                 );
               })}
             </div>
