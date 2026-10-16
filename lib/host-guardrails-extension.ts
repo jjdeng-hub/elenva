@@ -48,7 +48,8 @@ import {
 import { isEditToolName, isWriteToolName } from "./tool-names";
 import { cwdKey } from "./paths";
 import { registerPendingApproval, resolvePendingApproval } from "./pending-approvals";
-import { appendApprovalLog, type ApprovalDecision } from "./approval-log";
+import { appendApprovalLog, readApprovalLog, MAX_HISTORY_LIMIT, type ApprovalDecision } from "./approval-log";
+import { appendLastDecisionNote, safeLastDecisionNote } from "./deny-memory";
 import { getScheduledSessionTier, isScheduledSession } from "./scheduled-sessions";
 import { normalizePlanSteps, stepsToMarkdown } from "./plan-steps";
 
@@ -203,6 +204,19 @@ function shortInputJson(input: Record<string, unknown> | undefined, limit = 300)
   }
 }
 
+/**
+ * 「上次同类操作」附注（模块 5 · 第 3 轮）：读审批历史，找同 `ruleKey` 的最近一次
+ * 决定（排除当前会话，避免自指），生成一行人话。只看 `ruleKey` 与 `sessionId`，
+ * **不参与任何放行 / 拦截判定**；读日志异常时 `safeLastDecisionNote` 静默返回 null。
+ */
+function lastDecisionNote(ruleKey: string | undefined, sessionId: string | null): string | null {
+  return safeLastDecisionNote(
+    ruleKey,
+    () => readApprovalLog({ limit: MAX_HISTORY_LIMIT }).entries,
+    { excludeSessionId: sessionId },
+  );
+}
+
 function planModeActive(runtime: GuardrailsRuntime): boolean {
   const sessionId = runtime.getSessionId();
   if (!sessionId) return false;
@@ -348,6 +362,11 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
         ];
         if (risk.ruleKey && allowRules.includes(risk.ruleKey)) return;
 
+        // 「上次同类操作」附注：只在确实要走到闸门（需确认 / 入队 / 自动拒绝）时才读历史。
+        // 它只影响弹窗 / 队列 / 拒绝的显示文案，**不参与下面的任何判定**；
+        // 读日志出错时 lastDecisionNote 返回 null，appendLastDecisionNote 就原样不加。
+        const historyNote = lastDecisionNote(risk.ruleKey, sessionId);
+
         // 审批落入「待审批队列」并拦下本次调用。节律 / 无人值守共用同一落点，
         // 保证两种场景的文案与行为逐字一致。
         const enqueueApproval = () => {
@@ -357,12 +376,15 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
           const n = enqueuePendingApproval({
             toolName,
             detail: queueDetail,
-            reason: risk.reason,
+            // 队列卡片（工作台「等你」）也带上历史：同一落点的展示文案附注
+            reason: appendLastDecisionNote(risk.reason, historyNote),
             ruleKey: risk.ruleKey,
             cwd: runtime.getCwd(),
             sessionId,
           });
-          // 只加日志：入队同样是一次决策（本次调用被拦下、不执行）
+          // 只加日志：入队同样是一次决策（本次调用被拦下、不执行）。
+          // 注意：日志里的原因保持原样（risk.reason），绝不把附注存回历史，
+          // 否则下次会拼出「上次同类操作：上次同类操作：…」的嵌套。
           appendApprovalLog({
             sessionId,
             kind: "tool",
@@ -371,10 +393,14 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
             decision: "queued",
             source: "queue",
             reason: risk.reason,
+            ruleKey: risk.ruleKey,
           });
           return {
             block: true as const,
-            reason: `[审批] ${risk.reason} 已加入待审批队列（第 ${n} 项，未执行）。\n不要停下来等：继续做不依赖这一步的部分，收尾时说明这一项卡在哪、需要谁批准。`,
+            reason: appendLastDecisionNote(
+              `[审批] ${risk.reason} 已加入待审批队列（第 ${n} 项，未执行）。\n不要停下来等：继续做不依赖这一步的部分，收尾时说明这一项卡在哪、需要谁批准。`,
+              historyNote,
+            ),
           };
         };
 
@@ -398,10 +424,14 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
             decision: "denied",
             source: "auto",
             reason: risk.reason,
+            ruleKey: risk.ruleKey,
           });
           return {
             block: true,
-            reason: `[审批] ${risk.reason}，但当前会话没有可用的确认界面，已拒绝执行。`,
+            reason: appendLastDecisionNote(
+              `[审批] ${risk.reason}，但当前会话没有可用的确认界面，已拒绝执行。`,
+              historyNote,
+            ),
           };
         }
 
@@ -421,7 +451,10 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
         let choice: string | undefined;
         try {
           choice = await ctx.ui.select(
-            `危险操作需要确认\n${risk.reason}\n\n${detail}\n\n工具：${toolName}`,
+            appendLastDecisionNote(
+              `危险操作需要确认\n${risk.reason}\n\n${detail}\n\n工具：${toolName}`,
+              historyNote,
+            ),
             options,
             // 后台会话（子代理 / 并行试验）弹的卡可能没人在看；没有超时就会永久挂住
             // 那一轮工具调用。超时按「拒绝」处理 —— 宁可不做，也不静默执行。
@@ -444,6 +477,7 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
           decision: toolDecision,
           source: "dialog",
           reason: toolDecision === "approved" ? undefined : risk.reason,
+          ruleKey: risk.ruleKey,
         });
 
         if (choice === "本会话总是允许" && sessionId && risk.ruleKey) {
@@ -630,7 +664,9 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
           } finally {
             resolvePendingApproval(sessionId, "plan");
           }
-          // 只加日志：计划审批的结果写进历史（批准 / 打回的判定与写回逻辑一字未动）
+          // 只加日志：计划审批的结果写进历史（批准 / 打回的判定与写回逻辑一字未动）。
+          // plan 侧没有 tool-risk 那种 ruleKey，按 kind 级固定键（"plan"）记，
+          // 供以后把「上次计划决定」也带到现场。
           const logPlan = (decision: ApprovalDecision, reason?: string) =>
             appendApprovalLog({
               sessionId,
@@ -640,6 +676,7 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
               decision,
               source: "dialog",
               reason,
+              ruleKey: "plan",
             });
           if (choice === "批准，开始执行") {
             logPlan("approved");
