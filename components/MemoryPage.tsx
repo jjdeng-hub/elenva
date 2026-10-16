@@ -9,6 +9,7 @@ import { toast, dialogConfirm, dialogPrompt } from "@/components/ui/dialog";
 import { Popover } from "@/components/ui/popover";
 import { ReviewLedgerView } from "@/components/ReviewLedgerView";
 import { CopyButton } from "@/components/ui/widgets";
+import { CorrectionsInboxView } from "@/components/CorrectionsInbox";
 import { basename, formatSize, relTime } from "@/lib/format";
 
 type ContextFileEntry = {
@@ -111,7 +112,7 @@ type AgentMemoryDetail = {
   limit: number;
 };
 
-type MemoryTab = "agent" | "instructions" | "ledger";
+type MemoryTab = "agent" | "corrections" | "instructions" | "ledger";
 
 /** 待审条目（GET /api/memory/pending 的一项） */
 type PendingMemoryItem = {
@@ -160,6 +161,9 @@ export function MemoryPage({ projects }: { projects: MemoryProject[] }) {
               <TabButton active={tab === "agent"} onClick={() => setTab("agent")} icon={<Brain size={12} />}>
                 Agent 记忆
               </TabButton>
+              <TabButton active={tab === "corrections"} onClick={() => setTab("corrections")} icon={<Inbox size={12} />}>
+                纠正收件箱
+              </TabButton>
               <TabButton active={tab === "instructions"} onClick={() => setTab("instructions")} icon={<FileText size={12} />}>
                 指令文件
               </TabButton>
@@ -171,6 +175,8 @@ export function MemoryPage({ projects }: { projects: MemoryProject[] }) {
         />
         {tab === "agent" ? (
           <AgentMemoryView scrollRef={agentScrollRef} initialId={ledgerTargetFile} />
+        ) : tab === "corrections" ? (
+          <CorrectionsInboxView projects={projects} />
         ) : tab === "ledger" ? (
           <ReviewLedgerView
             onOpenMemoryEntry={(fileId) => {
