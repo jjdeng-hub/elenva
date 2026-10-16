@@ -1,11 +1,12 @@
 "use client";
 
-import { ChevronRight, Download, Loader2, Package, Plug, RefreshCw, Search, Server, ShieldCheck, Sparkles, Star, Trash2 } from "lucide-react";
+import { Boxes, Check, ChevronRight, Copy, Download, Loader2, Package, Plug, RefreshCw, Search, Server, ShieldCheck, Sparkles, Star, Trash2 } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { PageHeader } from "@/components/ui/bits";
 import { dialogConfirm, toast } from "@/components/ui/dialog";
+import { copyText } from "@/lib/clipboard";
 
 type PluginPackage = {
   source: string;
@@ -39,6 +40,33 @@ type CatalogItem = {
   description?: string;
   date?: string;
   keywords?: string[];
+};
+
+/** /api/builtin-catalog 返回项（仓库自带扩展 / 内置技能，状态按源与目标的文件比对得出） */
+type BuiltinItem = {
+  path: string;
+  kind: "extension" | "skills";
+  name: string;
+  description: string;
+  status: "missing" | "installed" | "outdated";
+  targetPath: string;
+  installCommand: string;
+  restartRequired: boolean;
+  needsDependency?: boolean;
+  dependencyName?: string;
+  dependencyNote?: string;
+};
+
+const BUILTIN_STATUS_LABEL: Record<BuiltinItem["status"], string> = {
+  missing: "未安装",
+  installed: "已安装",
+  outdated: "可更新",
+};
+
+const BUILTIN_STATUS_CLASS: Record<BuiltinItem["status"], string> = {
+  missing: "bg-panel-2 text-dim",
+  installed: "bg-success/10 text-success",
+  outdated: "bg-warn/10 text-warn",
 };
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -115,6 +143,13 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const catalogLoadedOnce = useRef(false);
 
+  /** 仓库自带件（内置扩展 ×4 + 内置起步技能）：发现 + 状态 + 一键安装（README 那套 CLI 的界面版） */
+  const [builtinItems, setBuiltinItems] = useState<BuiltinItem[]>([]);
+  const [builtinLoading, setBuiltinLoading] = useState(true);
+  const [builtinBusy, setBuiltinBusy] = useState<string | null>(null);
+  const [builtinNote, setBuiltinNote] = useState<string | null>(null);
+  const [copiedBuiltin, setCopiedBuiltin] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!defaultCwd) {
       setPackages([]);
@@ -135,6 +170,101 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
   useEffect(() => {
     load();
   }, [load]);
+
+  const loadBuiltin = useCallback(async () => {
+    setBuiltinLoading(true);
+    try {
+      const res = await fetch("/api/builtin-catalog", { cache: "no-store" });
+      const data = (await res.json().catch(() => ({}))) as {
+        items?: BuiltinItem[];
+        restartNote?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      setBuiltinItems(Array.isArray(data.items) ? data.items : []);
+      if (typeof data.restartNote === "string") setBuiltinNote(data.restartNote);
+    } catch {
+      setBuiltinItems([]);
+    } finally {
+      setBuiltinLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBuiltin();
+  }, [loadBuiltin]);
+
+  const installBuiltinItem = async (item: BuiltinItem) => {
+    const verb = item.status === "outdated" ? "更新" : "安装";
+    const ok = await dialogConfirm({
+      title: `${verb}内置${item.kind === "skills" ? "技能" : "扩展"}`,
+      message: `将把仓库里的 ${item.path} 复制到 pi 的 agent 目录（${item.targetPath}）。${item.kind === "skills" ? "只覆盖、不删除已有技能文件。" : "会先删掉目标目录里不属于它的旧文件。"}${item.needsDependency ? `注意：它依赖 ${item.dependencyName}，当前未检测到。` : ""}`,
+      confirmText: verb,
+    });
+    if (!ok) return;
+    setBuiltinBusy(item.path);
+    try {
+      const res = await fetch("/api/builtin-catalog/install", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: item.path }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        items?: BuiltinItem[];
+        restartNote?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      if (Array.isArray(data.items)) setBuiltinItems(data.items);
+      if (typeof data.restartNote === "string") setBuiltinNote(data.restartNote);
+      toast("已安装 · 新会话生效；扩展类更新可能需重启服务（见说明）", 6000);
+    } catch (e) {
+      toast(`安装失败：${errText(e)}`, 8000);
+    } finally {
+      setBuiltinBusy(null);
+    }
+  };
+
+  const copyBuiltinCommand = async (item: BuiltinItem) => {
+    try {
+      await copyText(item.installCommand);
+      setCopiedBuiltin(item.path);
+      window.setTimeout(() => setCopiedBuiltin((p) => (p === item.path ? null : p)), 1500);
+      toast(`已复制：${item.installCommand}`);
+    } catch {
+      toast("复制失败，请手动选中命令", 5000);
+    }
+  };
+
+  /** 借鉴 VS Code 扩展视图的「全部更新」：逐项复用同一个安装接口，串行执行 */
+  const updateAllBuiltin = async () => {
+    const targets = builtinItems.filter((i) => i.status === "outdated");
+    if (targets.length === 0) return;
+    const ok = await dialogConfirm({
+      title: "更新全部内置项",
+      message: `将更新 ${targets.length} 项：${targets.map((t) => t.name).join("、")}。`,
+      confirmText: "全部更新",
+    });
+    if (!ok) return;
+    setBuiltinBusy("__all__");
+    try {
+      for (const target of targets) {
+        const res = await fetch("/api/builtin-catalog/install", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: target.path }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { items?: BuiltinItem[]; error?: string };
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        if (Array.isArray(data.items)) setBuiltinItems(data.items);
+      }
+      toast(`已更新 ${targets.length} 项 · 新会话生效；扩展类更新可能需重启服务（见说明）`, 6000);
+    } catch (e) {
+      toast(`更新失败：${errText(e)}`, 8000);
+    } finally {
+      setBuiltinBusy(null);
+    }
+  };
 
   const loadMcp = useCallback(async () => {
     setMcpLoading(true);
@@ -332,10 +462,98 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
   /** 任一操作进行中：禁用其余按钮，避免并发改动同一个包列表 */
   const anyBusy = busy !== null || installingSource !== null;
 
+  /** 借鉴 VS Code 扩展视图的更新角标：分节头展示可更新数量 */
+  const builtinOutdated = builtinItems.filter((i) => i.status === "outdated");
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="page-col py-6">
         <PageHeader icon={<Plug size={16} />} title="插件" subtitle="安装 Pi 包，扩展能力、技能、命令与主题" />
+
+        {/* 内置扩展与技能（仓库自带件：发现 + 状态 + 一键安装） */}
+        <Card className="mb-4 p-4">
+          <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
+            <span className="flex items-center gap-1.5 text-[13px] font-semibold text-fg">
+              <Boxes size={14} className="text-accent" />
+              内置扩展与技能
+            </span>
+            <span className="text-[11px] text-dim">随仓库分发，需复制到 pi 的 agent 目录才生效</span>
+            {builtinOutdated.length > 0 && (
+              <span className="rounded-sm bg-warn/10 px-1.5 py-0.5 text-[11px] text-warn">
+                {builtinOutdated.length} 项可更新
+              </span>
+            )}
+            {builtinOutdated.length > 1 && (
+              <button
+                onClick={() => void updateAllBuiltin()}
+                disabled={builtinBusy !== null}
+                className="ml-auto flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-warn/40 px-2.5 text-[12px] text-warn t-fast hover:bg-warn/10 disabled:opacity-50"
+              >
+                {builtinBusy === "__all__" ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                全部更新
+              </button>
+            )}
+          </div>
+
+          {builtinLoading && (
+            <div className="flex items-center gap-2 py-3 text-[12px] text-dim">
+              <Loader2 size={14} className="animate-spin" /> 正在检查安装状态…
+            </div>
+          )}
+
+          {!builtinLoading && builtinItems.length === 0 && (
+            <div className="py-3 text-[12px] text-dim">没有找到可安装的内置项</div>
+          )}
+
+          {!builtinLoading &&
+            builtinItems.map((item) => (
+              <div key={item.path} className="flex items-center gap-3 border-t border-line-soft py-2.5 first:border-t-0">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="truncate text-[13px] font-medium text-fg">{item.name}</span>
+                    <span className={cn("shrink-0 rounded-sm px-1.5 py-0.5 text-[11px]", BUILTIN_STATUS_CLASS[item.status])}>
+                      {BUILTIN_STATUS_LABEL[item.status]}
+                    </span>
+                    {item.restartRequired && <span className="shrink-0 text-[11px] text-dim">扩展 · 更新后可能需重启服务</span>}
+                  </div>
+                  <div className="truncate text-[12px] text-dim" title={item.description}>
+                    {item.description}
+                  </div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-dim">
+                    <span className="font-mono">{item.path}</span>
+                    {item.needsDependency && (
+                      <span className="text-warn">
+                        依赖 {item.dependencyName} 未检测到：{item.dependencyNote}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button
+                  onClick={() => void copyBuiltinCommand(item)}
+                  disabled={builtinBusy !== null}
+                  title="复制 CLI 命令（README 那套）"
+                  className="flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-line px-2.5 text-[12px] text-muted t-fast hover:text-fg disabled:opacity-50"
+                >
+                  {copiedBuiltin === item.path ? <Check size={12} className="text-success" /> : <Copy size={12} />}
+                  {copiedBuiltin === item.path ? "已复制" : "复制命令"}
+                </button>
+                {item.status !== "installed" && (
+                  <button
+                    onClick={() => void installBuiltinItem(item)}
+                    disabled={builtinBusy !== null}
+                    className="flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-accent/40 px-2.5 text-[12px] font-medium text-accent t-fast hover:bg-accent-soft disabled:opacity-50"
+                  >
+                    {builtinBusy === item.path ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+                    {item.status === "outdated" ? "更新" : "安装"}
+                  </button>
+                )}
+              </div>
+            ))}
+
+          {builtinNote && !builtinLoading && (
+            <div className="border-t border-line-soft pt-2 text-[11px] text-dim">{builtinNote}</div>
+          )}
+        </Card>
 
         {/* 安装栏 */}
         <Card className="mb-4 p-4">
