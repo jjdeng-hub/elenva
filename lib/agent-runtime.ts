@@ -2163,6 +2163,11 @@ export async function startAgentSession(
   cwd: string | undefined,
   options: AgentSessionStartOptions = {},
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
+  // 宿主判别信号（模块 5 · 第 5 轮）：兜底写入，与 instrumentation.ts 同值。
+  // 走 lib 路径创建会话的调用方（脚本 / 测试）不会经过 Next 的启动钩子，
+  // 而 agentDir 扩展 `elenva-host-guard` 必须能在会话建立时判出「这是 ELENVA Web」，
+  // 否则会与 web 审批闸门形成双闸。独立 pi 进程不会执行到这里。
+  process.env.ELENVA_WEB_HOST = "1";
   const { initialModel, allowInitialModelFallback, thinkingLevel } = options;
   const requestedToolNames = options.toolNames === undefined
     ? undefined
