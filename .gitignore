@@ -56,6 +56,9 @@ tools/*.mjs
 !tools/auth-profiles-selftest.mjs
 !tools/skill-advisor-selftest.mjs
 !tools/model-notes-selftest.mjs
+!tools/tool-risk-bash-selftest.mjs
+!tools/mcp-annotations-selftest.mjs
+!tools/mcp-probe-selftest.mjs
 tools/*.log
 tools/rev/
 # 临时截图：可能拍到记忆全文等私有内容

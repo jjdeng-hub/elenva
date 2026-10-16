@@ -206,10 +206,10 @@ CI（`.github/workflows/gates.yml`）在 push / PR 时跑同样三道门 + 生�
   提供两样：身份段受管注入（`<agentDir>/APPEND_SYSTEM.md` 的 begin/end 段，只对 CLI/飞书侧生效，实测
   不会重复注入网页会话）+ 危险操作硬护栏（入 ELENVA 审批队列 + 会话内拒绝）。宿主判别靠 `ELENVA_WEB_HOST=1`
   （web 启动路径写入，防双闸）。**要跑 install.mjs 才生效**，本轮未部署。
-- **web 侧 `bash:pipe-shell` 规则实际不生效**（2026-10-16 · 模块5 R5 发现，未修）：`lib/tool-risk.ts`
-  先按 `|` 拆段再逐段匹配，而该规则正则要求字面 `|` → 永远见不到。实测 `curl -s URL | sh` 判为 `safe`
-  （`| sudo bash` 只因第二段命中 `sudo` 才拦）。CLI 侧新扩展已在整串命令上补判（`RAW_COMMAND_RULES`）；
-  web 侧属 M4R7 同域，留给那边一并修。
+- **web 侧 `bash:pipe-shell` 已修复**（2026-10-16 · 模块4 R7 修复）：`lib/tool-risk.ts` 原按 `|` 拆段再逐段匹配，
+  而该规则正则要求字面 `|` → 永远见不到（实测 `curl -s URL | sh` 判为 `safe`，`| sudo bash` 只因第二段
+  命中 `sudo` 才拦）。现与 CLI 侧 `extensions/elenva-host-guard/classify.ts` 的 `RAW_COMMAND_RULES` 同源：
+  先在**整串原始命令**上判这一组；回归用例见 `tools/tool-risk-bash-selftest.mjs`（含不误伤普通管道）。
 - **记忆页已支持条目级编辑**（2026-09-20）：Agent 记忆（`USER.md` / `MEMORY.md` / `failures.md` / 项目记忆）
   每条可改 / 删 / 增，写入走 `PUT /api/memory` → `lib/agent-memory.ts`（并发校验 revision / 配额校验 /
   写前备份到 `~/.pi/agent/backups/memory-ui-*` / 原子写）；条目格式由服务端序列化，不会破坏 `§` + 元数据契约。

@@ -44,6 +44,7 @@ import {
   isReadOnlyShellCommand,
   needsApproval,
   toolTargetPath,
+  type McpToolAnnotations,
 } from "./tool-risk";
 import { isEditToolName, isWriteToolName } from "./tool-names";
 import { cwdKey } from "./paths";
@@ -234,6 +235,20 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
     factory: (pi) => {
       let currentTurnId: string | null = null;
 
+      /**
+       * MCP 工具定义上的 annotations（readOnlyHint / destructiveHint）。
+       * 内核 `getAllTools()` 带回 M4R6 调研 §1.1④ 的 annotations；只对 `mcp__`
+       * 工具查询，查不到就返回 undefined（判定回落词段启发式）。
+       */
+      const mcpAnnotationsFor = (toolName: string): McpToolAnnotations | undefined => {
+        if (!toolName.startsWith("mcp__")) return undefined;
+        try {
+          return pi.getAllTools().find((tool) => tool.name === toolName)?.annotations;
+        } catch {
+          return undefined;
+        }
+      };
+
       /** 本轮（一次 agent run）的状态：什么时候开始、改过哪些文件、跑过哪些命令 */
       let runStartedAt = Date.now();
       const runEdits = new Set<string>();
@@ -324,6 +339,7 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
         const risk = classifyToolCall(toolName, input, {
           cwd: runtime.getCwd(),
           allowedRoots: runtime.getAllowedRoots(),
+          mcpAnnotations: mcpAnnotationsFor(toolName),
         });
 
         // 3.0) 节律安全档（模块 3 · 第 6 轮）：仅对 scheduled 会话生效——普通会话
