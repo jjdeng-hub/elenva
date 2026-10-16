@@ -50,6 +50,7 @@ tools/*.mjs
 !tools/budget-guard-selftest.mjs
 !tools/subagent-templates-selftest.mjs
 !tools/model-review-selftest.mjs
+!tools/skill-advisor-selftest.mjs
 tools/*.log
 tools/rev/
 # 临时截图：可能拍到记忆全文等私有内容

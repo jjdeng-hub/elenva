@@ -1,8 +1,11 @@
 "use client";
 
-import { Archive, ArchiveRestore, Download, FileText, Loader2, Plus, RefreshCw, Save, Search, Sparkles, X } from "lucide-react";
+import { Archive, ArchiveRestore, Download, FileText, Loader2, Plus, RefreshCw, Save, Search, Sparkles, TrendingUp, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { SkillAdvisorReport } from "@/lib/skill-advisor";
+import { buildSkillAdvisorReport } from "@/lib/skill-advisor";
+import type { SkillUsageReport } from "@/lib/skill-usage";
 import { cn } from "@/components/lib/utils";
 import { PageHeader } from "@/components/ui/bits";
 import { dialogConfirm, toast } from "@/components/ui/dialog";
@@ -21,9 +24,13 @@ type SearchResult = { package: string; installs?: string; url?: string };
 type SkillState = "active" | "stale" | "unused";
 type LifecycleEntry = {
   name: string;
+  filePath: string;
   baseDir: string;
+  source: string;
+  scope: string;
   useCount: number;
   lastUsedAt: string | null;
+  addedAt: string | null;
   state: SkillState;
   reason: string;
 };
@@ -134,6 +141,14 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
   const [lifecycle, setLifecycle] = useState<Record<string, LifecycleEntry>>({});
   const [archived, setArchived] = useState<ArchivedSkill[]>([]);
   const [archiving, setArchiving] = useState<string | null>(null);
+  // 用量与建议（模块 4 R5）：用量取 /api/skill-usage（含近 7/30 天窗口），建议由纯函数现算
+  const [usage, setUsage] = useState<SkillUsageReport | null>(null);
+  const [entries, setEntries] = useState<LifecycleEntry[]>([]);
+
+  const advisor = useMemo(
+    () => (usage ? buildSkillAdvisorReport({ entries }, usage) : null),
+    [entries, usage],
+  );
 
   const loadLifecycle = useCallback(async (cwd: string) => {
     if (!cwd) return;
@@ -142,6 +157,7 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
       if (!res.ok) return;
       const data = (await res.json()) as { entries?: LifecycleEntry[]; archived?: ArchivedSkill[] };
       setLifecycle(Object.fromEntries((data.entries ?? []).map((entry) => [entry.name, entry])));
+      setEntries(data.entries ?? []);
       setArchived(data.archived ?? []);
     } catch {
       /* 拿不到就不显示分层，不打扰 */
@@ -161,6 +177,16 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
     }
   }, []);
 
+  const loadUsage = useCallback(async () => {
+    try {
+      const data = await fetch("/api/skill-usage", { cache: "no-store" });
+      if (!data.ok) return;
+      setUsage((await data.json()) as SkillUsageReport);
+    } catch {
+      /* 拿不到就不显示用量 */
+    }
+  }, []);
+
   useEffect(() => {
     if (defaultCwd) load(defaultCwd);
   }, [defaultCwd, load]);
@@ -168,6 +194,29 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
   useEffect(() => {
     if (defaultCwd) void loadLifecycle(defaultCwd);
   }, [defaultCwd, loadLifecycle]);
+
+  useEffect(() => {
+    void loadUsage();
+  }, [loadUsage]);
+
+  /** 归档动作本体：单条与批量都走这里（复用既有 /api/skills/lifecycle 契约） */
+  const runArchive = async (name: string, baseDir: string, reason: string) => {
+    const res = await fetch("/api/skills/lifecycle", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "archive", name, baseDir, reason }),
+    });
+    const data = (await res.json().catch(() => ({}))) as { error?: string };
+    if (!res.ok) throw new Error(data.error || `归档失败（HTTP ${res.status}）`);
+  };
+
+  const reloadAfterArchive = async () => {
+    if (defaultCwd) {
+      await load(defaultCwd);
+      await loadLifecycle(defaultCwd);
+    }
+    void loadUsage();
+  };
 
   const archive = async (s: SkillInfo) => {
     const entry = lifecycle[s.name];
@@ -180,28 +229,71 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
     if (!ok) return;
     setArchiving(s.name);
     try {
-      const res = await fetch("/api/skills/lifecycle", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "archive",
-          name: s.name,
-          baseDir: entry?.baseDir ?? s.filePath.replace(/[\\/][^\\/]+$/, ""),
-          reason: entry?.reason ?? "手工归档",
-        }),
-      });
-      const data = (await res.json().catch(() => ({}))) as { error?: string };
-      if (!res.ok) throw new Error(data.error || `归档失败（HTTP ${res.status}）`);
+      await runArchive(s.name, entry?.baseDir ?? s.filePath.replace(/[\\/][^\\/]+$/, ""), entry?.reason ?? "手工归档");
       toast(`已归档「${s.name}」，可在下方恢复`);
-      if (defaultCwd) {
-        await load(defaultCwd);
-        await loadLifecycle(defaultCwd);
-      }
+      await reloadAfterArchive();
     } catch (error) {
       toast(error instanceof Error ? error.message : "归档失败");
     } finally {
       setArchiving(null);
     }
+  };
+
+  /** 吃灰单条的归档：同样走确认流（建议只提示，动作由人点） */
+  const archiveIdleOne = async (name: string) => {
+    const item = advisor?.idle.find((x) => x.name === name);
+    const ok = await dialogConfirm({
+      title: "归档技能",
+      message: `把「${name}」搬到归档目录（不再是可用技能，也不会被加载）。\n\n`
+        + `${item?.reason ?? "吃灰建议"}\n\n`
+        + "不会删除：文件原样保留，随时可以恢复。",
+      confirmText: "归档",
+    });
+    if (!ok) return;
+    setArchiving(name);
+    try {
+      await runArchive(
+        name,
+        lifecycle[name]?.baseDir ?? skills.find((s) => s.name === name)?.filePath.replace(/[\\/][^\\/]+$/, "") ?? "",
+        item?.reason || "吃灰归档建议",
+      );
+      toast(`已归档「${name}」，可在上方列表下方恢复`);
+      await reloadAfterArchive();
+    } catch (error) {
+      toast(error instanceof Error ? error.message : "归档失败");
+    } finally {
+      setArchiving(null);
+    }
+  };
+
+  /** 批量：弹窗列明对象 → 逐个执行 → 汇总 toast（沿用整理助手的「候选 + 确认 + 汇总」采纳 UX） */
+  const archiveAllIdle = async () => {
+    if (!advisor || advisor.idle.length === 0) return;
+    const ok = await dialogConfirm({
+      title: "按建议全部归档",
+      message: `把以下 ${advisor.idle.length} 个吃灰技能一起搬进归档目录：\n\n`
+        + advisor.idle.map((item) => `· ${item.name} —— ${item.reason}`).join("\n")
+        + "\n\n不会删除，随时可恢复。",
+      confirmText: "全部归档",
+    });
+    if (!ok) return;
+    setArchiving("__batch__");
+    const failed: string[] = [];
+    for (const item of advisor.idle) {
+      try {
+        await runArchive(
+          item.name,
+          lifecycle[item.name]?.baseDir ?? skills.find((s) => s.name === item.name)?.filePath.replace(/[\\/][^\\/]+$/, "") ?? "",
+          item.reason,
+        );
+      } catch {
+        failed.push(item.name);
+      }
+    }
+    setArchiving(null);
+    if (failed.length === 0) toast(`已按建议归档 ${advisor.idle.length} 个，均可在已归档列表恢复`);
+    else toast(`已归档 ${advisor.idle.length - failed.length} 个，失败：${failed.join("、")}`);
+    await reloadAfterArchive();
   };
 
   const restore = async (item: ArchivedSkill) => {
@@ -566,6 +658,108 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
           )}
           </Card>
         </div>
+
+        {/* 「用量与建议」—— 高频/吃灰的可读视图 + 归档建议（模块 4 R5）。
+            延续两条先例：skill-lifecycle 的「建议只提示、动作由人点」（Hermes curator）
+            与整理助手的采纳 UX（候选 → 确认列明对象 → 逐个执行 → 汇总 toast），
+            归档动作全部复用既有确认流，绝不自动执行。 */}
+        <Card className="mt-5">
+          <div className="flex flex-wrap items-center gap-2 px-4 pt-4">
+            <TrendingUp size={14} className="text-accent" />
+            <span className="text-[13px] font-semibold text-fg">用量与建议</span>
+            {advisor && (
+              <div className="ml-auto flex flex-wrap items-center gap-1.5">
+                <span className="chip">{advisor.overview.totalSkills} 技能</span>
+                <span className="chip">{advisor.overview.active} 活跃</span>
+                <span className="chip">近7天 {advisor.overview.calls7} 次</span>
+                <span className="chip">近30天 {advisor.overview.calls30} 次</span>
+                {advisor.overview.idle > 0 && (
+                  <span className="chip chip-warn">吃灰 {advisor.overview.idle}</span>
+                )}
+              </div>
+            )}
+            {advisor && advisor.idle.length > 0 && (
+              <button
+                onClick={() => void archiveAllIdle()}
+                disabled={archiving !== null}
+                className="btn btn-sm btn-primary"
+              >
+                {archiving === "__batch__" ? <Loader2 size={10} className="animate-spin" /> : <Archive size={10} />}
+                按建议全部归档（{advisor.idle.length}）
+              </button>
+            )}
+          </div>
+          {!usage ? (
+            <div className="flex items-center gap-2 px-4 py-6 text-[12px] text-dim">
+              <Loader2 size={14} className="animate-spin" /> 扫描会话统计技能调用…
+            </div>
+          ) : usage.total === 0 ? (
+            <div className="px-4 py-6 text-[12px] text-dim">
+              会话里还没有技能调用记录——技能被调用一次后这里就会出现读数与建议。
+            </div>
+          ) : (
+            advisor && (
+              <div className="grid items-start gap-4 px-4 pb-4 pt-2 md:grid-cols-2">
+                {/* 高频榜 */}
+                <div>
+                  <div className="mb-1 text-[12px] font-semibold text-muted">高频榜</div>
+                  {advisor.hot.length === 0 ? (
+                    <div className="py-2 text-[12px] text-dim">还没有调用记录</div>
+                  ) : (
+                    <div className="flex flex-col">
+                      {advisor.hot.map((item, i) => (
+                        <div key={item.name} className="flex items-center gap-2 border-t border-line-soft py-1.5 first:border-t-0">
+                          <span className="w-4 shrink-0 text-right font-mono text-[11px] text-dim">{i + 1}</span>
+                          <span className="min-w-0 flex-1 truncate text-[12px] text-fg" title={item.name}>{item.name}</span>
+                          {item.count7 > 0 && (
+                            <span className="chip shrink-0">近7天 {item.count7}</span>
+                          )}
+                          <span className="shrink-0 text-[11px] text-dim">
+                            {item.count} 次 · {shortDate(item.lastUsedAt)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {/* 吃灰清单 */}
+                <div>
+                  <div className="mb-1 text-[12px] font-semibold text-muted">吃灰清单</div>
+                  {advisor.idle.length === 0 ? (
+                    <div className="py-2 text-[12px] text-dim">没有归档建议——没有持续吃灰的技能</div>
+                  ) : (
+                    <div className="flex flex-col">
+                      {advisor.idle.map((item) => (
+                        <div key={item.name} className="flex items-start gap-2 border-t border-line-soft py-1.5 first:border-t-0">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="min-w-0 truncate text-[12px] text-fg" title={item.name}>{item.name}</span>
+                              <span className={cn("chip shrink-0", item.state === "unused" && "chip-warn")}>
+                                {item.state === "unused" ? "从未使用" : "久未使用"}
+                              </span>
+                            </div>
+                            <div className="mt-0.5 text-[11px] text-dim">{item.reason}</div>
+                          </div>
+                          <button
+                            onClick={() => void archiveIdleOne(item.name)}
+                            disabled={archiving !== null}
+                            className="btn btn-sm btn-ghost shrink-0"
+                          >
+                            {archiving === item.name ? <Loader2 size={10} className="animate-spin" /> : <Archive size={10} />}
+                            归档
+                          </button>
+                        </div>
+                      ))}
+                      <div className="mt-1 text-[11px] text-dim">
+                        建议只提示，归档由你来点——归档不删除文件，随时可恢复。
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )
+          )}
+        </Card>
       </div>
     </div>
   );
