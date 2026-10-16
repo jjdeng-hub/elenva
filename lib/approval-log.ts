@@ -56,6 +56,12 @@ export interface ApprovalLogEntry {
   source: ApprovalSource;
   /** 为什么被拦（拒绝 / 超时时附；计划打回时是批注） */
   reason?: string;
+  /**
+   * 同类操作的稳定标识（模块 5 · 第 3 轮，additive）：tool 侧取 `tool-risk` 的
+   * `ruleKey`，plan 侧固定为 `"plan"`。用来把「同一个危险动作」的历史串起来，
+   * 是「拒绝记忆」的匹配键；老条目没有此字段，照常读取（不参与匹配）。
+   */
+  ruleKey?: string;
 }
 
 /** 追写输入：ts 缺省取当前时间；其余按上面的口径收窄 */
@@ -67,6 +73,8 @@ export interface ApprovalLogInput {
   decision: ApprovalDecision;
   source: ApprovalSource;
   reason?: string;
+  /** 同类操作的稳定标识（见 ApprovalLogEntry.ruleKey）；空 / 非法则省略不写 */
+  ruleKey?: string;
   /** 测试可注入固定时间 */
   ts?: string;
 }
@@ -135,6 +143,8 @@ export function appendApprovalLog(input: ApprovalLogInput): void {
     };
     const reason = truncateSummary(str(input.reason));
     if (reason) entry.reason = reason;
+    const ruleKey = str(input.ruleKey).trim();
+    if (ruleKey) entry.ruleKey = ruleKey;
     appendFileSync(getApprovalLogPath(), `${JSON.stringify(entry)}\n`, "utf8");
   } catch {
     /* 旁路：写日志失败不影响审批 */
@@ -164,6 +174,9 @@ export function parseApprovalLog(raw: string): ApprovalLogEntry[] {
       };
       const reason = str(parsed.reason);
       if (reason) entry.reason = reason;
+      // additive：老条目没有 ruleKey 就留空，读端不受影响
+      const ruleKey = str(parsed.ruleKey).trim();
+      if (ruleKey) entry.ruleKey = ruleKey;
       out.push(entry);
     } catch {
       /* 坏行跳过 */
