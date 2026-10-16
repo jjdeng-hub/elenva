@@ -1,10 +1,11 @@
 "use client";
 
-import { Check, Cpu, Download, KeyRound, Loader2, RefreshCw, Save, ShieldCheck, X } from "lucide-react";
+import { Check, Cpu, Download, KeyRound, Loader2, RefreshCw, Save, ShieldCheck, Star, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { dialogConfirm, dialogPrompt, toast } from "@/components/ui/dialog";
+import { relTime } from "@/lib/format";
 import { EmptyState, PageHeader } from "@/components/ui/bits";
 import { ModelScopeEditor } from "@/components/ModelScopeEditor";
 import { ModelSetupDialog } from "@/components/ModelSetupDialog";
@@ -243,6 +244,176 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
           </div>
         </>
       )}
+    </Card>
+  );
+}
+
+/* ---------------- 健康 · 近 14 天（模块 6 R3：故障一眼可见，最小改法提供「设为默认」） ---------------- */
+type ModelHealthRow = {
+  provider: string;
+  model: string;
+  key: string;
+  calls: number;
+  failures: number;
+  recoveredFailures: number;
+  successRate: number;
+  status: "ok" | "unstable" | "failing";
+  lastCallAt: string;
+  lastFailureAt: string | null;
+  lastError: string | null;
+};
+
+type ModelHealthReport = {
+  at: string;
+  windowDays: number;
+  models: ModelHealthRow[];
+  totalCalls: number;
+  totalFailures: number;
+};
+
+const HEALTH_STATUS: Record<ModelHealthRow["status"], { label: string; chip: string; text: string }> = {
+  ok: { label: "正常", chip: "chip-success", text: "text-fg" },
+  unstable: { label: "不稳", chip: "chip-warn", text: "text-warn" },
+  failing: { label: "有故障", chip: "chip-danger", text: "text-danger" },
+};
+
+function formatSuccessRate(rate: number): string {
+  const pct = rate * 100;
+  return pct >= 99.95 ? "100%" : `${pct.toFixed(1)}%`;
+}
+
+function ModelHealthSection() {
+  const [report, setReport] = useState<ModelHealthReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [defaults, setDefaults] = useState<{ defaultProvider?: string; defaultModel?: string }>({});
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [healthRes, settingsRes] = await Promise.all([
+        fetch("/api/model-health", { cache: "no-store" }),
+        fetch("/api/pi-settings", { cache: "no-store" }),
+      ]);
+      const health = (await healthRes.json().catch(() => null)) as ModelHealthReport | null;
+      const settings = (await settingsRes.json().catch(() => null)) as
+        | { settings?: { defaultProvider?: string; defaultModel?: string } }
+        | null;
+      setReport(health && Array.isArray(health.models) ? health : null);
+      setDefaults(settings?.settings ?? {});
+    } catch {
+      setReport(null);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  /** 走既有默认模型设置链（/api/pi-settings → settings.json 的 defaultProvider/defaultModel） */
+  const setDefault = async (row: ModelHealthRow) => {
+    setSavingKey(row.key);
+    try {
+      const res = await fetch("/api/pi-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ defaultProvider: row.provider, defaultModel: row.model }),
+      });
+      const d = (await res.json()) as {
+        error?: string;
+        settings?: { defaultProvider?: string; defaultModel?: string };
+      };
+      if (!res.ok) throw new Error(d.error || `保存失败（HTTP ${res.status}）`);
+      setDefaults(d.settings ?? { defaultProvider: row.provider, defaultModel: row.model });
+      toast(`已将 ${row.model} 设为启动默认，新会话生效`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  const models = report?.models ?? [];
+  const failingCount = models.filter((m) => m.status === "failing").length;
+
+  return (
+    <Card testId="model-health" className="mt-5">
+      <CardHeader>
+        <CardTitle>健康 · 近 14 天</CardTitle>
+        <span className="text-[11px] text-dim">
+          来源：本机会话记录（~/.pi/agent/sessions） · 60 秒缓存
+          {failingCount > 0 ? ` · ${failingCount} 个模型有故障` : ""}
+        </span>
+        <button onClick={() => void load()} disabled={loading} className="btn btn-sm btn-ghost ml-auto">
+          {loading ? <Loader2 size={12} className="anim-spin" /> : <RefreshCw size={12} />} 刷新
+        </button>
+      </CardHeader>
+
+      {loading && (
+        <div className="flex items-center gap-2 px-4 py-5 text-[12px] text-dim">
+          <Loader2 size={14} className="anim-spin" /> 扫描近 14 天会话…
+        </div>
+      )}
+
+      {!loading && models.length === 0 && (
+        <div className="px-4 py-6 text-center text-[12px] leading-relaxed text-dim">
+          近 14 天没有模型调用记录。聊过天后，这里会按模型显示成功率、失败次数与最近失败时刻。
+        </div>
+      )}
+
+      {!loading &&
+        models.map((m) => {
+          const status = HEALTH_STATUS[m.status];
+          const isDefault = defaults.defaultProvider === m.provider && defaults.defaultModel === m.model;
+          return (
+            <div
+              key={m.key}
+              data-testid="model-health-row"
+              className="flex items-center gap-3 border-t border-line-soft px-4 py-2.5 first:border-t-0"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-[13px] font-medium text-fg">{m.model}</span>
+                  <span className="truncate font-mono text-[11px] text-dim">{m.provider}</span>
+                </div>
+                <div className="mt-0.5 truncate text-[11px] text-dim">
+                  {m.calls} 次调用 · 失败 {m.failures}
+                  {m.recoveredFailures > 0 ? `（自动重试接管 ${m.recoveredFailures}）` : ""}
+                  {m.lastFailureAt ? ` · 最近失败 ${relTime(m.lastFailureAt)}` : ""}
+                </div>
+                {m.lastError && (
+                  <div className="mt-0.5 truncate text-[11px] text-dim/80" title={m.lastError}>
+                    {m.lastError}
+                  </div>
+                )}
+              </div>
+              <span className={cn("shrink-0 text-[14px] font-semibold tabular-nums", status.text)}>
+                {formatSuccessRate(m.successRate)}
+              </span>
+              <span className={cn("chip shrink-0", status.chip)}>{status.label}</span>
+              {isDefault ? (
+                <span className="chip chip-accent shrink-0">默认</span>
+              ) : (
+                <button
+                  onClick={() => void setDefault(m)}
+                  disabled={savingKey !== null}
+                  title="写入 settings.json 的 defaultProvider/defaultModel，新会话生效"
+                  className="btn btn-sm btn-ghost shrink-0"
+                >
+                  {savingKey === m.key ? <Loader2 size={12} className="anim-spin" /> : <Star size={12} />} 设为默认
+                </button>
+              )}
+            </div>
+          );
+        })}
+
+      <div className="border-t border-line-soft px-4 py-2 text-[11px] leading-relaxed text-dim">
+        成功率 =（调用数 − 失败数）/ 调用数；失败取会话里 assistant 响应 stopReason=error 的次数。
+        同一轮自动重试会在记录里各计一次（被重试接管的失败已单独标注）；用户主动中断不计入。
+        未列延迟：会话记录里没有可归因到 provider 的耗时字段，宁缺勿假。
+      </div>
     </Card>
   );
 }
@@ -608,6 +779,8 @@ export function ModelsPage() {
           )}
           </Card>
         </div>
+
+        <ModelHealthSection />
       </div>
 
       <ModelSetupDialog
