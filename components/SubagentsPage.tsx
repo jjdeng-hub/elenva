@@ -1,11 +1,12 @@
 "use client";
 
-import { Bot, Loader2, Plus, Save, Trash2 } from "lucide-react";
+import { Bot, Loader2, Plus, Save, Search, ShieldAlert, ShieldCheck, Trash2 } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
-import { dialogConfirm, toast } from "@/components/ui/dialog";
+import { dialogConfirm, dialogPrompt, toast } from "@/components/ui/dialog";
 import { EmptyState, PageHeader } from "@/components/ui/bits";
+import { SUBAGENT_TEMPLATES, toProfile, type SubagentTemplate, type SubagentTemplateIcon } from "@/lib/subagent-templates";
 
 type SubagentScope = "builtin" | "global" | "workspace" | "project";
 
@@ -48,6 +49,63 @@ function BuiltinToggle({ enabled, onChange, saving }: { enabled: boolean | null;
       <span className={cn("size-1.5 rounded-full", enabled ? "bg-success" : "bg-dim")} />
       {enabled === null ? "加载中…" : enabled ? "内置子代理已启用" : "内置子代理已停用"}
     </button>
+  );
+}
+
+/* 模板图标：lib 只给语义名，这里映射到具体图标组件 */
+function TemplateIcon({ icon }: { icon: SubagentTemplateIcon }) {
+  if (icon === "search") return <Search size={14} className="text-accent" />;
+  if (icon === "shield-alert") return <ShieldAlert size={14} className="text-accent" />;
+  return <ShieldCheck size={14} className="text-accent" />;
+}
+
+/* 「从模板开始」：常用角色的一键起点，创建后可继续编辑 */
+function TemplatePicker({
+  disabled,
+  onPick,
+  onManual,
+  onCancel,
+}: {
+  disabled: boolean;
+  onPick: (template: SubagentTemplate) => void;
+  onManual: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div className="border-t border-line-soft px-4 py-3" data-testid="subagent-template-picker">
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <span className="text-[12px] font-medium text-fg">从模板开始</span>
+        <span className="text-[11px] text-dim">常用角色，一键起；创建后可继续编辑</span>
+        <button onClick={onCancel} className="ml-auto flex h-7 cursor-pointer items-center rounded-lg border border-line px-2.5 text-[12px] text-muted t-fast hover:text-fg">
+          取消
+        </button>
+      </div>
+      <div className="grid gap-2 sm:grid-cols-3">
+        {SUBAGENT_TEMPLATES.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            disabled={disabled}
+            onClick={() => onPick(t)}
+            data-testid={`subagent-template-${t.id}`}
+            className="flex h-full cursor-pointer flex-col gap-1.5 rounded-lg border border-line bg-panel-2 p-3 text-left t-fast hover:border-accent/50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span className="flex items-center gap-1.5 text-[13px] font-medium text-fg">
+              <TemplateIcon icon={t.icon} /> {t.displayName}
+            </span>
+            <span className="text-[11px] leading-relaxed text-muted">{t.description}</span>
+            <span className="mt-auto flex flex-wrap gap-1 pt-1">
+              {t.tools.map((tool) => (
+                <span key={tool} className="chip chip-mono">{tool}</span>
+              ))}
+            </span>
+          </button>
+        ))}
+      </div>
+      <button onClick={onManual} className="mt-2 cursor-pointer text-[11px] text-dim t-fast hover:text-fg">
+        跳过模板，手动填写
+      </button>
+    </div>
   );
 }
 
@@ -221,6 +279,8 @@ export function SubagentsPage({ defaultCwd }: { defaultCwd: string | null }) {
   const [builtinEnabled, setBuiltinEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<string | null>(null); // profile name 或 "new"
+  const [manualNew, setManualNew] = useState(false); // 新建时是否跳过模板、走手填表单
+  const [creating, setCreating] = useState(false);
   const [togglingBuiltin, setTogglingBuiltin] = useState(false);
 
   const load = useCallback(async (cwd: string | null) => {
@@ -270,6 +330,36 @@ export function SubagentsPage({ defaultCwd }: { defaultCwd: string | null }) {
       toast(e instanceof Error ? e.message : String(e));
     } finally {
       setTogglingBuiltin(false);
+    }
+  };
+
+  const createFromTemplate = async (template: SubagentTemplate) => {
+    if (!defaultCwd || creating) return;
+    const displayName = await dialogPrompt({
+      title: `从「${template.displayName}」模板创建`,
+      message: `将创建 ${template.id}.md，保存到全局（~/.pi/agent/agents），与「新建子代理」一致。工具：${template.tools.join(" · ")}。确认前可修改显示名。`,
+      defaultValue: template.displayName,
+      placeholder: template.displayName,
+      confirmText: "创建",
+    });
+    if (displayName === null) return;
+    setCreating(true);
+    try {
+      const res = await fetch("/api/subagents/profiles", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ cwd: defaultCwd, scope: "global", profile: toProfile(template, { displayName }) }),
+      });
+      const d = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(d.error || `创建失败（HTTP ${res.status}）`);
+      toast(`已创建「${displayName || template.displayName}」`);
+      setEditing(null);
+      setManualNew(false);
+      void load(defaultCwd);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -337,7 +427,10 @@ export function SubagentsPage({ defaultCwd }: { defaultCwd: string | null }) {
           <div className="mt-auto flex items-center gap-2 px-4 py-2.5 text-[12px] text-dim">
             <span className="min-w-0 truncate font-mono">目录：{defaultCwd ?? "（未设置默认工作目录，无法读取项目级 Profile）"}</span>
             <button
-              onClick={() => setEditing("new")}
+              onClick={() => {
+                setManualNew(false);
+                setEditing("new");
+              }}
               disabled={!defaultCwd}
               data-testid="subagent-new"
               className="btn btn-primary ml-auto shrink-0"
@@ -358,7 +451,7 @@ export function SubagentsPage({ defaultCwd }: { defaultCwd: string | null }) {
             </div>
           )}
           {!loading && profiles.length === 0 && (
-            <EmptyState icon={<Bot size={20} />} title="暂无子代理配置" hint="新建一个子代理，或在上方开关处启用 Pi 内置预设。" />
+            <EmptyState icon={<Bot size={20} />} title="暂无子代理配置" hint="新建一个子代理，或从模板开始（调研 / 审计 / 复核）；也可在上方开关处启用 Pi 内置预设。" />
           )}
           {profiles.map((p) => (
             <div key={`${p.scope}-${p.name}`} className="border-t border-line-soft px-4 py-3 first:border-t-0">
@@ -410,15 +503,27 @@ export function SubagentsPage({ defaultCwd }: { defaultCwd: string | null }) {
               )}
             </div>
           ))}
-          {editing === "new" && (
+          {editing === "new" && !manualNew && (
+            <TemplatePicker
+              disabled={!defaultCwd || creating}
+              onPick={(t) => void createFromTemplate(t)}
+              onManual={() => setManualNew(true)}
+              onCancel={() => setEditing(null)}
+            />
+          )}
+          {editing === "new" && manualNew && (
             <ProfileEditor
               initial={null}
               cwd={defaultCwd!}
               onSaved={() => {
                 setEditing(null);
+                setManualNew(false);
                 void load(defaultCwd);
               }}
-              onCancel={() => setEditing(null)}
+              onCancel={() => {
+                setManualNew(false);
+                setEditing(null);
+              }}
             />
           )}
           </Card>
