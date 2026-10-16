@@ -6,7 +6,7 @@
 // 隔离：PI_CODING_AGENT_DIR 指向 mkdtemp 出来的临时目录，全用**虚构**数据，
 // 不碰真实 ~/.pi/agent。lib/*.ts 是纯 TS（无 JSX），jiti 可直载（见记忆 F1/F3）。
 import { createJiti } from "jiti";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -245,6 +245,37 @@ check("链路：读日志 → 找同类 → 生成附注（排除当前会话）
     "只有当前会话自己的记录 → 不附注",
   );
   eq(safeLastDecisionNote("path:dotenv", readEntries, { now }), null, "没有同类历史 → 不附注");
+});
+
+/* ============================ 调用点静态核对（防「分层各自绿、链路断」） ============================ */
+// 记忆 F1 的教训：纯函数与 IO 层各自有测试，不等于把它们接起来的那几行没错。
+// 这里对**调用点**做一次静态断言（同 project-policy-selftest 的做法）。
+const readSource = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
+
+check("host-guardrails：三处 tool 日志都带 ruleKey，plan 侧用固定键", () => {
+  const source = readSource("lib/host-guardrails-extension.ts");
+  const toolSide = (source.match(/ruleKey: risk\.ruleKey/g) ?? []).length;
+  eq(toolSide, 4, "tool 侧落点（入队队列条目 + 入队日志 + 自动拒绝日志 + 弹窗日志）都传 ruleKey");
+  assert(/ruleKey: "plan"/.test(source), "plan 侧应记固定键 plan");
+});
+
+check("host-guardrails：三处现场文案都过 appendLastDecisionNote", () => {
+  const source = readSource("lib/host-guardrails-extension.ts");
+  const wired = (source.match(/appendLastDecisionNote\(/g) ?? []).length;
+  eq(wired, 4, "入队原因 + 入队 block 文案 + 自动拒绝文案 + 弹窗标题");
+  assert(/lastDecisionNote\(risk\.ruleKey, sessionId\)/.test(source), "附注由 ruleKey + 当前会话算出");
+  assert(/safeLastDecisionNote\(/.test(source), "读日志包在 safeLastDecisionNote 里（异常静默）");
+});
+
+check("approval-log：写入与解析都容错处理 ruleKey", () => {
+  const source = readSource("lib/approval-log.ts");
+  eq((source.match(/if \(ruleKey\) entry\.ruleKey = ruleKey;/g) ?? []).length, 2, "写端 + 读端各一处");
+});
+
+check("deny-memory 不引入 node:*（客户端可直载）", () => {
+  const source = readSource("lib/deny-memory.ts");
+  assert(!/from "node:/.test(source), "不应 import node:*");
+  assert(!/require\(/.test(source), "不应 require");
 });
 
 /* ============================ 收尾 ============================ */
