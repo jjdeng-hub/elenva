@@ -47,6 +47,7 @@ import {
 import { isEditToolName, isWriteToolName } from "./tool-names";
 import { cwdKey } from "./paths";
 import { registerPendingApproval, resolvePendingApproval } from "./pending-approvals";
+import { appendApprovalLog, type ApprovalDecision } from "./approval-log";
 import { getScheduledSessionTier, isScheduledSession } from "./scheduled-sessions";
 import { normalizePlanSteps, stepsToMarkdown } from "./plan-steps";
 
@@ -341,15 +342,26 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
         // 审批落入「待审批队列」并拦下本次调用。节律 / 无人值守共用同一落点，
         // 保证两种场景的文案与行为逐字一致。
         const enqueueApproval = () => {
+          const queueDetail = toolName.startsWith("mcp__")
+            ? shortInputJson(input)
+            : shortCommand(typeof input?.command === "string" ? input.command : "");
           const n = enqueuePendingApproval({
             toolName,
-            detail: toolName.startsWith("mcp__")
-              ? shortInputJson(input)
-              : shortCommand(typeof input?.command === "string" ? input.command : ""),
+            detail: queueDetail,
             reason: risk.reason,
             ruleKey: risk.ruleKey,
             cwd: runtime.getCwd(),
             sessionId,
+          });
+          // 只加日志：入队同样是一次决策（本次调用被拦下、不执行）
+          appendApprovalLog({
+            sessionId,
+            kind: "tool",
+            tool: toolName,
+            summary: queueDetail,
+            decision: "queued",
+            source: "queue",
+            reason: risk.reason,
           });
           return {
             block: true as const,
@@ -366,6 +378,18 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
         if (!ctx.hasUI) {
           // 无人值守 / 后台会话：按配置决定「拒绝」还是「入队后继续」
           if (settings.approvalFallback === "queue") return enqueueApproval();
+          // 只加日志：没有可用界面时的自动拒绝也是一次决策（没有人点，来源记为 auto）
+          appendApprovalLog({
+            sessionId,
+            kind: "tool",
+            tool: toolName,
+            summary: toolName.startsWith("mcp__")
+              ? shortInputJson(input)
+              : shortCommand(typeof input?.command === "string" ? input.command : ""),
+            decision: "denied",
+            source: "auto",
+            reason: risk.reason,
+          });
           return {
             block: true,
             reason: `[审批] ${risk.reason}，但当前会话没有可用的确认界面，已拒绝执行。`,
@@ -398,6 +422,20 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
           // 正常返回 / 超时 / 抛错都要清，否则「等你」里会留一条幽灵条目
           resolvePendingApproval(sessionId, "tool");
         }
+
+        // 只加日志：把这次审批的结果写进历史（下面的放行 / 拒绝语义一字未动）。
+        // choice === undefined 表示没人点（10 分钟超时或弹窗被中断）。
+        const toolDecision: ApprovalDecision =
+          choice === undefined ? "timeout" : choice === "拒绝" ? "denied" : "approved";
+        appendApprovalLog({
+          sessionId,
+          kind: "tool",
+          tool: toolName,
+          summary: detail,
+          decision: toolDecision,
+          source: "dialog",
+          reason: toolDecision === "approved" ? undefined : risk.reason,
+        });
 
         if (choice === "本会话总是允许" && sessionId && risk.ruleKey) {
           const set = sessionAllow.get(sessionId) ?? new Set<string>();
@@ -583,7 +621,19 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
           } finally {
             resolvePendingApproval(sessionId, "plan");
           }
+          // 只加日志：计划审批的结果写进历史（批准 / 打回的判定与写回逻辑一字未动）
+          const logPlan = (decision: ApprovalDecision, reason?: string) =>
+            appendApprovalLog({
+              sessionId,
+              kind: "plan",
+              tool: "present_plan",
+              summary: text,
+              decision,
+              source: "dialog",
+              reason,
+            });
           if (choice === "批准，开始执行") {
+            logPlan("approved");
             if (sessionId) writePlanMode(sessionId, false);
             return {
               content: [{ type: "text", text: `用户已批准计划，可以开始执行。\n\n${text}` }],
@@ -602,11 +652,13 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
             }
             const trimmed = typeof note === "string" ? note.trim() : "";
             if (trimmed === "") {
+              logPlan("denied", "打回（无批注）");
               return {
                 content: [{ type: "text", text: "用户打回了计划。请修订后再次调用 present_plan（保持步骤结构）。" }],
                 details: { kind: "elenva-plan", status: "revise", steps },
               };
             }
+            logPlan("denied", `打回批注：${trimmed}`);
             return {
               content: [{
                 type: "text",
@@ -615,6 +667,7 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
               details: { kind: "elenva-plan", status: "revise", steps, note: trimmed },
             };
           }
+          logPlan(choice === "先不做" ? "denied" : "timeout", choice === "先不做" ? "先不做" : "超时未选择");
           return {
             content: [{ type: "text", text: "用户暂时不执行该计划：停止改动，等待用户下一步指示。" }],
             details: { kind: "elenva-plan", status: "rejected", steps },
