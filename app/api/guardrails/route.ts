@@ -11,13 +11,13 @@ import {
   writePlanMode,
   writePlanModeDefault,
   writeMcpWriteApproval,
+  writeProjectPolicy,
   writeVerificationGuard,
 } from "@/lib/guardrail-settings";
+import { APPROVAL_MODES, parsePolicyPatch } from "@/lib/guardrail-policy";
 import type { ApprovalMode } from "@/lib/tool-risk";
 
 export const dynamic = "force-dynamic";
-
-const APPROVAL_MODES: ApprovalMode[] = ["off", "risky", "writes"];
 
 /**
  * GET /api/guardrails —— 审批档位与免确认规则。
@@ -35,6 +35,10 @@ export async function GET(req: Request) {
         planModeDefault: settings.planModeDefault,
         verificationGuard: settings.verificationGuard,
         mcpWriteApproval: settings.mcpWriteApproval,
+        /** 全局回落档：项目策略的「继承」要显示当前值，所以一并给出来 */
+        approvalFallback: settings.approvalFallback,
+        /** 项目级档位覆盖（值为规范化后的 cwd key） */
+        policyByProject: settings.policyByProject,
         allowByProject: settings.allowByProject,
         verifyCommandsByProject: settings.verifyCommandsByProject,
         /** 带了 cwd 就直接给该项目的声明列表（服务端规范化 key，界面不用猜写法） */
@@ -67,6 +71,8 @@ export async function POST(req: Request) {
       cwd?: string;
       ruleKey?: string;
       pattern?: string;
+      /** 项目策略补丁：键缺省 = 不改，null = 回到继承；整个 policy 为 null = 清除该项目设置 */
+      policy?: unknown;
     };
 
     switch (body.action) {
@@ -95,6 +101,16 @@ export async function POST(req: Request) {
       case "setMcpWriteApproval": {
         const settings = writeMcpWriteApproval(body.enabled !== false);
         return NextResponse.json({ mcpWriteApproval: settings.mcpWriteApproval });
+      }
+      case "setProjectPolicy": {
+        if (!body.cwd) {
+          return NextResponse.json({ error: "缺少 cwd" }, { status: 400 });
+        }
+        // 写前校验放纯函数里（可被自测穷举）：非法档位直接 400，不静默落盘
+        const parsed = parsePolicyPatch(body.policy);
+        if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+        const settings = writeProjectPolicy(body.cwd, parsed.patch);
+        return NextResponse.json({ policyByProject: settings.policyByProject });
       }
       case "addVerifyCommand": {
         if (!body.cwd || !body.pattern) {

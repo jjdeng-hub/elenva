@@ -4,6 +4,14 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 import { cwdKey } from "./paths";
 import type { ApprovalMode } from "./tool-risk";
+import {
+  isApprovalFallback,
+  isApprovalMode,
+  parsePolicyByProject,
+  POLICY_KEYS,
+  type ProjectPolicy,
+  type ProjectPolicyPatch,
+} from "./guardrail-policy";
 
 /**
  * 审批与计划模式的持久化设置。
@@ -28,6 +36,13 @@ export interface GuardrailSettings {
    * approvalMode 设为「关闭」时本项同样不生效（总闸优先）。
    */
   mcpWriteApproval: boolean;
+  /**
+   * 项目级审批**档位**：按项目 cwd 分组，每个键缺省即继承全局。
+   * 与 allowByProject 的分工：那张表是「这个项目里某条规则不再问」，
+   * 这张表是「这个项目整体用哪个档」—— 一个管豁免，一个管档位。
+   * 解析（项目 > 全局）在 `guardrail-policy.ts` 的纯函数里。
+   */
+  policyByProject: Record<string, ProjectPolicy>;
   /** 免确认规则：按项目 cwd 分组，值是 tool-risk 给出的 ruleKey */
   allowByProject: Record<string, string[]>;
   /** 打开会话时默认进入计划模式 */
@@ -51,6 +66,7 @@ export const DEFAULT_GUARDRAIL_SETTINGS: GuardrailSettings = {
   approvalMode: "risky",
   approvalFallback: "reject",
   mcpWriteApproval: true,
+  policyByProject: {},
   allowByProject: {},
   planModeDefault: false,
   planModeSessions: {},
@@ -58,15 +74,18 @@ export const DEFAULT_GUARDRAIL_SETTINGS: GuardrailSettings = {
   verifyCommandsByProject: {},
 };
 
-const APPROVAL_MODES: ApprovalMode[] = ["off", "risky", "writes"];
-const APPROVAL_FALLBACKS = ["reject", "queue"] as const;
-type ApprovalFallback = GuardrailSettings["approvalFallback"];
-function isApprovalFallback(value: unknown): value is ApprovalFallback {
-  return typeof value === "string" && (APPROVAL_FALLBACKS as readonly string[]).includes(value);
-}
-
-function isApprovalMode(value: unknown): value is ApprovalMode {
-  return typeof value === "string" && (APPROVAL_MODES as string[]).includes(value);
+/**
+ * 读盘容错 + key 规范化：值层面的合法性由纯函数 `parsePolicyByProject` 判
+ * （非法值逐键忽略），这里只负责把 key 统一成 cwdKey（同 allowByProject 的理由：
+ * 界面给 `C:/x`、内核给 `C:\x`，不统一就会出现「写进去一个、按另一个查」）。
+ */
+function readPolicyByProject(value: unknown): Record<string, ProjectPolicy> {
+  const out: Record<string, ProjectPolicy> = {};
+  for (const [key, policy] of Object.entries(parsePolicyByProject(value))) {
+    const normalized = cwdKey(key) || key;
+    out[normalized] = { ...(out[normalized] ?? {}), ...policy };
+  }
+  return out;
 }
 
 function readStringArrayMap(value: unknown): Record<string, string[]> {
@@ -104,6 +123,7 @@ export function readGuardrailSettings(settingsPath = getGuardrailSettingsPath())
       mcpWriteApproval: stored.mcpWriteApproval === undefined
         ? DEFAULT_GUARDRAIL_SETTINGS.mcpWriteApproval
         : stored.mcpWriteApproval === true,
+      policyByProject: readPolicyByProject(stored.policyByProject),
       allowByProject: readStringArrayMap(stored.allowByProject),
       planModeDefault: stored.planModeDefault === true,
       planModeSessions: stored.planModeSessions !== null
@@ -212,6 +232,45 @@ export function readVerifyCommands(cwd: string, settingsPath = getGuardrailSetti
   } catch {
     return [];
   }
+}
+
+/**
+ * 写某个项目的审批档位。
+ *
+ * 语义刻意是**补丁**而不是整条替换：只改传进来的键，`null` 表示该键回到继承；
+ * `patch === null` 整条清除（回到全继承）。三个键各自独立，所以「只把审批档
+ * 调严、其余不动」不会连带把 mcpWriteApproval 写死。
+ * 写前由纯函数 `parsePolicyPatch` 校验（路由层调用），这里再做一次结构兜底。
+ */
+export function writeProjectPolicy(
+  cwd: string,
+  patch: ProjectPolicyPatch | null,
+  settingsPath = getGuardrailSettingsPath(),
+): GuardrailSettings {
+  const key = cwdKey(cwd);
+  const current = readGuardrailSettings(settingsPath);
+  if (!key) return current;
+  const policyByProject = { ...current.policyByProject };
+  if (patch === null) {
+    delete policyByProject[key];
+    return write({ ...current, policyByProject }, settingsPath);
+  }
+  const next: ProjectPolicy = { ...(policyByProject[key] ?? {}) };
+  if ("approvalMode" in patch) {
+    if (patch.approvalMode == null) delete next.approvalMode;
+    else next.approvalMode = patch.approvalMode;
+  }
+  if ("approvalFallback" in patch) {
+    if (patch.approvalFallback == null) delete next.approvalFallback;
+    else next.approvalFallback = patch.approvalFallback;
+  }
+  if ("mcpWriteApproval" in patch) {
+    if (patch.mcpWriteApproval == null) delete next.mcpWriteApproval;
+    else next.mcpWriteApproval = patch.mcpWriteApproval;
+  }
+  if (POLICY_KEYS.some((k) => next[k] !== undefined)) policyByProject[key] = next;
+  else delete policyByProject[key];
+  return write({ ...current, policyByProject }, settingsPath);
 }
 
 /** 把一条 ruleKey 加进某项目的免确认列表 */

@@ -30,6 +30,7 @@ import {
   isNonCodePath,
   looksLikeCheck,
 } from "./verification-kind";
+import { resolvePolicy } from "./guardrail-policy";
 import {
   appendVerificationRecord,
   getVerificationLedgerPath,
@@ -298,6 +299,14 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
 
         // 3) 审批闸门
         const settings = readGuardrailSettings();
+        // 项目级档位（模块 5 · 第 2 轮）：三个键各自「项目 > 全局」。
+        // 没有项目配置时 resolvePolicy 原样返回全局值（逐字节等价），
+        // 所以下面仍然只有一条判定路径，没有分叉。
+        // caseInsensitiveKeys 由这里按平台显式给：Windows 的 cwdKey 落盘是小写形式，
+        // 而 Linux 上 `/Home` 与 `/home` 是两个不同目录，不能一并忽略大小写。
+        const policy = resolvePolicy(settings, runtime.getCwd(), {
+          caseInsensitiveKeys: process.platform === "win32",
+        });
         const risk = classifyToolCall(toolName, input, {
           cwd: runtime.getCwd(),
           allowedRoots: runtime.getAllowedRoots(),
@@ -331,8 +340,8 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
           }
         }
         // MCP 写操作由独立开关控制：关掉时回到默认（不打扰）；总闸「关闭」时同样不生效
-        if (risk.mcpWrite === true && !settings.mcpWriteApproval) return;
-        if (!needsApproval(risk, settings.approvalMode)) return;
+        if (risk.mcpWrite === true && !policy.mcpWriteApproval) return;
+        if (!needsApproval(risk, policy.approvalMode)) return;
         const allowRules = [
           ...(settings.allowByProject[cwdKey(runtime.getCwd())] ?? []),
           ...(sessionId ? [...(sessionAllow.get(sessionId) ?? [])] : []),
@@ -377,7 +386,7 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
 
         if (!ctx.hasUI) {
           // 无人值守 / 后台会话：按配置决定「拒绝」还是「入队后继续」
-          if (settings.approvalFallback === "queue") return enqueueApproval();
+          if (policy.approvalFallback === "queue") return enqueueApproval();
           // 只加日志：没有可用界面时的自动拒绝也是一次决策（没有人点，来源记为 auto）
           appendApprovalLog({
             sessionId,
