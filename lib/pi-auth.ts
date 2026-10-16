@@ -191,7 +191,7 @@ export async function deleteProviderAuth(provider: string): Promise<void> {
 }
 
 /** 让运行中的会话立即重新加载凭据与模型目录 */
-async function refreshSessions(): Promise<void> {
+export async function refreshSessions(): Promise<void> {
   const g = globalThis as AnyRecord;
   const sessions = g.__piSessions as Map<string, { inner?: { modelRuntime?: { refresh?: (o?: unknown) => Promise<unknown> } } }> | undefined;
   if (!sessions) return;

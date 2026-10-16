@@ -16,6 +16,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { AccountProfilesSection } from "@/components/AccountProfilesSection";
 import { cn } from "@/components/lib/utils";
 import { toast } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/bits";
@@ -1220,11 +1221,11 @@ export function SettingsPage({
         <PageHeader icon={<SettingsIcon size={16} />} title="设置" subtitle="工具开关、版本信息与其他偏好" />
 
         {/* 两列按高度均衡分组（而非按旧的「左=Agent 行为 / 右=应用层」硬切）：
-            旧分法左列 1569px、右列 337px，底边差出一屏。现在按实测高度
-            配平（约 976 : 970），两列底边基本齐平。 */}
+            旧分法左右底边会差出一屏，现按实测高度配平。 */}
         <div className="flex flex-col gap-5 xl:flex-row xl:items-start">
           <div className="flex min-w-0 flex-1 flex-col gap-5">
             <PiSettingsSection />
+            <AccountProfilesSection />
             <AppearanceSection />
             <AboutSection />
           </div>
