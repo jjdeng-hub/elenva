@@ -50,7 +50,7 @@ const SAFE: ToolRisk = { level: "safe", reason: "", ruleKey: "", ruleLabel: "" }
 
 /** 只读工具：无论什么审批档位都不打扰用户 */
 const READ_ONLY_TOOLS = new Set([
-  "read", "grep", "find", "ls", "glob", "web_search", "web_fetch", "todo_write",
+  "read", "grep", "find", "ls", "glob", "web_search", "web_fetch", "todo_write", "skill_draft",
 ]);
 
 interface BashRule {
