@@ -95,7 +95,11 @@ export type PolicyPatchResult =
 /**
  * 校验一份来自界面的补丁（写前校验）。与读盘相反，这里**非法值直接报错** ——
  * 界面传错是 bug，静默吞掉会让人以为「设置生效了」。
- * `null` 整体表示「清除该项目设置」。
+ *
+ * 关键约定：`null` 必须**原样传下去**（`patch[键] = null`），它在下游的意思是
+ * 「这个键回到继承」。早期实现把「键存在但值为 null」当成「没传」跳过，结果
+ * `writeProjectPolicy` 收到空补丁 `{}` → 什么都不删 → 选择器看着变回「继承」了、
+ * 落盘的值还在，刷新后原样回来。（整条 null 另当别论 = 清除该项目设置。）
  */
 export function parsePolicyPatch(value: unknown): PolicyPatchResult {
   if (value === null) return { ok: true, patch: null };
@@ -104,17 +108,23 @@ export function parsePolicyPatch(value: unknown): PolicyPatchResult {
   }
   const raw = value as Record<string, unknown>;
   const patch: ProjectPolicyPatch = {};
-  if ("approvalMode" in raw && raw.approvalMode !== null) {
-    if (!isApprovalMode(raw.approvalMode)) return { ok: false, error: "未知的审批档位" };
-    patch.approvalMode = raw.approvalMode;
+  if ("approvalMode" in raw) {
+    const next = raw.approvalMode;
+    if (next === null) patch.approvalMode = null;
+    else if (isApprovalMode(next)) patch.approvalMode = next;
+    else return { ok: false, error: "未知的审批档位" };
   }
-  if ("approvalFallback" in raw && raw.approvalFallback !== null) {
-    if (!isApprovalFallback(raw.approvalFallback)) return { ok: false, error: "未知的无人值守策略" };
-    patch.approvalFallback = raw.approvalFallback;
+  if ("approvalFallback" in raw) {
+    const next = raw.approvalFallback;
+    if (next === null) patch.approvalFallback = null;
+    else if (isApprovalFallback(next)) patch.approvalFallback = next;
+    else return { ok: false, error: "未知的无人值守策略" };
   }
-  if ("mcpWriteApproval" in raw && raw.mcpWriteApproval !== null) {
-    if (typeof raw.mcpWriteApproval !== "boolean") return { ok: false, error: "MCP 写确认必须是布尔值" };
-    patch.mcpWriteApproval = raw.mcpWriteApproval;
+  if ("mcpWriteApproval" in raw) {
+    const next = raw.mcpWriteApproval;
+    if (next === null) patch.mcpWriteApproval = null;
+    else if (typeof next === "boolean") patch.mcpWriteApproval = next;
+    else return { ok: false, error: "MCP 写确认必须是布尔值" };
   }
   return { ok: true, patch };
 }

@@ -46,6 +46,16 @@ const check = (name, fn) => {
     console.log(`FAIL  ${name}\n      ${error instanceof Error ? error.message : String(error)}`);
   }
 };
+/** 异步用例（路由层）：同样的 PASS/FAIL 口径 */
+const checkAsync = async (name, fn) => {
+  try {
+    await fn();
+    console.log(`PASS  ${name}`);
+  } catch (error) {
+    fail += 1;
+    console.log(`FAIL  ${name}\n      ${error instanceof Error ? error.message : String(error)}`);
+  }
+};
 const assert = (cond, message) => {
   if (!cond) throw new Error(message);
 };
@@ -125,16 +135,30 @@ check("isApprovalMode / isApprovalFallback：只认白名单", () => {
   assert(!isApprovalFallback("deny") && !isApprovalFallback(null), "非法回落");
 });
 
-check("parsePolicyPatch：null = 清整条；非法值报错（写前校验，不静默）", () => {
+check("parsePolicyPatch：整条 null = 清除；单键 null = 回到继承（必须传下去）；非法值报错", () => {
   const cleared = parsePolicyPatch(null);
   assert(cleared.ok, "null 合法");
-  eq(cleared.patch, null, "null → 整条清除");
+  eq(cleared.patch, null, "整条 null → 整条清除");
   const ok = parsePolicyPatch({ approvalMode: "off", mcpWriteApproval: false });
   assert(ok.ok, "合法补丁");
   eq(ok.patch.approvalMode, "off", "approvalMode");
   eq(ok.patch.mcpWriteApproval, false, "mcpWriteApproval");
   assert(!("approvalFallback" in ok.patch), "没传的键不进补丁");
-  for (const bad of [{ approvalMode: "strict" }, { approvalFallback: "deny" }, { mcpWriteApproval: "on" }, "x", 3]) {
+  // 回归点（复核复现的那个 bug）：null 必须原样进补丁。
+  // 早先这里写成「键存在但值为 null 就跳过」→ 下游收到空补丁 {} → 单键回退静默失效。
+  for (const key of ["approvalMode", "approvalFallback", "mcpWriteApproval"]) {
+    const onlyNull = parsePolicyPatch({ [key]: null });
+    assert(onlyNull.ok, `${key}: 单独传 null 应合法`);
+    assert(key in onlyNull.patch, `${key}: null 必须保留在补丁里（否则下游不知道要删）`);
+    eq(onlyNull.patch[key], null, `${key}: 值应为 null`);
+    eq(Object.keys(onlyNull.patch).length, 1, `${key}: 不应扩散到其它键`);
+  }
+  const mixed = parsePolicyPatch({ approvalMode: null, approvalFallback: "queue" });
+  assert(mixed.ok, "null 与合法值可以混传");
+  eq(mixed.patch.approvalMode, null, "null 原样");
+  eq(mixed.patch.approvalFallback, "queue", "合法值照常");
+  assert(!("mcpWriteApproval" in mixed.patch), "没传的键仍不进补丁");
+  for (const bad of [{ approvalMode: "strict" }, { approvalFallback: "deny" }, { mcpWriteApproval: "on" }, { approvalMode: undefined }, "x", 3]) {
     const result = parsePolicyPatch(bad);
     assert(!result.ok, `${JSON.stringify(bad)} 应报错`);
   }
@@ -377,6 +401,98 @@ check("落盘 → 重读 → 解析：一轮闭环", () => {
   eq(resolved.approvalFallback, "queue", "approvalFallback");
   eq(resolved.mcpWriteApproval, DEFAULT_GUARDRAIL_SETTINGS.mcpWriteApproval, "未覆盖的键继承全局");
   eq(getGuardrailSettingsPath(agentDir), path, "路径入口一致");
+});
+
+/* ---------------- 4.5 集成链路：parse → write（以及路由层，复核复现的那条） ---------------- */
+
+/** 三键设满（模拟用户先都设过），键值与全局值故意不同 */
+const FULL_POLICY = { approvalMode: "off", approvalFallback: "queue", mcpWriteApproval: false };
+
+check("集成链路：parsePolicyPatch → writeProjectPolicy，三键逐一同路径", () => {
+  const path = settingsPath();
+  for (const key of Object.keys(FULL_POLICY)) {
+    rmSync(path, { force: true });
+    writeProjectPolicy("/proj", FULL_POLICY, path);
+    const parsed = parsePolicyPatch({ [key]: null });
+    assert(parsed.ok, `${key}: 补丁应合法`);
+    const settings = writeProjectPolicy("/proj", parsed.patch, path);
+    const policy = settings.policyByProject["/proj"] ?? {};
+    assert(!(key in policy), `${key}: 该键应被删（回到继承）`);
+    for (const other of Object.keys(FULL_POLICY)) {
+      if (other === key) continue;
+      eq(policy[other], FULL_POLICY[other], `${key} 回退时 ${other} 应保留`);
+    }
+    // 真落盘（不是只看内存里的返回值）
+    const reread = readGuardrailSettings(path).policyByProject["/proj"] ?? {};
+    assert(!(key in reread), `${key}: 重读也应已删`);
+    eq(resolvePolicy(readGuardrailSettings(path), "/proj")[key], DEFAULT_GUARDRAIL_SETTINGS[key], `${key}: 回退后等于全局值`);
+  }
+});
+
+check("集成链路：模拟界面载荷 —— 三键逐个选回「继承」后整条 entry 消失", () => {
+  const path = settingsPath();
+  rmSync(path, { force: true });
+  writeProjectPolicy("/proj", FULL_POLICY, path);
+  eq(Object.keys(readGuardrailSettings(path).policyByProject["/proj"]).length, 3, "先设满三键");
+  // 界面每个选择器的「继承」选项值都是空字符串，转成 null 发出去
+  let settings = readGuardrailSettings(path);
+  for (const key of Object.keys(FULL_POLICY)) {
+    // 界面语义：选「继承」→ 发 null（选择器的 value 是空字符串）
+    const parsed = parsePolicyPatch({ [key]: null });
+    assert(parsed.ok, `${key}: 界面载荷应合法`);
+    settings = writeProjectPolicy("/proj", parsed.patch, path);
+  }
+  eq(settings.policyByProject["/proj"], undefined, "最后一个键回退后整条 entry 删除");
+  eq(readGuardrailSettings(path).policyByProject["/proj"], undefined, "重读也确认整条没了");
+  const resolved = resolvePolicy(readGuardrailSettings(path), "/proj");
+  eq(resolved.projectKey, null, "解析回落到「无项目配置」");
+});
+
+// 路由层：直接调 POST 处理器 —— 与复核用的复现命令同一条路径（含 JSON 载荷与 cwd 规范化）
+const route = await jiti.import("../app/api/guardrails/route.ts");
+const postGuardrails = async (body) => {
+  const res = await route.POST(new Request("http://localhost/api/guardrails", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }));
+  return { status: res.status, data: await res.json() };
+};
+
+await checkAsync("路由集成：POST 单键 null 真的落盘删除（复核复现的那条）", async () => {
+  const path = settingsPath();
+  const cwd = "/tmp/elenva-policy-demo"; // 虚构路径
+  rmSync(path, { force: true });
+  const seed = await postGuardrails({ action: "setProjectPolicy", cwd, policy: FULL_POLICY });
+  eq(seed.status, 200, "seed 状态码");
+  eq(seed.data.policyByProject[cwd].approvalMode, "off", "seed 落盘");
+
+  const back = await postGuardrails({ action: "setProjectPolicy", cwd, policy: { approvalMode: null } });
+  eq(back.status, 200, "回退状态码");
+  assert(!("approvalMode" in back.data.policyByProject[cwd]), "响应里该键应已删");
+  const stored = readGuardrailSettings(path).policyByProject[cwd] ?? {};
+  assert(!("approvalMode" in stored), "磁盘上该键应已删");
+  eq(stored.approvalFallback, "queue", "其余键保留");
+  eq(stored.mcpWriteApproval, false, "其余键保留");
+
+  let last = back;
+  for (const key of ["approvalFallback", "mcpWriteApproval"]) {
+    const step = await postGuardrails({ action: "setProjectPolicy", cwd, policy: { [key]: null } });
+    eq(step.status, 200, `${key} 回退状态码`);
+    assert(!(key in (step.data.policyByProject[cwd] ?? {})), `${key} 应从磁盘删除`);
+    last = step;
+  }
+  eq(Object.keys(last.data.policyByProject).length, 0, "三键回退完 → 该项目整条消失");
+
+  // 非法值：400 且不落盘（写前校验不能只挡一半）
+  const bad = await postGuardrails({ action: "setProjectPolicy", cwd, policy: { approvalMode: "strict" } });
+  eq(bad.status, 400, "非法档位 400");
+  eq(Object.keys(readGuardrailSettings(path).policyByProject).length, 0, "400 不落盘");
+  // 整条清除路径仍正常
+  await postGuardrails({ action: "setProjectPolicy", cwd, policy: FULL_POLICY });
+  const cleared = await postGuardrails({ action: "setProjectPolicy", cwd, policy: null });
+  eq(cleared.status, 200, "整条清除状态码");
+  eq(cleared.data.policyByProject[cwd], undefined, "整条清除");
 });
 
 /* ---------------- 5. 调用点与纯度核对（静态） ---------------- */
