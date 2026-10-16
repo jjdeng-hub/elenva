@@ -2,6 +2,7 @@
 
 import {
   AlarmClock,
+  TrendingUp,
   Bot,
   Brain,
   Cpu,
@@ -31,6 +32,8 @@ export type View =
   | "code"
   /** 节律：按规则自动跑的任务（查看 / 新建 / 编辑 / 运行历史） */
   | "rhythm"
+  /** 成长：近 8 周的任务量 / 失败率 / 轮数 / 工具调用趋势（成长仪表，只读） */
+  | "growth"
   /** 审批历史：危险操作的批准 / 拒绝 / 超时 / 入队记录（只读） */
   | "approvals"
   | "skills"
@@ -183,6 +186,7 @@ export function WorkstationSidebar({
           <NavItem collapsed={isCollapsed} icon={<ListChecks size={14} />} label="会话" active={view === "chat"} onClick={() => onViewChange("chat")} />
           <NavItem collapsed={isCollapsed} icon={<FolderGit2 size={14} />} label="代码" active={view === "code"} onClick={() => onViewChange("code")} />
           <NavItem collapsed={isCollapsed} icon={<AlarmClock size={14} />} label="节律" active={view === "rhythm"} onClick={() => onViewChange("rhythm")} />
+          <NavItem collapsed={isCollapsed} icon={<TrendingUp size={14} />} label="成长" active={view === "growth"} onClick={() => onViewChange("growth")} />
           <NavItem collapsed={isCollapsed} icon={<ShieldCheck size={14} />} label="审批历史" active={view === "approvals"} onClick={() => onViewChange("approvals")} />
 
       <div className={groupCls}>资源</div>

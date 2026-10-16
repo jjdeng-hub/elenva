@@ -8,6 +8,7 @@ import { CodeView } from "@/components/CodeView";
 import { CandidatesPage } from "@/components/CandidatesPage";
 import { ApprovalHistoryPage } from "@/components/ApprovalHistoryPage";
 import { HomeDashboard } from "@/components/HomeDashboard";
+import { GrowthPage } from "@/components/GrowthPage";
 import { IdentityPage } from "@/components/IdentityPage";
 import { MemoryPage, type MemoryProject } from "@/components/MemoryPage";
 import { ModelsPage } from "@/components/ModelsPage";
@@ -35,6 +36,7 @@ type SessionsResponse = {
 const PAGE_TITLES: Record<string, string> = {
   code: "代码",
   rhythm: "节律",
+  growth: "成长",
   approvals: "审批历史",
   skills: "技能",
   memory: "记忆",
@@ -809,6 +811,7 @@ export function AppShell() {
         )}
         {view === "skills" && <SkillsPage defaultCwd={defaultCwd} />}
         {view === "rhythm" && <RhythmPage defaultCwd={defaultCwd} onOpenSession={openSessionById} />}
+        {view === "growth" && <GrowthPage />}
         {view === "approvals" && <ApprovalHistoryPage onOpenSession={openSessionById} />}
         {view === "memory" && <MemoryPage projects={memoryProjects} />}
         {view === "identity" && <IdentityPage />}
