@@ -734,6 +734,8 @@ export function ChatView({
      计划模式状态存在服务端（内核空闲回收会话后仍然有效）。新会话还没有 id，
      此时开关写入的是「新建会话的默认值」，由 readPlanMode 对未设过的会话回落。 */
   const [planMode, setPlanMode] = useState(false);
+  /** 花费上限（只提示不拦截）：观测栏「运行统计」附「 / 上限 $Y」用 */
+  const [budgets, setBudgets] = useState<{ dailyUsd?: number; sessionUsd?: number }>({});
   const [checkpointRefreshKey, setCheckpointRefreshKey] = useState(0);
   const planSessionId = session?.id ?? null;
   useEffect(() => {
@@ -741,9 +743,10 @@ export function ChatView({
     const query = planSessionId ? `?session=${encodeURIComponent(planSessionId)}` : "";
     fetch(`/api/guardrails${query}`, { cache: "no-store" })
       .then((r) => r.json())
-      .then((d: { planMode?: boolean; planModeDefault?: boolean }) => {
+      .then((d: { planMode?: boolean; planModeDefault?: boolean; budgets?: { dailyUsd?: number; sessionUsd?: number } }) => {
         if (!alive) return;
         setPlanMode(planSessionId ? d.planMode === true : d.planModeDefault === true);
+        setBudgets(d.budgets ?? {});
       })
       .catch(() => undefined);
     return () => {
@@ -774,7 +777,10 @@ export function ChatView({
       if (planSessionId) {
         fetch(`/api/guardrails?session=${encodeURIComponent(planSessionId)}`, { cache: "no-store" })
           .then((r) => r.json())
-          .then((d: { planMode?: boolean }) => setPlanMode(d.planMode === true))
+          .then((d: { planMode?: boolean; budgets?: { dailyUsd?: number; sessionUsd?: number } }) => {
+            setPlanMode(d.planMode === true);
+            setBudgets(d.budgets ?? {});
+          })
           .catch(() => undefined);
       }
     }
@@ -1294,6 +1300,7 @@ export function ChatView({
               cwd={cwd || ""}
               gitInfo={gitInfo}
               sessionStats={sessionStats}
+              budgets={budgets}
               contextUsage={contextUsage}
               compactions={compactionRecords}
               displayModel={displayModel}

@@ -555,6 +555,7 @@ export function SessionObservatory({
   onOpenSubagents,
   onOpenSettings,
   turn,
+  budgets,
   /** 观测栏是否展开。收起走宽度过渡（与另外两个侧栏同一节奏），不卸载组件 */
   open = true,
   header,
@@ -577,6 +578,8 @@ export function SessionObservatory({
   cwd: string;
   gitInfo: GitInfo;
   sessionStats: SessionStatsInfo | null;
+  /** 花费上限（只提示不拦截，来自 /api/guardrails）；用于运行统计附「 / 上限 $Y」 */
+  budgets?: { dailyUsd?: number; sessionUsd?: number };
   contextUsage: { percent: number | null; contextWindow: number; tokens: number | null } | null;
   /** 压缩历史（「这次丢了什么」）；无压缩时为空数组，UI 不渲染对应区块 */
   compactions?: CompactionRecord[];
@@ -602,7 +605,15 @@ export function SessionObservatory({
   const todos = useMemo(() => latestTodoState(messages, results), [messages, results]);
   const todoStats = todos && todos.items.length > 0 ? todoProgress(todos.items) : null;
 
-  /* 运行统计收起时的摘要行：只留「耗时 · 调用 · 花费」三个最常看的数 */
+  /* 运行统计收起时的摘要行：只留「耗时 · 调用 · 花费」三个最常看的数；
+     设了会话上限时再附「 / 上限 $Y」—— 借鉴用量控制台的「已用 / 上限并列」，
+     并按 LiteLLM 分级给颜色：达 80% 用警示色（warn），超出用危险色（danger）。只提示不拦截。 */
+  const sessionLimit = budgets?.sessionUsd;
+  const sessionRatio = sessionLimit !== undefined && sessionLimit > 0 && sessionStats != null
+    ? sessionStats.cost / sessionLimit
+    : null;
+  const overSessionLimit = sessionRatio !== null && sessionRatio > 1;
+  const nearSessionLimit = sessionRatio !== null && sessionRatio >= 0.8 && sessionRatio <= 1;
   const statsSummary = sessionStats
     ? [
         sessionStats.totalActiveMs ? formatDuration(sessionStats.totalActiveMs) : null,
@@ -793,7 +804,14 @@ export function SessionObservatory({
         <CollapsibleSection
           title="运行统计"
           icon={<ListChecks size={12} />}
-          summary={statsSummary}
+          summary={sessionStats && sessionLimit !== undefined ? (
+            <>
+              {statsSummary}
+              <span className={cn("ml-0", overSessionLimit ? "font-semibold text-danger" : nearSessionLimit && "font-semibold text-warn")}>
+                {` / 上限 ${formatCost(sessionLimit)}`}
+              </span>
+            </>
+          ) : statsSummary}
           testId="rail-stats-toggle"
         >
           {sessionStats ? (

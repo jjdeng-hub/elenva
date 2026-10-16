@@ -16,6 +16,10 @@ import { cacheSessionPath, invalidateSessionListCache, resolveSessionPath } from
 import { getProjectTrustStatus, projectTrustReloadOptions } from "./project-trust";
 import { persistExplicitStartupPreferences } from "./startup-preferences";
 import { autoNameSessionIfNeeded } from "./session-auto-name";
+import { computeSessionStats } from "./session-stats";
+import { aggregateUsage } from "./usage-aggregate";
+import { approachingBudgets, budgetBucket, checkBudgets, formatApproachNote, formatBudgetNote, parseBudgets } from "./budget-guard";
+import { readGuardrailSettings } from "./guardrail-settings";
 import { hasActiveSessionLivenessProvider } from "./session-liveness";
 import type { AgentSession, SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
@@ -592,6 +596,21 @@ export class AgentSessionWrapper {
       const i = this.listeners.indexOf(listener);
       if (i !== -1) this.listeners.splice(i, 1);
     };
+  }
+
+  /**
+   * 推一条界面提示（toast）—— 复用扩展通知通道（`extension_ui_request` / `notify`），
+   * 前端把它交给已有的 notice 队列渲染。与扩展调 ui.notify 走的是同一条路。
+   */
+  notify(message: string, type: "info" | "success" | "warning" | "error" = "info"): void {
+    if (!this._alive) return;
+    this.emit({
+      type: "extension_ui_request",
+      id: randomUUID(),
+      method: "notify",
+      notifyType: type,
+      message,
+    } as ExtensionUiRequest as AgentEvent);
   }
 
   onDestroy(cb: () => void): void {
@@ -2057,6 +2076,80 @@ export function getCompletionNotificationSuppressedAgentSessionIds(): string[] {
   return [...ids];
 }
 
+// ============================================================================
+// 预算护栏（模块 5 · 第 4 轮）：每轮结束**只提示、不拦截**
+// ============================================================================
+
+/**
+ * 今日花费的进程内 60s TTL 缓存。
+ *
+ * 为什么另做一层：`aggregateUsage()` 要遍历整个 sessions 目录，每轮都全盘扫太贵；
+ * 而「今日花费」对 60s 的延迟不敏感。缓存刻意放在这里而不是 `aggregateUsage` 内部
+ * —— 它是首页与 `/api/usage` 共用的取数层，加缓存会改变所有调用方的新鲜度语义。
+ */
+const TODAY_COST_CACHE_TTL_MS = 60_000;
+let todayCostCache: { at: number; cost: number } | null = null;
+
+async function getTodayCostCached(now = Date.now()): Promise<number> {
+  if (todayCostCache && now - todayCostCache.at < TODAY_COST_CACHE_TTL_MS) {
+    return todayCostCache.cost;
+  }
+  const report = await aggregateUsage();
+  todayCostCache = { at: now, cost: report.today.cost };
+  return todayCostCache.cost;
+}
+
+/**
+ * 每轮结束后的预算检查：命中就走 notice 通道推一条。永不影响执行路径
+ * （调用方 `void`）—— 任何异常都只能落日志，不能阻断一轮的收尾。
+ *
+ * 去重口径（防刷屏）：
+ * - 键 = `${scope}:${tier}`。超限的 tier 由 `budgetBucket` 给（刚超 = `over`，
+ *   再超 50% = `far`）；另借鉴 LiteLLM 的 80% 分级，未超但达上限 80% 推一次 `near`。
+ *   三档单调不减，所以「同会话同 scope 同档只推一次」等价于「每跨一档各推一次」。
+ * - `notifiedKeys` 由每个 wrapper 一份（调用方闭包持有），随会话回收重置。
+ * - 同轮多个 scope 同时新跨档：合成一条（`formatBudgetNote` / `formatApproachNote`）。
+ */
+async function runBudgetCheck(
+  session: AgentSessionWrapper,
+  notifiedKeys: Set<string>,
+): Promise<void> {
+  try {
+    const budgets = parseBudgets(readGuardrailSettings().budgets);
+    if (budgets.dailyUsd === undefined && budgets.sessionUsd === undefined) return;
+
+    const entries = session.inner.sessionManager.getEntries() as unknown as SessionEntry[];
+    const sessionSpent = computeSessionStats(entries).cost;
+    const dailySpent = await getTodayCostCached();
+    const spent = { dailySpent, sessionSpent, budgets };
+
+    const { exceeded } = checkBudgets(spent);
+    const newlyExceeded = exceeded.filter((item) => {
+      const key = `${item.scope}:${budgetBucket(item.spent, item.limit)}`;
+      if (notifiedKeys.has(key)) return false;
+      notifiedKeys.add(key);
+      return true;
+    });
+
+    // 80% 接近提示（LiteLLM 分级）；已超的 scope 不在这个列表里，不会与上面重复
+    const approaching = approachingBudgets(spent).filter((item) => {
+      const key = `${item.scope}:near`;
+      if (notifiedKeys.has(key)) return false;
+      notifiedKeys.add(key);
+      return true;
+    });
+
+    const parts = [formatApproachNote(approaching), formatBudgetNote(newlyExceeded)]
+      .filter((value): value is string => Boolean(value));
+    if (parts.length > 0) session.notify(parts.join("；"), "warning");
+  } catch (error) {
+    console.error(
+      "[elenva] budget guard failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
 /**
  * Get or create an AgentSession for the given session.
  * For new sessions (sessionFile === ""), pi generates its own id.
@@ -2227,10 +2320,12 @@ export async function startAgentSession(
         ? () => subagentResources.appendSystemPrompt[0] ?? ""
         : () => contextFilesSystemPrompt(inner.resourceLoader.getAgentsFiles().agentsFiles)
       : undefined;
+    /** 预算提示去重键（每会话一份，随 wrapper 回收重置），见 runBudgetCheck 注释 */
+    const notifiedBudgetKeys = new Set<string>();
     const wrapper = new AgentSessionWrapper(inner, {
       exactSystemPrompt,
       chatOnly,
-      onAgentRunComplete: () => {
+      onAgentRunComplete: (completedSessionId) => {
         // 说明：这里原本会向 Web Push 订阅者推送「会话完成」通知。
         // 推送链路（/api/push/* + lib/web-push.ts）在界面侧从未接入，
         // 已随未启用的 i18n 词条一起移除；重新启用时从 git 历史取回即可。
@@ -2238,6 +2333,9 @@ export async function startAgentSession(
         void autoNameSessionIfNeeded(inner as unknown as AgentSession).catch((error) => {
           console.error("[elenva] auto session title failed:", error instanceof Error ? error.message : error);
         });
+        // 预算护栏：只提示不拦截（子代理走 suppressCompletionNotifications，不会到这里）
+        const finished = registry.get(completedSessionId);
+        if (finished) void runBudgetCheck(finished, notifiedBudgetKeys);
       },
       suppressCompletionNotifications: Boolean(subagentResources),
     });

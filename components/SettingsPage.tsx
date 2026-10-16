@@ -608,6 +608,9 @@ function GuardrailsSection({ projects, defaultCwd }: {
   const [mcpGlobal, setMcpGlobal] = useState(true);
   const [planDefault, setPlanDefault] = useState(false);
   const [verificationGuard, setVerificationGuard] = useState(true);
+  /** 预算上限草稿（字符串：输入中允许暂时非法，提交时才校验） */
+  const [dailyDraft, setDailyDraft] = useState("");
+  const [sessionDraft, setSessionDraft] = useState("");
   const [verifyCwd, setVerifyCwd] = useState<string>(defaultCwd ?? projects?.[0]?.path ?? "");
   const [declared, setDeclared] = useState<string[]>([]);
   const [verifyDraft, setVerifyDraft] = useState("");
@@ -640,6 +643,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
         planModeDefault?: boolean;
         verificationGuard?: boolean;
         mcpWriteApproval?: boolean;
+        budgets?: { dailyUsd?: number; sessionUsd?: number };
       }) => {
         setMode(d.approvalMode ?? "risky");
         setFallback(d.approvalFallback === "queue" ? "queue" : "reject");
@@ -648,6 +652,8 @@ function GuardrailsSection({ projects, defaultCwd }: {
         setPolicyByProject(d.policyByProject ?? {});
         setPlanDefault(d.planModeDefault === true);
         setVerificationGuard(d.verificationGuard !== false);
+        setDailyDraft(d.budgets?.dailyUsd !== undefined ? String(d.budgets.dailyUsd) : "");
+        setSessionDraft(d.budgets?.sessionUsd !== undefined ? String(d.budgets.sessionUsd) : "");
       })
       .catch(() => setMode("risky"));
   };
@@ -691,6 +697,28 @@ function GuardrailsSection({ projects, defaultCwd }: {
     await post({ action: "addVerifyCommand", cwd: verifyCwd, pattern });
     setVerifyDraft("");
     loadVerify(verifyCwd);
+  };
+
+  /** 预算上限：两个输入框一次提交（留空 = 不限）。非负数字以外当场拒，不发请求 */
+  const saveBudgets = async () => {
+    const parseLimit = (text: string): number | null | "invalid" => {
+      const t = text.trim();
+      if (!t) return null;
+      const n = Number(t);
+      if (!Number.isFinite(n) || n < 0) return "invalid";
+      return n;
+    };
+    const daily = parseLimit(dailyDraft);
+    const session = parseLimit(sessionDraft);
+    if (daily === "invalid" || session === "invalid") {
+      toast("上限必须是非负数字（留空 = 不限）");
+      return;
+    }
+    const data = await post({ action: "setBudgets", dailyUsd: daily, sessionUsd: session });
+    const saved = (data.budgets as { dailyUsd?: number; sessionUsd?: number } | undefined) ?? {};
+    setDailyDraft(saved.dailyUsd !== undefined ? String(saved.dailyUsd) : "");
+    setSessionDraft(saved.sessionUsd !== undefined ? String(saved.sessionUsd) : "");
+    toast("预算上限已保存");
   };
 
   const removeVerify = async (pattern: string) => {
@@ -912,6 +940,55 @@ function GuardrailsSection({ projects, defaultCwd }: {
               void post({ action: "setVerificationGuard", enabled: next });
             }}
           />
+        </div>
+
+        <div className="mt-4 border-t border-line-soft pt-3">
+          <div className="text-[13px] font-medium text-fg">花费上限</div>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-dim">
+            超过设定上限时在会话里提示一条，<span className="text-fg">只提示不拦截</span>
+            —— 不拒执行、不改任务流程。留空 = 不限。
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-2">
+            <label className="flex items-center gap-1.5 text-[11px] text-dim">
+              日上限
+              <span className="flex items-center rounded-md border border-line bg-panel-2 px-1.5 focus-within:border-accent/60">
+                <span className="text-dim">$</span>
+                <input
+                  inputMode="decimal"
+                  value={dailyDraft}
+                  onChange={(e) => setDailyDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing) void saveBudgets();
+                  }}
+                  className="h-7 w-20 bg-transparent font-mono text-[11px] text-fg outline-none placeholder:text-dim"
+                  placeholder="不限"
+                />
+              </span>
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-dim">
+              会话上限
+              <span className="flex items-center rounded-md border border-line bg-panel-2 px-1.5 focus-within:border-accent/60">
+                <span className="text-dim">$</span>
+                <input
+                  inputMode="decimal"
+                  value={sessionDraft}
+                  onChange={(e) => setSessionDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing) void saveBudgets();
+                  }}
+                  className="h-7 w-20 bg-transparent font-mono text-[11px] text-fg outline-none placeholder:text-dim"
+                  placeholder="不限"
+                />
+              </span>
+            </label>
+            <button
+              onClick={() => void saveBudgets()}
+              disabled={saving}
+              className="btn btn-sm shrink-0"
+            >
+              保存
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 border-t border-line-soft pt-3">

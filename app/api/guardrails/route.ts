@@ -8,12 +8,14 @@ import {
   removeVerifyCommand,
   addVerifyCommand,
   writeApprovalMode,
+  writeBudgets,
   writePlanMode,
   writePlanModeDefault,
   writeMcpWriteApproval,
   writeProjectPolicy,
   writeVerificationGuard,
 } from "@/lib/guardrail-settings";
+import { parseBudgetsInput } from "@/lib/budget-guard";
 import { APPROVAL_MODES, parsePolicyPatch } from "@/lib/guardrail-policy";
 import type { ApprovalMode } from "@/lib/tool-risk";
 
@@ -41,6 +43,8 @@ export async function GET(req: Request) {
         policyByProject: settings.policyByProject,
         allowByProject: settings.allowByProject,
         verifyCommandsByProject: settings.verifyCommandsByProject,
+        /** 花费上限（只提示不拦截）：缺省字段即「不限」 */
+        budgets: settings.budgets,
         /** 带了 cwd 就直接给该项目的声明列表（服务端规范化 key，界面不用猜写法） */
         ...(cwd ? { verifyCommands: readVerifyCommands(cwd) } : {}),
         planMode: sessionId ? readPlanMode(sessionId) : false,
@@ -71,6 +75,9 @@ export async function POST(req: Request) {
       cwd?: string;
       ruleKey?: string;
       pattern?: string;
+      /** 预算上限：两个字段都可为 null（不限）；非负数字以外的值会被 400 拒掉 */
+      dailyUsd?: unknown;
+      sessionUsd?: unknown;
       /** 项目策略补丁：键缺省 = 不改，null = 回到继承；整个 policy 为 null = 清除该项目设置 */
       policy?: unknown;
     };
@@ -101,6 +108,13 @@ export async function POST(req: Request) {
       case "setMcpWriteApproval": {
         const settings = writeMcpWriteApproval(body.enabled !== false);
         return NextResponse.json({ mcpWriteApproval: settings.mcpWriteApproval });
+      }
+      case "setBudgets": {
+        // 写前校验放纯函数里（可被自测穷举）：负数 / NaN 直接 400，不静默落盘
+        const parsed = parseBudgetsInput({ dailyUsd: body.dailyUsd, sessionUsd: body.sessionUsd });
+        if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
+        const settings = writeBudgets(parsed.budgets);
+        return NextResponse.json({ budgets: settings.budgets });
       }
       case "setProjectPolicy": {
         if (!body.cwd) {
