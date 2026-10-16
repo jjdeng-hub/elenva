@@ -610,6 +610,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
   const [verificationGuard, setVerificationGuard] = useState(true);
   /** 预算上限草稿（字符串：输入中允许暂时非法，提交时才校验） */
   const [dailyDraft, setDailyDraft] = useState("");
+  const [weeklyDraft, setWeeklyDraft] = useState("");
   const [sessionDraft, setSessionDraft] = useState("");
   const [verifyCwd, setVerifyCwd] = useState<string>(defaultCwd ?? projects?.[0]?.path ?? "");
   const [declared, setDeclared] = useState<string[]>([]);
@@ -643,7 +644,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
         planModeDefault?: boolean;
         verificationGuard?: boolean;
         mcpWriteApproval?: boolean;
-        budgets?: { dailyUsd?: number; sessionUsd?: number };
+        budgets?: { dailyUsd?: number; weeklyUsd?: number; sessionUsd?: number };
       }) => {
         setMode(d.approvalMode ?? "risky");
         setFallback(d.approvalFallback === "queue" ? "queue" : "reject");
@@ -653,6 +654,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
         setPlanDefault(d.planModeDefault === true);
         setVerificationGuard(d.verificationGuard !== false);
         setDailyDraft(d.budgets?.dailyUsd !== undefined ? String(d.budgets.dailyUsd) : "");
+        setWeeklyDraft(d.budgets?.weeklyUsd !== undefined ? String(d.budgets.weeklyUsd) : "");
         setSessionDraft(d.budgets?.sessionUsd !== undefined ? String(d.budgets.sessionUsd) : "");
       })
       .catch(() => setMode("risky"));
@@ -709,14 +711,16 @@ function GuardrailsSection({ projects, defaultCwd }: {
       return n;
     };
     const daily = parseLimit(dailyDraft);
+    const weekly = parseLimit(weeklyDraft);
     const session = parseLimit(sessionDraft);
-    if (daily === "invalid" || session === "invalid") {
+    if (daily === "invalid" || weekly === "invalid" || session === "invalid") {
       toast("上限必须是非负数字（留空 = 不限）");
       return;
     }
-    const data = await post({ action: "setBudgets", dailyUsd: daily, sessionUsd: session });
-    const saved = (data.budgets as { dailyUsd?: number; sessionUsd?: number } | undefined) ?? {};
+    const data = await post({ action: "setBudgets", dailyUsd: daily, weeklyUsd: weekly, sessionUsd: session });
+    const saved = (data.budgets as { dailyUsd?: number; weeklyUsd?: number; sessionUsd?: number } | undefined) ?? {};
     setDailyDraft(saved.dailyUsd !== undefined ? String(saved.dailyUsd) : "");
+    setWeeklyDraft(saved.weeklyUsd !== undefined ? String(saved.weeklyUsd) : "");
     setSessionDraft(saved.sessionUsd !== undefined ? String(saved.sessionUsd) : "");
     toast("预算上限已保存");
   };
@@ -957,6 +961,22 @@ function GuardrailsSection({ projects, defaultCwd }: {
                   inputMode="decimal"
                   value={dailyDraft}
                   onChange={(e) => setDailyDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing) void saveBudgets();
+                  }}
+                  className="h-7 w-20 bg-transparent font-mono text-[11px] text-fg outline-none placeholder:text-dim"
+                  placeholder="不限"
+                />
+              </span>
+            </label>
+            <label className="flex items-center gap-1.5 text-[11px] text-dim">
+              周上限
+              <span className="flex items-center rounded-md border border-line bg-panel-2 px-1.5 focus-within:border-accent/60">
+                <span className="text-dim">$</span>
+                <input
+                  inputMode="decimal"
+                  value={weeklyDraft}
+                  onChange={(e) => setWeeklyDraft(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.nativeEvent.isComposing) void saveBudgets();
                   }}

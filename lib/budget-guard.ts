@@ -8,12 +8,17 @@
 export interface BudgetSettings {
   /** 每日花费上限（USD）。缺省 / null = 不限。非负有限数才算有效值。 */
   dailyUsd?: number;
+  /** 滚动 7 天花费上限（USD，模块 6 第 2 轮增）。缺省 / null = 不限。
+   *  向后兼容：旧数据没有这个键，解析后就是不限，无需迁移。 */
+  weeklyUsd?: number;
   /** 单会话花费上限（USD）。缺省 / null = 不限。非负有限数才算有效值。 */
   sessionUsd?: number;
 }
 
+export type BudgetScope = "daily" | "weekly" | "session";
+
 export interface BudgetExceeded {
-  scope: "daily" | "session";
+  scope: BudgetScope;
   spent: number;
   limit: number;
 }
@@ -39,6 +44,7 @@ export function parseBudgets(value: unknown): BudgetSettings {
   const raw = value as Record<string, unknown>;
   const out: BudgetSettings = {};
   if (isValidLimit(raw.dailyUsd)) out.dailyUsd = raw.dailyUsd;
+  if (isValidLimit(raw.weeklyUsd)) out.weeklyUsd = raw.weeklyUsd;
   if (isValidLimit(raw.sessionUsd)) out.sessionUsd = raw.sessionUsd;
   return out;
 }
@@ -57,11 +63,16 @@ export function parseBudgetsInput(
   }
   const raw = value as Record<string, unknown>;
   const out: BudgetSettings = {};
-  for (const key of ["dailyUsd", "sessionUsd"] as const) {
+  const LIMIT_LABELS: Record<keyof BudgetSettings, string> = {
+    dailyUsd: "日上限必须是非负数字",
+    weeklyUsd: "周上限必须是非负数字",
+    sessionUsd: "会话上限必须是非负数字",
+  };
+  for (const key of ["dailyUsd", "weeklyUsd", "sessionUsd"] as const) {
     const v = raw[key];
     if (v === null || v === undefined) continue;
     if (!isValidLimit(v)) {
-      return { ok: false, error: key === "dailyUsd" ? "日上限必须是非负数字" : "会话上限必须是非负数字" };
+      return { ok: false, error: LIMIT_LABELS[key] };
     }
     out[key] = v;
   }
@@ -76,6 +87,13 @@ function usd(value: number): string {
   return `$${value.toFixed(2)}`;
 }
 
+/** 各 scope 的口语称呼（与 formatBudgetNote / formatApproachNote 共用，保证说法一致） */
+const SCOPE_LABELS: Record<BudgetScope, string> = {
+  daily: "今日",
+  weekly: "近 7 天",
+  session: "本会话",
+};
+
 /**
  * 把超限项拼成人话（一遍说清）；空数组 / null 返回 null。
  * 顺序即传入顺序（checkBudgets 固定 daily → session）。
@@ -83,9 +101,8 @@ function usd(value: number): string {
 export function formatBudgetNote(exceeded: readonly BudgetExceeded[] | null | undefined): string | null {
   if (!exceeded || exceeded.length === 0) return null;
   return exceeded
-    .map((item) => item.scope === "daily"
-      ? `今日已花费 ${usd(item.spent)}，超过设定上限 ${usd(item.limit)}`
-      : `本会话已花费 ${usd(item.spent)}，超过设定上限 ${usd(item.limit)}`)
+    .map((item) =>
+      `${SCOPE_LABELS[item.scope]}已花费 ${usd(item.spent)}，超过设定上限 ${usd(item.limit)}`)
     .join("；");
 }
 
@@ -97,16 +114,23 @@ export function formatBudgetNote(exceeded: readonly BudgetExceeded[] | null | un
  */
 export function checkBudgets(input: {
   dailySpent: number;
+  /** 滚动 7 天花费（含今日）。缺省按 0（不命中）；调用方从聚合报告取近 7 天。 */
+  weeklySpent?: number;
   sessionSpent: number;
   budgets: BudgetSettings | null | undefined;
 }): BudgetCheckResult {
   const budgets = parseBudgets(input.budgets);
   const dailySpent = normalizeSpent(input.dailySpent);
+  const weeklySpent = normalizeSpent(input.weeklySpent);
   const sessionSpent = normalizeSpent(input.sessionSpent);
   const exceeded: BudgetExceeded[] = [];
 
+  // 固定顺序 daily → weekly → session（自测钉死）；周包含今日，所以周排日后面
   if (budgets.dailyUsd !== undefined && dailySpent > budgets.dailyUsd) {
     exceeded.push({ scope: "daily", spent: dailySpent, limit: budgets.dailyUsd });
+  }
+  if (budgets.weeklyUsd !== undefined && weeklySpent > budgets.weeklyUsd) {
+    exceeded.push({ scope: "weekly", spent: weeklySpent, limit: budgets.weeklyUsd });
   }
   if (budgets.sessionUsd !== undefined && sessionSpent > budgets.sessionUsd) {
     exceeded.push({ scope: "session", spent: sessionSpent, limit: budgets.sessionUsd });
@@ -131,7 +155,7 @@ export function budgetBucket(spent: number, limit: number): "over" | "far" {
 export const BUDGET_NEAR_RATIO = 0.8;
 
 export interface BudgetApproach {
-  scope: "daily" | "session";
+  scope: BudgetScope;
   spent: number;
   limit: number;
   /** 使用比例（spent / limit），用于「已达 …%」文案 */
@@ -140,12 +164,13 @@ export interface BudgetApproach {
 
 export function approachingBudgets(input: {
   dailySpent: number;
+  weeklySpent?: number;
   sessionSpent: number;
   budgets: BudgetSettings | null | undefined;
 }): BudgetApproach[] {
   const budgets = parseBudgets(input.budgets);
   const out: BudgetApproach[] = [];
-  const consider = (scope: "daily" | "session", spentRaw: number, limit: number | undefined) => {
+  const consider = (scope: BudgetScope, spentRaw: number | undefined, limit: number | undefined) => {
     // 上限 0 没有「接近」语义（任何花费都是超），跳过
     if (limit === undefined || limit <= 0) return;
     const spent = normalizeSpent(spentRaw);
@@ -155,6 +180,7 @@ export function approachingBudgets(input: {
     }
   };
   consider("daily", input.dailySpent, budgets.dailyUsd);
+  consider("weekly", input.weeklySpent, budgets.weeklyUsd);
   consider("session", input.sessionSpent, budgets.sessionUsd);
   return out;
 }
@@ -163,7 +189,7 @@ export function approachingBudgets(input: {
 export function formatApproachNote(items: readonly BudgetApproach[] | null | undefined): string | null {
   if (!items || items.length === 0) return null;
   return items
-    .map((item) => `${item.scope === "daily" ? "今日" : "本会话"}已花费 ${usd(item.spent)}，`
+    .map((item) => `${SCOPE_LABELS[item.scope]}已花费 ${usd(item.spent)}，`
       + `已达设定上限 ${usd(item.limit)} 的 ${Math.round(item.ratio * 100)}%`)
     .join("；");
 }

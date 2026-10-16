@@ -64,6 +64,12 @@ function CompositionBar({ report }: { report: UsageReport }) {
   );
 }
 
+/** 项目展示名：取末段（与记忆页/Git 项目的命名口径一致），未知项目给「未知」 */
+function projectLabel(cwd: string): string {
+  if (!cwd || cwd === "unknown") return "未知";
+  return cwd.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || cwd;
+}
+
 /**
  * 用量分析（右列紧凑版）。
  *
@@ -72,8 +78,12 @@ function CompositionBar({ report }: { report: UsageReport }) {
  *
  * 内容做了去重 —— 右列两卡各司其职，别互相重复：
  * · 今日概览管 **今日 + 近 14 日成本曲线**（那里已有迷你柱状图）
- * · 这里管 **累计构成 + 谁在烧钱**（Top 会话）
+ * · 这里管 **累计构成 + 谁在烧钱**（按项目 / Top 会话）
  * 所以成本趋势柱状图不再出现在本卡；模型分布也不在这里（下方有「模型用量排行」专卡）。
+ *
+ * 2026-10-16（模块 6 · 第 2 轮）增「按项目」：花费按会话 cwd 归因（聚合层在
+ * `lib/usage-aggregate.ts` projects），Top 3 + 其余合并；点行跳到该项目最近
+ * 一个会话 —— 会话列表里同项目的会话本来就分在同一组，等于抵达相应分组。
  */
 export function UsageAnalysis({
   report,
@@ -100,6 +110,27 @@ export function UsageAnalysis({
     [report.sessions],
   );
 
+  /** 按项目归因：Top 3 + 其余合并；projectTotal==0 时不出此节（空态不占高度） */
+  const projectRows = useMemo(() => {
+    const entries = Object.entries(report.projects)
+      .map(([cwd, u]) => ({ cwd, cost: u.cost, tokens: u.tokens.total }))
+      .filter((p) => p.cost > 0)
+      .sort((a, b) => b.cost - a.cost);
+    if (entries.length === 0) return null;
+    const top = entries.slice(0, 3);
+    const restCost = entries.slice(3).reduce((sum, p) => sum + p.cost, 0);
+    const restTokens = entries.slice(3).reduce((sum, p) => sum + p.tokens, 0);
+    const total = entries.reduce((sum, p) => sum + p.cost, 0);
+    return { top, rest: restCost > 0 ? { cost: restCost, tokens: restTokens } : null, total };
+  }, [report.projects]);
+
+  /** 点项目行 → 该项目最近的一个会话（侧栏里同项目会话在同一分组） */
+  const openProjectSession = (cwd: string) => {
+    const matches = sessions.filter((s) => s.cwd === cwd || (s.repoRoot && s.repoRoot === cwd));
+    const latest = matches.sort((a, b) => b.modified.localeCompare(a.modified))[0];
+    if (latest) onOpenSession(latest);
+  };
+
   return (
     <div className={cn("card flex flex-col px-4 py-3.5", className)}>
       <div className="flex shrink-0 items-center justify-between">
@@ -115,6 +146,43 @@ export function UsageAnalysis({
           <CompositionBar report={report} />
         </div>
       </div>
+
+      {projectRows && (
+        <div className="mt-3 shrink-0">
+          <div className="text-[12px] font-medium text-dim">按项目（累计）</div>
+          <div className="mt-1.5 space-y-0.5">
+            {projectRows.top.map((p) => (
+              <button
+                key={p.cwd}
+                onClick={() => openProjectSession(p.cwd)}
+                title={p.cwd}
+                className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-left t-fast hover:bg-hover"
+              >
+                <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{projectLabel(p.cwd)}</span>
+                <span className="w-10 shrink-0 text-right text-[12px] tabular-nums text-dim">
+                  {Math.round((p.cost / projectRows.total) * 100)}%
+                </span>
+                <span className="shrink-0 text-[12px] tabular-nums text-muted">
+                  {formatTokens(p.tokens)}
+                  <span className="ml-1 text-dim">{formatCost(p.cost)}</span>
+                </span>
+              </button>
+            ))}
+            {projectRows.rest && (
+              <div className="flex items-center gap-2 px-1.5 py-1">
+                <span className="min-w-0 flex-1 truncate text-[12px] text-dim">其余项目</span>
+                <span className="w-10 shrink-0 text-right text-[12px] tabular-nums text-dim">
+                  {Math.round((projectRows.rest.cost / projectRows.total) * 100)}%
+                </span>
+                <span className="shrink-0 text-[12px] tabular-nums text-muted">
+                  {formatTokens(projectRows.rest.tokens)}
+                  <span className="ml-1 text-dim">{formatCost(projectRows.rest.cost)}</span>
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       <div className="mt-3 flex min-h-0 flex-1 flex-col">
         <div className="shrink-0 text-[12px] font-medium text-dim">消耗 Top 会话</div>

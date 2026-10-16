@@ -75,8 +75,9 @@ export async function POST(req: Request) {
       cwd?: string;
       ruleKey?: string;
       pattern?: string;
-      /** 预算上限：两个字段都可为 null（不限）；非负数字以外的值会被 400 拒掉 */
+      /** 预算上限：三个字段都可为 null（不限）；非负数字以外的值会被 400 拒掉 */
       dailyUsd?: unknown;
+      weeklyUsd?: unknown;
       sessionUsd?: unknown;
       /** 项目策略补丁：键缺省 = 不改，null = 回到继承；整个 policy 为 null = 清除该项目设置 */
       policy?: unknown;
@@ -111,7 +112,7 @@ export async function POST(req: Request) {
       }
       case "setBudgets": {
         // 写前校验放纯函数里（可被自测穷举）：负数 / NaN 直接 400，不静默落盘
-        const parsed = parseBudgetsInput({ dailyUsd: body.dailyUsd, sessionUsd: body.sessionUsd });
+        const parsed = parseBudgetsInput({ dailyUsd: body.dailyUsd, weeklyUsd: body.weeklyUsd, sessionUsd: body.sessionUsd });
         if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
         const settings = writeBudgets(parsed.budgets);
         return NextResponse.json({ budgets: settings.budgets });

@@ -42,9 +42,16 @@ export interface UsageReport {
   sessions: Record<string, { tokens: UsageTotals; cost: number; model?: string }>;
   /** All-time usage keyed by "provider/modelId" (assistant + trailing toolResult messages). */
   models: Record<string, { tokens: UsageTotals; cost: number }>;
+  /**
+   * All-time usage keyed by project (会话 cwd，模块 6 第 2 轮)。会话头里没有 cwd 的
+   * 旧文件归入 "unknown"。不在这里做 repoRoot 归并（那要跑 git，lib/ 禁 spawn）；
+   * worktree 等细分由 UI 层拿会话列表再合。
+   */
+  projects: Record<string, { tokens: UsageTotals; cost: number; sessions: number }>;
 }
 
-const AGG_VERSION = 2;
+// v3：FileAggregate 增 cwd（会话头），旧缓存槽没有这个字段，必须整体重扫
+const AGG_VERSION = 3;
 
 interface FileAggregate {
   id: string;
@@ -53,6 +60,8 @@ interface FileAggregate {
   models: Map<string, { tokens: UsageTotals; cost: number }>;
   /** Model of the last assistant message ("provider/modelId"). */
   lastModel?: string;
+  /** cwd of the session header ({type:"session", id, cwd}); missing on old/broken files. */
+  cwd?: string;
 }
 
 interface CacheSlot {
@@ -110,6 +119,7 @@ function parseFile(filePath: string): FileAggregate {
   let id = "";
   let lastModel: string | undefined;
   let currentModel: string | undefined;
+  let cwd: string | undefined;
 
   const fd = openSync(filePath, "r");
   try {
@@ -137,8 +147,9 @@ function parseFile(filePath: string): FileAggregate {
         } catch {
           continue;
         }
-        if (entry.type === "session" && typeof entry.id === "string") {
-          id = entry.id;
+        if (entry.type === "session") {
+          if (typeof entry.id === "string") id = entry.id;
+          if (typeof entry.cwd === "string" && entry.cwd) cwd = entry.cwd;
           continue;
         }
         let usage: Record<string, unknown> | undefined;
@@ -182,7 +193,10 @@ function parseFile(filePath: string): FileAggregate {
     if (trimmed) {
       try {
         const entry = JSON.parse(trimmed) as Record<string, unknown>;
-        if (entry.type === "session" && typeof entry.id === "string") id = entry.id;
+        if (entry.type === "session") {
+          if (typeof entry.id === "string") id = entry.id;
+          if (typeof entry.cwd === "string" && entry.cwd) cwd = entry.cwd;
+        }
       } catch { /* ignore */ }
     }
   } finally {
@@ -196,7 +210,7 @@ function parseFile(filePath: string): FileAggregate {
     const base = filePath.replace(/\\/g, "/").split("/").pop() ?? "";
     id = base.replace(/\.jsonl$/i, "").split("_").pop() ?? base;
   }
-  return { id, days, models, lastModel };
+  return { id, days, models, lastModel, ...(cwd ? { cwd } : {}) };
 }
 
 function sumDays(days: Iterable<{ tokens: UsageTotals; cost: number }>): { tokens: UsageTotals; cost: number } {
@@ -262,6 +276,7 @@ export async function aggregateUsage(): Promise<UsageReport> {
 
   const sessions: UsageReport["sessions"] = {};
   const models: UsageReport["models"] = {};
+  const projects: UsageReport["projects"] = {};
   for (const slot of cache.values()) {
     const totals = sumDays(slot.aggregate.days.values());
     const prev = sessions[slot.aggregate.id];
@@ -274,6 +289,17 @@ export async function aggregateUsage(): Promise<UsageReport> {
         cost: totals.cost,
         ...(slot.aggregate.lastModel ? { model: slot.aggregate.lastModel } : {}),
       };
+    }
+    // 项目维度（模块 6 第 2 轮）：会话头 cwd 即项目；无头的旧文件归 unknown，
+    // 不丢账（总账 = 各项目之和 + unknown）。
+    const projectKey = slot.aggregate.cwd ?? "unknown";
+    const project = projects[projectKey];
+    if (project) {
+      addTo(project.tokens, totals.tokens);
+      project.cost += totals.cost;
+      project.sessions += 1;
+    } else {
+      projects[projectKey] = { tokens: { ...totals.tokens }, cost: totals.cost, sessions: 1 };
     }
     for (const [model, bucket] of slot.aggregate.models) {
       const cur = models[model];
@@ -325,5 +351,6 @@ export async function aggregateUsage(): Promise<UsageReport> {
     days,
     sessions,
     models,
+    projects,
   };
 }

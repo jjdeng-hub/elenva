@@ -196,6 +196,67 @@ check("formatApproachNote：文案与「超过」区分（说「已达 …%」�
     "今日已花费 $0.85，已达设定上限 $1.00 的 85%",
     "near 文案",
   );
+  eq(
+    formatApproachNote([{ scope: "weekly", spent: 8.5, limit: 10, ratio: 0.85 }]),
+    "近 7 天已花费 $8.50，已达设定上限 $10.00 的 85%",
+    "weekly near 文案",
+  );
+});
+
+/* ---------------- 3.5 周维度（模块 6 · 第 2 轮） ---------------- */
+
+check("weeklyUsd：近 7 天超限 → exceeded 一项 + 人话 note", () => {
+  const r = checkBudgets({ dailySpent: 0.1, weeklySpent: 12.5, sessionSpent: 0.1, budgets: { weeklyUsd: 10 } });
+  deepEq(r.exceeded, [{ scope: "weekly", spent: 12.5, limit: 10 }], "exceeded");
+  eq(r.note, "近 7 天已花费 $12.50，超过设定上限 $10.00", "note");
+});
+
+check("三侧同时超 → 固定顺序 daily → weekly → session（自测钉死）", () => {
+  const r = checkBudgets({
+    dailySpent: 3.2,
+    weeklySpent: 12,
+    sessionSpent: 4.5,
+    budgets: { dailyUsd: 3, weeklyUsd: 10, sessionUsd: 4 },
+  });
+  deepEq(r.exceeded.map((i) => i.scope), ["daily", "weekly", "session"], "顺序");
+  eq(
+    r.note,
+    "今日已花费 $3.20，超过设定上限 $3.00；近 7 天已花费 $12.00，超过设定上限 $10.00；本会话已花费 $4.50，超过设定上限 $4.00",
+    "一句话说清三项",
+  );
+});
+
+check("weekly：精确等于上限不算超；weeklySpent 缺省按 0 不命中（旧调用兼容）", () => {
+  eq(checkBudgets({ dailySpent: 0, weeklySpent: 5, sessionSpent: 0, budgets: { weeklyUsd: 5 } }).exceeded.length, 0, "等于不算超");
+  // 旧调用不传 weeklySpent（模块 5 第 4 轮的调用形状）→ 按 0，不命中
+  eq(checkBudgets({ dailySpent: 0, sessionSpent: 0, budgets: { weeklyUsd: 5 } }).exceeded.length, 0, "缺省=0");
+});
+
+check("weekly：非法上限视为不限（负数 / NaN / 字符串 / 布尔）", () => {
+  for (const bad of [-1, NaN, Infinity, "1", true, {}]) {
+    const r = checkBudgets({ dailySpent: 0, weeklySpent: 100, sessionSpent: 0, budgets: { weeklyUsd: bad } });
+    eq(r.exceeded.length, 0, `非法 weeklyUsd ${String(bad)} 应视为不限`);
+  }
+});
+
+check("weekly near：达 80% 未超才命中；已超的 weekly 不报 near", () => {
+  const near = approachingBudgets({ dailySpent: 0, weeklySpent: 8, sessionSpent: 0, budgets: { weeklyUsd: 10 } });
+  deepEq(near.map((n) => [n.scope, Math.round(n.ratio * 100)]), [["weekly", 80]], "80% 边界");
+  const over = approachingBudgets({ dailySpent: 0, weeklySpent: 11, sessionSpent: 0, budgets: { weeklyUsd: 10 } });
+  eq(over.length, 0, "已超不报 near（交给 checkBudgets，防同轮双弹）");
+});
+
+check("parseBudgets / parseBudgetsInput：weeklyUsd 读写同规则", () => {
+  deepEq(parseBudgets({ weeklyUsd: 10, sessionUsd: 2 }), { weeklyUsd: 10, sessionUsd: 2 }, "合法全收");
+  deepEq(parseBudgets({ weeklyUsd: -2 }), {}, "负数丢弃");
+  deepEq(parseBudgets({ weeklyUsd: 0 }), { weeklyUsd: 0 }, "0 保留");
+  const ok = parseBudgetsInput({ weeklyUsd: 10 });
+  eq(ok.ok, true, "合法应过");
+  deepEq(ok.budgets, { weeklyUsd: 10 }, "只留合法键");
+  deepEq(parseBudgetsInput({ weeklyUsd: null }).budgets, {}, "null = 不限");
+  const bad = parseBudgetsInput({ weeklyUsd: -1 });
+  eq(bad.ok, false, "负数应拒");
+  eq(bad.error, "周上限必须是非负数字", "错误文案");
 });
 
 /* ---------------- 4. 磁盘层 + 路由层（真实写盘 / 重读） ---------------- */
@@ -278,6 +339,26 @@ await checkAsync("路由集成：非法上限 400 且不落盘（写前校验不
   eq(unknown.status, 400, "未知 action 400");
 });
 
+await checkAsync("路由集成：weeklyUsd 落盘回读；旧数据缺省 = 不限（向后兼容）", async () => {
+  const path = settingsPath();
+  rmSync(path, { force: true });
+
+  const save = await postGuardrails({ action: "setBudgets", dailyUsd: 1, weeklyUsd: 10, sessionUsd: null });
+  eq(save.status, 200, "保存状态码");
+  deepEq(save.data.budgets, { dailyUsd: 1, weeklyUsd: 10 }, "响应含 weeklyUsd");
+  deepEq(readGuardrailSettings(path).budgets, { dailyUsd: 1, weeklyUsd: 10 }, "重读磁盘一致");
+
+  // 只写日上限（模拟旧数据）→ 读回来 weeklyUsd 是 undefined = 不限，无需迁移
+  writeBudgets({ dailyUsd: 2 }, path);
+  const reread = readGuardrailSettings(path).budgets;
+  eq(reread.weeklyUsd, undefined, "旧数据缺省兼容");
+
+  // 非法周上限 400 且不落盘
+  const badSave = await postGuardrails({ action: "setBudgets", weeklyUsd: "abc" });
+  eq(badSave.status, 400, "非法 weeklyUsd 应 400");
+  deepEq(readGuardrailSettings(path).budgets, { dailyUsd: 2 }, "400 不落盘");
+});
+
 /* ---------------- 5. 调用点静态核对（防分层绿、链路断） ---------------- */
 
 const readSource = (rel) => readFileSync(new URL(`../${rel}`, import.meta.url), "utf8");
@@ -307,13 +388,16 @@ check("路由：GET 带 budgets、POST 有 setBudgets 且写前用纯函数校�
 check("agent-runtime：每轮结束检查 + 60s TTL 缓存 + 去重键 + notice 通道 + 80% 分级", () => {
   const source = readSource("lib/agent-runtime.ts");
   assert(/TODAY_COST_CACHE_TTL_MS = 60_000/.test(source), "应有 60s TTL 常量");
-  assert(/getTodayCostCached\(/.test(source), "应有今日花费缓存层");
+  assert(/getBudgetSpendCached\(/.test(source), "应有今日+周花费缓存层（同次聚合，不新增扫描）");
+  assert(/days\.slice\(-7\)/.test(source), "周花费应取滚动 7 天窗口（days 末项恒为今日）");
   assert(/aggregateUsage\(\)/.test(source), "缓存层应基于 aggregateUsage");
   assert(/async function runBudgetCheck\(/.test(source), "应有每轮预算检查");
+  assert(/weeklySpent/.test(source), "检查入参应含周花费");
+  assert(/budgets\.weeklyUsd === undefined/.test(source), "早退应覆盖 weekly（三限全缺省才跳过）");
   assert(/notifiedBudgetKeys/.test(source), "应有每会话去重键");
   assert(/checkBudgets\(spent\)/.test(source), "应调用 checkBudgets");
   assert(/approachingBudgets\(spent\)/.test(source), "应调用 approachingBudgets（80% 分级）");
-  assert(/\$\{item\.scope\}:near/.test(source), "near 档应计去重键");
+  assert(/\$\{item\.scope\}:near/.test(source), "near 档应计去重键（weekly 自动带上 scope 维度）");
   assert(/session\.notify\(parts\.join\("；"\), "warning"\)/.test(source), "应走 notice 通道推 warning");
   assert(/onAgentRunComplete: \(completedSessionId\)/.test(source), "应挂在每轮结束回调上");
   assert(/void runBudgetCheck\(finished, notifiedBudgetKeys\)/.test(source), "回调应触发检查");
@@ -329,12 +413,13 @@ check("观测栏：运行统计在设了会话上限时附「 / 上限 $Y」，�
   assert(/nearSessionLimit && "font-semibold text-warn"/.test(source), "达 80% 应用 warn 色");
 });
 
-check("设置页：有「花费上限」小节，两个输入 + setBudgets 写入，且写明只提示不拦截", () => {
+check("设置页：有「花费上限」小节，日 / 周 / 会话三个输入 + setBudgets 写入，且写明只提示不拦截", () => {
   const source = readSource("components/SettingsPage.tsx");
   assert(/花费上限/.test(source), "应有「花费上限」小节");
   assert(/只提示不拦截/.test(source), "应写明只提示不拦截");
   assert(/action: "setBudgets"/.test(source), "应调用 setBudgets");
-  assert(/dailyDraft/.test(source) && /sessionDraft/.test(source), "应有日 / 会话两个输入");
+  assert(/dailyDraft/.test(source) && /weeklyDraft/.test(source) && /sessionDraft/.test(source), "应有日 / 周 / 会话三个输入");
+  assert(/weeklyUsd: weekly/.test(source), "周上限应随 setBudgets 提交");
 });
 
 check("ChatView：把 budgets 透传给观测栏", () => {
