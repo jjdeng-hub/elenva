@@ -48,6 +48,7 @@ tools/*.mjs
 !tools/deny-memory-selftest.mjs
 !tools/builtin-catalog-selftest.mjs
 !tools/budget-guard-selftest.mjs
+!tools/subagent-templates-selftest.mjs
 tools/*.log
 tools/rev/
 # 临时截图：可能拍到记忆全文等私有内容
