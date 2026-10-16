@@ -30,6 +30,7 @@ import { useTurnCheckpoints } from "@/hooks/useTurnCheckpoints";
 import { latestTodoState } from "@/lib/todo-view";
 import { resolveLocalFilePath } from "@/lib/file-links";
 import type { SessionInfo, ToolResultMessage } from "@/lib/types";
+import type { ToolEntry } from "@/lib/tool-presets";
 import type { CompactionRecord } from "@/lib/compaction-records";
 import { basename, formatCost, formatTokens } from "@/lib/format";
 import { toast, dialogConfirm, dialogPrompt } from "@/components/ui/dialog";
@@ -135,6 +136,8 @@ export function ChatView({
   onSelectSide?: (sessionId: string | null) => void;
 }) {
   const chatInputRef = useRef<ChatInputHandle | null>(null);
+  /** 当前会话可用工具全集（get_tools 回读，供自定义工具选择 UI 分组展示） */
+  const [systemTools, setSystemTools] = useState<ToolEntry[] | null>(null);
   const {
     loading, error, messages, streamState, agentRunning, agentPhase,
     data,
@@ -147,7 +150,8 @@ export function ChatView({
     toolPreset, steeringMode, followUpMode,
     handleSend, handleAbort, scrollToBottom, scrollContainerRef,
     handleModelChange, handleThinkingLevelChange, handleToolPresetChange,
-    loadModels,
+    handleToolSelectionChange,
+    loadModels, loadSystemInfo,
     handleFork, handleCompact, handleBuiltinSlashCommand,
     handleSteer, handleFollowUp, handleRecallQueue,
     sessionStats,
@@ -163,10 +167,17 @@ export function ChatView({
     // 必须与下方 draftKey 的新会话值一致（rekeyDraft 按它迁移到正式会话 id）。
     newSessionDraftKey: "new",
     chatInputRef,
+    onSystemToolsChange: setSystemTools,
     onAgentEnd,
     onSessionCreated,
     onSessionForked,
   });
+
+  // 自定义工具选择的可用清单：切会话时先清空，避免上一条会话的工具串台。
+  const sessionToolsKey = session?.id ?? (newSessionCwd ? "__new__" : null);
+  useEffect(() => {
+    setSystemTools(null);
+  }, [sessionToolsKey]);
 
 
 
@@ -988,6 +999,9 @@ export function ChatView({
       polishSessionId={planSessionId}
       toolPreset={toolPreset}
       onToolPresetChange={(p) => void handleToolPresetChange(p)}
+      availableTools={systemTools}
+      onToolSelectionChange={handleToolSelectionChange}
+      onRequestTools={() => void loadSystemInfo()}
       planMode={planMode}
       onTogglePlanMode={(enabled) => void togglePlanMode(enabled)}
       contextUsage={contextUsage}

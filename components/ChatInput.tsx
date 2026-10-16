@@ -11,6 +11,7 @@ import {
   Layers,
   ListChecks,
   Loader2,
+  Lock,
   Paperclip,
   RotateCcw,
   Slash,
@@ -36,6 +37,15 @@ import type { AttachedImage, ChatInputHandle, ThinkingLevelOption } from "@/hook
 import { MAX_ATTACHED_IMAGE_BYTES, MAX_ATTACHED_IMAGES } from "@/lib/image-attachments";
 import { imageData } from "@/lib/image-block";
 import type { ToolPreset } from "@/lib/tool-presets";
+import {
+  builtinNamesFromTools,
+  groupAvailableTools,
+  matchToolPreset,
+  sameBuiltinSelection,
+  toggleBuiltinSelection,
+  type GroupedTool,
+  type ToolDescriptor,
+} from "@/lib/tool-selection-ui";
 import type { ReactNode } from "react";
 
 type SlashCommandInfo = { name: string; description?: string; source: string };
@@ -129,6 +139,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     modelPicker,
     toolPreset,
     onToolPresetChange,
+    availableTools,
+    onToolSelectionChange,
+    onRequestTools,
     planMode,
     onTogglePlanMode,
     contextUsage,
@@ -843,7 +856,14 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   }}
                 />
                 {onToolPresetChange && (
-                  <ToolPresetPicker value={toolPreset ?? "default"} disabled={running} onChange={onToolPresetChange} />
+                  <ToolPresetPicker
+                    value={toolPreset ?? "default"}
+                    disabled={running}
+                    tools={availableTools}
+                    onSelectPreset={onToolPresetChange}
+                    onApplySelection={onToolSelectionChange}
+                    onRequestTools={onRequestTools}
+                  />
                 )}
                 {onTogglePlanMode && (
                   <button
@@ -990,6 +1010,12 @@ interface ChatInputProps {
   toolPreset?: ToolPreset;
   /** 切换工具预设（运行中会被后端拒绝，UI 此时禁用） */
   onToolPresetChange?: (preset: ToolPreset) => void;
+  /** 当前会话可用工具全集（get_tools 回读，自定义选择面板分组展示） */
+  availableTools?: readonly ToolDescriptor[] | null;
+  /** 应用一份确切的内置工具组合（返回是否成功，失败时光滑回滚） */
+  onToolSelectionChange?: (toolNames: string[]) => Promise<boolean>;
+  /** 打开选择面板时懒加载工具清单（新会话尚未创建也能拿到） */
+  onRequestTools?: () => void;
   /** 计划模式：只做只读勘察，提交计划经用户批准后才允许改动 */
   planMode?: boolean;
   onTogglePlanMode?: (enabled: boolean) => void;
@@ -1036,53 +1062,186 @@ const TOOL_PRESET_OPTIONS: { value: ToolPreset; label: string; desc: string }[] 
 function ToolPresetPicker({
   value,
   disabled,
-  onChange,
+  tools,
+  onSelectPreset,
+  onApplySelection,
+  onRequestTools,
 }: {
   value: ToolPreset;
   disabled?: boolean;
-  onChange: (p: ToolPreset) => void;
+  tools?: readonly ToolDescriptor[] | null;
+  onSelectPreset: (p: ToolPreset) => void;
+  onApplySelection?: (toolNames: string[]) => Promise<boolean>;
+  onRequestTools?: () => void;
 }) {
-  // default 是自定义组合的兜底归类，能力上视同 Agent
-  const effective: ToolPreset = value === "default" ? "full" : value;
+  const hasTools = Boolean(tools && tools.length > 0);
+  const activeNames = useMemo(
+    () => builtinNamesFromTools(tools ?? [], { activeOnly: true }),
+    [tools],
+  );
+  // 当前集合恰好是三档预设之一 → 预设；否则是「自定义」（default 旧档视同 Agent 显示）。
+  const matched = useMemo(
+    () => (hasTools ? matchToolPreset(activeNames) : null),
+    [hasTools, activeNames],
+  );
+  const isCustom = hasTools && matched === null;
+  const effective: ToolPreset = matched
+    ? (matched === "default" ? "full" : matched)
+    : (value === "default" ? "full" : value);
   const current = TOOL_PRESET_OPTIONS.find((o) => o.value === effective) ?? TOOL_PRESET_OPTIONS[2];
+  const grouped = useMemo(() => groupAvailableTools(tools ?? []), [tools]);
+
+  const [pending, setPending] = useState<string[]>(activeNames);
+  const [applying, setApplying] = useState(false);
+  // 服务端回读刷新后（切会话 / 应用成功）把待应用集合对齐到真实状态；失败时也靠它回滚。
+  useEffect(() => {
+    if (applying) return;
+    setPending(activeNames);
+  }, [activeNames, applying]);
+
+  const dirty = !sameBuiltinSelection(pending, activeNames);
+  const canApply = Boolean(onApplySelection) && dirty && !applying && !disabled;
+
+  const toggle = (name: string, enabled: boolean) => {
+    setPending((prev) => toggleBuiltinSelection(prev, name, enabled));
+  };
+
+  const apply = async (close: () => void) => {
+    if (!onApplySelection || !canApply) return;
+    setApplying(true);
+    const ok = await onApplySelection(pending);
+    setApplying(false);
+    if (ok) close();
+    else setPending(activeNames);
+  };
+
+  const renderGroup = (title: string, hint: string | null, items: GroupedTool[]) => {
+    if (items.length === 0) return null;
+    return (
+      <div className="mt-0.5">
+        <div className="flex items-center gap-1.5 px-3 py-0.5 text-[10px] text-dim">
+          <span>{title}</span>
+          {hint && <span className="text-dim">· {hint}</span>}
+        </div>
+        {items.map((t) => {
+          const selectable = t.lock === null;
+          const checked = selectable ? pending.includes(t.name) : t.active === true;
+          const reason = t.lock === "follows-toolset"
+            ? "扩展工具随任一工具启用，暂不可单独关闭"
+            : t.lock === "kernel-exposure"
+              ? "由内核按需暴露，暂不支持单独开关"
+              : (t.description ?? t.name);
+          return (
+            <button
+              key={t.name}
+              type="button"
+              disabled={!selectable || disabled}
+              title={reason}
+              onClick={() => selectable && toggle(t.name, !checked)}
+              className={cn(
+                "flex w-full items-center gap-2 px-3 py-1 text-left t-fast",
+                selectable && !disabled ? "cursor-pointer hover:bg-hover" : "cursor-default",
+                !selectable && "opacity-60",
+              )}
+            >
+              <span
+                className={cn(
+                  "flex size-3.5 shrink-0 items-center justify-center rounded-sm border t-fast",
+                  checked ? "border-accent bg-accent text-accent-fg" : "border-line bg-panel",
+                )}
+              >
+                {checked && <Check size={10} />}
+              </span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[11px] text-fg">{t.name}</span>
+              {t.lock && <Lock size={10} className="shrink-0 text-dim" />}
+            </button>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <Popover
       containerClassName="shrink-0"
       panelClassName="bottom-full mb-1.5"
-      trigger={({ open, toggle }) => (
+      trigger={({ open, toggle: togglePanel }) => (
         <button
-          onClick={toggle}
+          onClick={() => {
+            if (!open) onRequestTools?.();
+            togglePanel();
+          }}
           disabled={disabled}
-          title={disabled ? "Agent 运行中，暂不能切换工具集" : "切换工具预设"}
+          title={disabled ? "Agent 运行中，暂不能切换工具集" : "切换工具集"}
           className="flex h-8 cursor-pointer items-center gap-1.5 rounded-lg px-2.5 text-[12px] text-muted t-fast hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-50"
         >
           <Wrench size={12} className="shrink-0 text-dim" />
-          <span>{current.label}</span>
+          <span>{isCustom ? "自定义" : current.label}</span>
           <ChevronDown size={12} className={cn("shrink-0 text-dim transition-transform", open && "rotate-180")} />
         </button>
       )}
     >
       {(close) => (
-        <div className="py-1" data-testid="tool-preset-menu">
+        <div className="max-h-[360px] w-[260px] overflow-y-auto py-1" data-testid="tool-preset-menu">
+          <div className="px-3 pb-0.5 text-[10px] text-dim">工作模式</div>
           {TOOL_PRESET_OPTIONS.map((o) => (
             <button
               key={o.value}
               onClick={() => {
                 close();
-                if (o.value !== effective) onChange(o.value);
+                if (o.value !== effective || isCustom) onSelectPreset(o.value);
               }}
               className={cn(
                 "flex w-full cursor-pointer flex-col items-start gap-0.5 px-3 py-1.5 text-left t-fast hover:bg-hover",
-                o.value === effective && "bg-active",
+                o.value === effective && !isCustom && "bg-active",
               )}
             >
               <span className="flex w-full items-center gap-1.5 text-[12px] text-fg">
                 {o.label}
-                {o.value === effective && <Check size={12} className="ml-auto text-accent" />}
+                {o.value === effective && !isCustom && <Check size={12} className="ml-auto text-accent" />}
               </span>
               <span className="font-mono text-[10px] text-dim">{o.desc}</span>
             </button>
           ))}
+
+          <div className="my-1 border-t border-line" />
+          <div className="flex items-center justify-between px-3 pb-0.5">
+            <span className="text-[10px] text-dim">自定义</span>
+            {isCustom && <span className="text-[10px] text-accent">当前</span>}
+          </div>
+          {hasTools ? (
+            <>
+              <div className="px-3 pb-1 text-[10px] leading-relaxed text-dim">
+                勾选启用的内置工具；扩展 / MCP 由内核管理。
+              </div>
+              {renderGroup("内置", null, grouped.builtin.filter((t) => t.lock === null))}
+              {renderGroup("扩展", "随任一工具启用", grouped.extension)}
+              {renderGroup("MCP", "内核按需暴露", grouped.mcp)}
+              {renderGroup("内核", "不可单独开关", grouped.builtin.filter((t) => t.lock !== null))}
+            </>
+          ) : (
+            <div className="px-3 py-1.5 text-[11px] text-dim">打开后加载工具清单…</div>
+          )}
+
+          <div className="mt-1 flex items-center justify-end gap-2 border-t border-line px-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setPending(activeNames)}
+              disabled={!dirty || applying}
+              className="h-6 cursor-pointer rounded-md px-2 text-[11px] text-muted t-fast hover:bg-hover hover:text-fg disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              重置
+            </button>
+            <button
+              type="button"
+              onClick={() => void apply(close)}
+              disabled={!canApply}
+              className="flex h-6 cursor-pointer items-center gap-1 rounded-md border border-accent/50 bg-accent-soft px-2 text-[11px] text-accent t-fast hover:bg-accent hover:text-accent-fg disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {applying && <Loader2 size={10} className="animate-spin" />}
+              应用
+            </button>
+          </div>
         </div>
       )}
     </Popover>
