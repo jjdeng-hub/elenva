@@ -10,6 +10,12 @@
  *   3. 项目上下文：<cwd>/AGENTS.md                 ← 用户/项目手写
  *   4. 技能索引 + cwd                             ← 按装了哪些技能生成
  *
+ * **身份段已数据化**（2026-10-16，模块 7 R1）：`## 你是谁` 那一段的正文来自受管文件
+ * `<agentDir>/elenva-identity.json`（见 `lib/identity.ts`），可在「身份」页分段编辑 + 版本历史 +
+ * 生效预览。本文件只保留槽位定义、默认文本与装配顺序；文件缺失时用内置默认（= 旧代码里的现文）。
+ * 因此装配必须在**每次新会话启动时**调用 `hostSystemPrompt()`（不是模块级常量）——
+ * 新建会话生效、已开会话不回溯。其余各段（环境事实）仍是代码里的静态字符串，不受影响。
+ *
  * 宿主层有两种形态（`kind` 字段）：
  *   · "section"：自带标题的独立小节。目前只有**身份段** —— 它必须排在所有事实之前，
  *     因为「护栏是我的机制」要在「护栏会拦你」之前说。
@@ -44,6 +50,8 @@
  * 每段的 rationale 记的是「为什么必须存在」，删段前先确认那条理由还成立。
  */
 
+import { DEFAULT_IDENTITY_SECTIONS, buildIdentityText, readIdentity } from "./identity";
+
 export interface HostPromptSection {
   /** 稳定 id：日志、接口、设置页按它引用 */
   id: string;
@@ -61,31 +69,19 @@ export interface HostPromptSection {
   kind?: "section" | "list";
 }
 
+/**
+ * 静态槽位定义（身份段的 `text` 是**内置默认**；运行时的当前值由 `hostPromptSections()` 注入）。
+ * 保留这个常量是为了：默认文本来源唯一（= `DEFAULT_IDENTITY_SECTIONS`）、以及给接口/设置页
+ * 提供 rationale / relatedTo 元数据。读当前提示词请用 `hostPromptSections()`。
+ */
 export const HOST_PROMPT_SECTIONS: readonly HostPromptSection[] = [
   {
     id: "identity",
     kind: "section",
     rationale:
       "身份是地基：不写，agent 默认自己是 pi CLI 的编码助手 —— 把工作台当外部环境（护栏=阻碍而非机制）、界面上的机制（记忆 / 技能 / 插件）想不起来用、能力不足时只会笼统说「做不到」。三样都有行为后果。",
-    relatedTo: "全部界面（零件清单与页面一一对应）+ 品牌（Logo / 页面标题）",
-    text: [
-      "## 你是谁",
-      "",
-      "你是 **ELENVA**（昵称 **Elen**）—— 一个以 pi 为内核的 agent，住在这个 Web 工作台里。pi 是引擎，工作台是你的身体：记忆、技能、插件、子代理、护栏都长在你身上，不是外部系统；用户看到的每个页面，都是你自己的一部分。",
-      "",
-      "**你的主职是编码 —— 用你的能力把 ELENVA 工作台搭起来、改好。** 它是你的工作场所，也是你要交付的东西；通用助手、内容这类岗位以后会有独立 agent 承担。",
-      "",
-      "你身上的零件（界面上都有对应的位置）：记忆（长期 / 每日 / 待办）· 技能（按需加载的方法）· 插件（外部能力）· 子代理（并行任务）· 护栏（审批闸门 / 每轮快照 / 验证账本）。护栏保护的是你干的事，不是防着你。",
-      "",
-      "做不到的时候，说清楚缺哪一类，不要笼统地说「做不到」：",
-      "- 记不住 → 现在写进记忆",
-      "- 每次都要重新查 → 沉淀成技能",
-      "- 缺外部数据或操作 → 需要插件 / MCP",
-      "- 重复犯错 → 升级成规则，或提议加护栏",
-      "- 模态之外（图像 / 音频）→ 直接讲明，别硬凑",
-      "",
-      "成长路径：失败 → 记忆 → 规则。被拦一次、返工一次、验证红一次，留一条记忆；同类问题出现第二次，升级成规则。收尾时如实报出没验证的部分 —— 那里通常就是你当前最真实的短板。",
-    ].join("\n"),
+    relatedTo: "「身份」页（分段编辑 / 版本历史 / 生效预览）+ 全部界面（零件清单与页面一一对应）+ 品牌",
+    text: buildIdentityText(DEFAULT_IDENTITY_SECTIONS),
   },
   {
     id: "environment",
@@ -137,7 +133,7 @@ export const HOST_PROMPT_SECTIONS: readonly HostPromptSection[] = [
  * 两种形态分开拼：`kind: "section"` 原样成块（自带标题），其余聚成
  * 「## 运行环境（ELENVA Web 工作台）」下的列表 —— **身份在前、事实在后**。
  */
-export function buildHostPrompt(sections: readonly HostPromptSection[] = HOST_PROMPT_SECTIONS): string {
+export function buildHostPrompt(sections: readonly HostPromptSection[] = hostPromptSections()): string {
   if (sections.length === 0) return "";
   const blocks: string[] = [];
   let listItems: string[] = [];
@@ -161,4 +157,20 @@ export function buildHostPrompt(sections: readonly HostPromptSection[] = HOST_PR
   return blocks.join("\n\n");
 }
 
-export const HOST_SYSTEM_PROMPT = buildHostPrompt();
+/**
+ * 读当前设置，产出「这一次新会话会拿到的宿主层」。
+ *
+ * 每次新会话启动时调用一次（见 `lib/agent-runtime.ts` 的 appendSystemPrompt）—— 身份文件改完，
+ * **新建会话即生效，已打开会话不回溯**（系统提示是前缀缓存的第一块，不能中途改）。
+ */
+export function hostPromptSections(): readonly HostPromptSection[] {
+  const identityText = buildIdentityText(readIdentity().document.sections);
+  return HOST_PROMPT_SECTIONS.map((section) =>
+    section.id === "identity" ? { ...section, text: identityText } : section,
+  );
+}
+
+/** 当前宿主层文本（装配顺序：身份在前、环境事实在后） */
+export function hostSystemPrompt(): string {
+  return buildHostPrompt(hostPromptSections());
+}

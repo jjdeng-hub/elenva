@@ -14,6 +14,11 @@
 |---|---|---|---|
 | pi 基座 | 内核 `core/system-prompt.js` | 所有 pi 会话 | **pi，我们不碰** |
 | **宿主层** | `lib/host-prompt.ts` → `appendSystemPrompt`（身份段 + 环境事实） | Web 工作台打开的**每一个**会话 | 我们 |
+
+**身份段（`## 你是谁`）已是受管数据**（2026-10-16，模块 7 R1）：正文来自 `~/.pi/agent/elenva-identity.json`
+（`lib/identity.ts`；可在网页「身份」页分段编辑、看版本历史、恢复旧版）。`lib/host-prompt.ts` 只保留
+槽位 / 默认文本 / 装配顺序，其余各段（环境事实）仍是代码里的静态字符串。改身份**内容**不必改代码；
+改装配顺序或别的段才改 `lib/host-prompt.ts`。
 | 项目上下文 | `<cwd>/AGENTS.md` | 该项目 | 用户 / 项目手写 |
 | 技能 | `<name>/SKILL.md` | 按需 read，不占每轮预算 | 按技能 |
 
@@ -65,6 +70,7 @@
 - [ ] 跑 `node ./node_modules/typescript/bin/tsc --noEmit`（这一段是代码，不是文档）。
 - [ ] 跑夹具：`node --experimental-strip-types tools/rev/host-prompt-fixture.mjs`
       （形态 / 顺序 / 拼接 / 关键句 / 长度预算，23 项全绿才算过）。
+      （`tools/rev/` 是本机夹具，不随仓库分发；仓库内的身份回归在 `tools/identity-selftest.mjs`。）
 - [ ] 要更接近真实：开一个新会话，确认 `/api/sessions/<id>/state` 的 `systemPrompt`
       里有 `## 你是谁`（身份段）与 `## 运行环境（ELENVA Web 工作台）`（事实），
       位置都在基座之后、`<project_context>` 之前。
