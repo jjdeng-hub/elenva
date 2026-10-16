@@ -7,6 +7,7 @@ import { cn } from "@/components/lib/utils";
 import { EmptyState, PageHeader } from "@/components/ui/bits";
 import { toast, dialogConfirm, dialogPrompt } from "@/components/ui/dialog";
 import { Popover } from "@/components/ui/popover";
+import { ReviewLedgerView } from "@/components/ReviewLedgerView";
 import { CopyButton } from "@/components/ui/widgets";
 import { basename, formatSize, relTime } from "@/lib/format";
 
@@ -110,7 +111,7 @@ type AgentMemoryDetail = {
   limit: number;
 };
 
-type MemoryTab = "agent" | "instructions";
+type MemoryTab = "agent" | "instructions" | "ledger";
 
 /** 待审条目（GET /api/memory/pending 的一项） */
 type PendingMemoryItem = {
@@ -135,10 +136,15 @@ const PENDING_TARGETS: { id: PendingResolveTarget; label: string; hint: string }
  *    项目级 MEMORY.md），存在本机 ~/.pi/agent/ 下，不进仓库 —— 条目可直接编辑（写入走 /api/memory，
  *    带配额校验、写前备份、并发检测；检索索引由扩展在会话启动时对齐）。
  *  - 「指令文件」：用户手写的长期指令（AGENTS.md / SYSTEM.md），会话启动时注入，可编辑、进 git。
- * 用户容易把两者混为一谈（"到底谁在写记忆"），所以页头用分段控件明确分开，不再靠一段说明文字解释。
+ *  - 「复台账」：复盘产出的只读时间线（记忆新增/更新 + 工作记录 + 快照差分出的「去掉」）。
+ *    放这一页的理由：账本的数据源就是「Agent 记忆」那三个文件 + 工作记录，从这里点回条目天然顺路，
+ *    不必新增一个侧栏入口（新增视图要动 hash 路由 / PAGE_TITLES / 侧栏，代价比收益大）。
+ * 用户容易把前两者混为一谈（"到底谁在写记忆"），所以页头用分段控件明确分开，不再靠一段说明文字解释。
  */
 export function MemoryPage({ projects }: { projects: MemoryProject[] }) {
   const [tab, setTab] = useState<MemoryTab>("agent");
+  /** 从复台账点「某条记忆」后要定位到的文件；AgentMemoryView 下次挂载时读到它 */
+  const [ledgerTargetFile, setLedgerTargetFile] = useState("memory");
   /** Agent 记忆页的滚动容器：配额块「去整理」用它做瞬时滚动（勿用 scrollIntoView） */
   const agentScrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -157,10 +163,24 @@ export function MemoryPage({ projects }: { projects: MemoryProject[] }) {
               <TabButton active={tab === "instructions"} onClick={() => setTab("instructions")} icon={<FileText size={12} />}>
                 指令文件
               </TabButton>
+              <TabButton active={tab === "ledger"} onClick={() => setTab("ledger")} icon={<CalendarDays size={12} />}>
+                复台账
+              </TabButton>
             </div>
           }
         />
-        {tab === "agent" ? <AgentMemoryView scrollRef={agentScrollRef} /> : <InstructionFilesView projects={projects} />}
+        {tab === "agent" ? (
+          <AgentMemoryView scrollRef={agentScrollRef} initialId={ledgerTargetFile} />
+        ) : tab === "ledger" ? (
+          <ReviewLedgerView
+            onOpenMemoryEntry={(fileId) => {
+              setLedgerTargetFile(fileId);
+              setTab("agent");
+            }}
+          />
+        ) : (
+          <InstructionFilesView projects={projects} />
+        )}
       </div>
     </div>
   );
@@ -194,9 +214,9 @@ function TabButton({
 
 /* ============================ Agent 记忆（只读） ============================ */
 
-function AgentMemoryView({ scrollRef }: { scrollRef: RefObject<HTMLDivElement | null> }) {
+function AgentMemoryView({ scrollRef, initialId = "memory" }: { scrollRef: RefObject<HTMLDivElement | null>; initialId?: string }) {
   const [index, setIndex] = useState<AgentMemoryIndex | null>(null);
-  const [activeId, setActiveId] = useState("memory");
+  const [activeId, setActiveId] = useState(initialId);
   const [detail, setDetail] = useState<AgentMemoryDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);

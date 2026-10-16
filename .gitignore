@@ -36,6 +36,7 @@ tools/*.mjs
 !tools/memory-origins-selftest.mjs
 !tools/memory-conflicts-selftest.mjs
 !tools/memory-suggestions-selftest.mjs
+!tools/review-ledger-selftest.mjs
 !tools/pending-approvals-selftest.mjs
 !tools/plan-steps-selftest.mjs
 !tools/todo-ledger-selftest.mjs
