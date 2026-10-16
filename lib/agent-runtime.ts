@@ -2088,15 +2088,25 @@ export function getCompletionNotificationSuppressedAgentSessionIds(): string[] {
  * —— 它是首页与 `/api/usage` 共用的取数层，加缓存会改变所有调用方的新鲜度语义。
  */
 const TODAY_COST_CACHE_TTL_MS = 60_000;
-let todayCostCache: { at: number; cost: number } | null = null;
+interface BudgetSpend {
+  today: number;
+  /** 滚动 7 天（今日 + 前 6 个本地自然日），周上限（weeklyUsd）用 */
+  weekly: number;
+}
+let budgetSpendCache: { at: number; spend: BudgetSpend } | null = null;
 
-async function getTodayCostCached(now = Date.now()): Promise<number> {
-  if (todayCostCache && now - todayCostCache.at < TODAY_COST_CACHE_TTL_MS) {
-    return todayCostCache.cost;
+async function getBudgetSpendCached(now = Date.now()): Promise<BudgetSpend> {
+  if (budgetSpendCache && now - budgetSpendCache.at < TODAY_COST_CACHE_TTL_MS) {
+    return budgetSpendCache.spend;
   }
   const report = await aggregateUsage();
-  todayCostCache = { at: now, cost: report.today.cost };
-  return todayCostCache.cost;
+  // 滚动 7 天窗口 = days 末尾 7 项（days 末项恒为今日、零填充，见 aggregateUsage），
+  // 与今日概览「近 14 日」同族口径，起点不锚周一对齐。
+  let weekly = 0;
+  for (const day of report.days.slice(-7)) weekly += day.cost;
+  const spend = { today: report.today.cost, weekly };
+  budgetSpendCache = { at: now, spend };
+  return spend;
 }
 
 /**
@@ -2107,6 +2117,8 @@ async function getTodayCostCached(now = Date.now()): Promise<number> {
  * - 键 = `${scope}:${tier}`。超限的 tier 由 `budgetBucket` 给（刚超 = `over`，
  *   再超 50% = `far`）；另借鉴 LiteLLM 的 80% 分级，未超但达上限 80% 推一次 `near`。
  *   三档单调不减，所以「同会话同 scope 同档只推一次」等价于「每跨一档各推一次」。
+ *   scope 含 weekly（模块 6 第 2 轮）：滚动 7 天花费 vs weeklyUsd，去重键自动带上
+ *   weekly 维度，无需额外状态。
  * - `notifiedKeys` 由每个 wrapper 一份（调用方闭包持有），随会话回收重置。
  * - 同轮多个 scope 同时新跨档：合成一条（`formatBudgetNote` / `formatApproachNote`）。
  */
@@ -2116,12 +2128,12 @@ async function runBudgetCheck(
 ): Promise<void> {
   try {
     const budgets = parseBudgets(readGuardrailSettings().budgets);
-    if (budgets.dailyUsd === undefined && budgets.sessionUsd === undefined) return;
+    if (budgets.dailyUsd === undefined && budgets.weeklyUsd === undefined && budgets.sessionUsd === undefined) return;
 
     const entries = session.inner.sessionManager.getEntries() as unknown as SessionEntry[];
     const sessionSpent = computeSessionStats(entries).cost;
-    const dailySpent = await getTodayCostCached();
-    const spent = { dailySpent, sessionSpent, budgets };
+    const { today: dailySpent, weekly: weeklySpent } = await getBudgetSpendCached();
+    const spent = { dailySpent, weeklySpent, sessionSpent, budgets };
 
     const { exceeded } = checkBudgets(spent);
     const newlyExceeded = exceeded.filter((item) => {

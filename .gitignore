@@ -48,6 +48,7 @@ tools/*.mjs
 !tools/deny-memory-selftest.mjs
 !tools/builtin-catalog-selftest.mjs
 !tools/budget-guard-selftest.mjs
+!tools/usage-projects-selftest.mjs
 !tools/subagent-templates-selftest.mjs
 !tools/model-review-selftest.mjs
 !tools/skill-advisor-selftest.mjs
