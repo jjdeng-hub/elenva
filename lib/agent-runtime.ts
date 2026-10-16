@@ -50,6 +50,7 @@ import {
   readSessionToolSelection,
   validateSessionToolSelection,
 } from "./session-tool-selection";
+import { TOOL_SELECTION_NOTE_TYPE, buildToolSelectionNote } from "./tool-selection-ui";
 
 // ============================================================================
 // Agent session runtime — the in-process kernel entry point.
@@ -1853,6 +1854,29 @@ export interface SetAgentSessionToolsResult {
 }
 
 /** Persist a normal session's tool selection and rebuild when resource policy changes. */
+/**
+ * 工具集变更后给模型补一条显式说明（custom message，display=false：只进上下文，不在界面渲染）。
+ *
+ * 背景：SDK 会把新工具写进请求的 tools 参数与系统提示，但模型仍会锺定自己上一轮的
+ * 「我没有 X 工具」（实测真实网关已复现）。显式追加一条模型可见的说明能打破锺定。
+ * 注入失败不应让工具切换本身失败——吞掉并记日志。
+ */
+function appendToolSelectionNote(session: AgentSessionWrapper): void {
+  try {
+    const active = session.inner.getActiveToolNames();
+    session.inner.sessionManager.appendCustomMessageEntry(
+      TOOL_SELECTION_NOTE_TYPE,
+      buildToolSelectionNote(active),
+      false,
+    );
+  } catch (error) {
+    console.error(
+      "[elenva] failed to append tool selection note:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+}
+
 export async function setAgentSessionTools(
   sessionId: string,
   sessionFile: string | undefined,
@@ -1870,6 +1894,7 @@ export async function setAgentSessionTools(
     appendSessionToolSelection(manager, toolNames);
     invalidateSessionListCache();
     const started = await startAgentSession(sessionId, sessionFile, undefined);
+    appendToolSelectionNote(started.session);
     return { session: started.session, sessionId: started.realSessionId, recreated: false };
   }
 
@@ -1887,6 +1912,7 @@ export async function setAgentSessionTools(
 
   if (!crossesChatOnlyBoundary) {
     existing.setActiveToolSelection(toolNames);
+    appendToolSelectionNote(existing);
     return { session: existing, sessionId, recreated: false };
   }
 
@@ -1900,6 +1926,7 @@ export async function setAgentSessionTools(
 
   if (persistedFile) {
     const started = await startAgentSession(sessionId, persistedFile, undefined);
+    appendToolSelectionNote(started.session);
     return { session: started.session, sessionId: started.realSessionId, recreated: true };
   }
 
@@ -1911,6 +1938,7 @@ export async function setAgentSessionTools(
       ? { thinkingLevel: currentThinkingLevel as ThinkingLevel }
       : {}),
   });
+  appendToolSelectionNote(started.session);
   return { session: started.session, sessionId: started.realSessionId, recreated: true };
 }
 

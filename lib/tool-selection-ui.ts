@@ -203,3 +203,22 @@ export function toggleBuiltinSelection(
 export function sameBuiltinSelection(a: readonly string[], b: readonly string[]): boolean {
   return normalizeBuiltinSelection(a).join(",") === normalizeBuiltinSelection(b).join(",");
 }
+
+/**
+ * 工具集变更后注入给模型的说明（custom massage，display=false：只进上下文，不在界面渲染）。
+ *
+ * 为什么需要它：切工具后，SDK 虽然会把新工具写进请求的 tools 参数与系统提示，但模型会
+ * 锺定自己上一轮说过的话（实测真实网关：请求里工具已正确增/减，模型却照拄上一轮的清单）。
+ * 追加一条模型可见的显式说明，能直接打破这种锺定。
+ */
+export const TOOL_SELECTION_NOTE_TYPE = "pi-web:tool-selection-note";
+
+export function buildToolSelectionNote(toolNames: readonly string[]): string {
+  const names = [...new Set(toolNames)];
+  const list = names.length > 0 ? names.join("、") : "（无，纯对话）";
+  return [
+    "【工具集已更新】本会话当前启用的工具如下，请以此为准：",
+    `- 共 ${names.length} 个：${list}`,
+    "如果你此前在对话里说过某个工具不可用，以本条为准；需要时直接调用对应工具即可。",
+  ].join("\n");
+}

@@ -19,6 +19,8 @@ const {
   builtinNamesFromTools,
   toggleBuiltinSelection,
   sameBuiltinSelection,
+  TOOL_SELECTION_NOTE_TYPE,
+  buildToolSelectionNote,
 } = await jiti.import("../lib/tool-selection-ui.ts");
 
 let fail = 0;
@@ -145,6 +147,17 @@ check("sameBuiltinSelection：顺序/别名无关等价", () => {
   assert(sameBuiltinSelection(["read", "bash"], ["bash", "read"]), "顺序无关");
   assert(sameBuiltinSelection(["read"], ["read", "read"]), "重复无关");
   assert(!sameBuiltinSelection(["read"], ["read", "bash"]), "不同集合不等价");
+});
+
+check("buildToolSelectionNote：模型可见的工具集变更说明", () => {
+  const note = buildToolSelectionNote(["read", "bash", "edit"]);
+  assert(note.includes("工具集已更新"), "含更新标记");
+  assert(note.includes("共 3 个"), "含数量");
+  assert(note.includes("read、bash、edit"), "按传入顺序列出工具");
+  assert(note.includes("以本条为准"), "含纠正措辞");
+  eq(buildToolSelectionNote([]).includes("（无，纯对话）"), true, "空集合有兜底措辞");
+  eq(buildToolSelectionNote(["read", "read", "bash"]).includes("共 2 个"), true, "去重后再计数");
+  eq(TOOL_SELECTION_NOTE_TYPE, "pi-web:tool-selection-note", "customType 稳定");
 });
 
 console.log(fail === 0 ? `\n全部通过（${total} 项）` : `\n${fail}/${total} 项失败`);
