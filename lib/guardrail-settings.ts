@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 import { cwdKey } from "./paths";
+import { parseBudgets, type BudgetSettings } from "./budget-guard";
 import type { ApprovalMode } from "./tool-risk";
 import {
   isApprovalFallback,
@@ -50,6 +51,11 @@ export interface GuardrailSettings {
   /** 会话级计划模式：true/false 均为显式值，未出现过的会话回落到 planModeDefault */
   planModeSessions: Record<string, boolean>;
   /**
+   * 花费上限（模块 5 · 第 4 轮）：只提示不拦截。缺省 / null = 不限。
+   * 读盘容错见纯函数 `parseBudgets`（负数 / NaN 丢弃）。
+   */
+  budgets: BudgetSettings;
+  /**
    * 收尾守卫：改了代码却没留下验证证据时追一次。
    * 只提醒不代跑，所以默认开着 —— 它不花钱、不阻塞，只是不让「改完了」没有依据。
    */
@@ -72,6 +78,7 @@ export const DEFAULT_GUARDRAIL_SETTINGS: GuardrailSettings = {
   planModeSessions: {},
   verificationGuard: true,
   verifyCommandsByProject: {},
+  budgets: {},
 };
 
 /**
@@ -138,6 +145,7 @@ export function readGuardrailSettings(settingsPath = getGuardrailSettingsPath())
         ? DEFAULT_GUARDRAIL_SETTINGS.verificationGuard
         : stored.verificationGuard === true,
       verifyCommandsByProject: readStringArrayMap(stored.verifyCommandsByProject),
+      budgets: parseBudgets(stored.budgets),
     };
   } catch {
     // 设置文件损坏时不阻塞会话：回落到默认档位（risky）。
@@ -181,6 +189,19 @@ export function writeMcpWriteApproval(
 ): GuardrailSettings {
   const current = readGuardrailSettings(settingsPath);
   return write({ ...current, mcpWriteApproval: enabled }, settingsPath);
+}
+
+/**
+ * 写预算上限（整条替换语义）：界面每次提交两个字段，null / 缺省 = 不限。
+ * 写前校验由路由层用纯函数 `parseBudgetsInput` 做（非法值 400，不落盘）；
+ * 这里再用 `parseBudgets` 兜一次结构，保证写进文件的永远是合法形态。
+ */
+export function writeBudgets(
+  budgets: BudgetSettings | null | undefined,
+  settingsPath = getGuardrailSettingsPath(),
+): GuardrailSettings {
+  const current = readGuardrailSettings(settingsPath);
+  return write({ ...current, budgets: parseBudgets(budgets) }, settingsPath);
 }
 
 /**
