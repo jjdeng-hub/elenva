@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Boxes,
   Loader2,
@@ -21,6 +21,7 @@ import { toast } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/bits";
 import { getToolNamesForPreset, TOOL_PRESET_VALUES, type ToolPreset } from "@/lib/tool-presets";
 import type { ApprovalMode } from "@/lib/tool-risk";
+import type { ProjectPolicy } from "@/lib/guardrail-policy";
 import type { PiManagedSettings } from "@/lib/pi-user-settings";
 import {
   applyThemePreference,
@@ -594,12 +595,17 @@ function AppearanceSection() {
  * 「总是允许」。
  */
 function GuardrailsSection({ projects, defaultCwd }: {
-  /** 可选项目（用于「本项目的验证命令」） */
+  /** 可选项目（用于「本项目的验证命令」与「项目策略」） */
   projects?: Array<{ name: string; path: string }>;
   defaultCwd?: string | null;
 }) {
   const [mode, setMode] = useState<ApprovalMode | null>(null);
   const [allowByProject, setAllowByProject] = useState<Record<string, string[]>>({});
+  /** 项目级档位覆盖；值为空对象表示该项目「全继承」 */
+  const [policyByProject, setPolicyByProject] = useState<Record<string, ProjectPolicy>>({});
+  /** 全局回落档：界面上只作为「继承（…）」的显示值，改它要动代码（见 GuardrailSettings 注释） */
+  const [fallback, setFallback] = useState<"reject" | "queue">("reject");
+  const [mcpGlobal, setMcpGlobal] = useState(true);
   const [planDefault, setPlanDefault] = useState(false);
   const [verificationGuard, setVerificationGuard] = useState(true);
   const [verifyCwd, setVerifyCwd] = useState<string>(defaultCwd ?? projects?.[0]?.path ?? "");
@@ -628,12 +634,18 @@ function GuardrailsSection({ projects, defaultCwd }: {
       .then((r) => r.json())
       .then((d: {
         approvalMode?: ApprovalMode;
+        approvalFallback?: "reject" | "queue";
         allowByProject?: Record<string, string[]>;
+        policyByProject?: Record<string, ProjectPolicy>;
         planModeDefault?: boolean;
         verificationGuard?: boolean;
+        mcpWriteApproval?: boolean;
       }) => {
         setMode(d.approvalMode ?? "risky");
+        setFallback(d.approvalFallback === "queue" ? "queue" : "reject");
+        setMcpGlobal(d.mcpWriteApproval !== false);
         setAllowByProject(d.allowByProject ?? {});
+        setPolicyByProject(d.policyByProject ?? {});
         setPlanDefault(d.planModeDefault === true);
         setVerificationGuard(d.verificationGuard !== false);
       })
@@ -689,6 +701,47 @@ function GuardrailsSection({ projects, defaultCwd }: {
 
   const ruleEntries = Object.entries(allowByProject);
 
+  /* 「项目策略」的行：最近打开的项目 + 存过策略但已不在最近列表里的（后者也要能看见、能清）。
+     key 的写法在不同来源不一致（界面 `C:/x`、落盘的 key 是规范化后的），所以匹配按宽松
+     形式比 —— 命中已存的配置时用**存的那个 key**，避免新建第二条同目录记录。 */
+  const policyRows = useMemo(() => {
+    const norm = (value: string) => value.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    const rows: Array<{ cwd: string; name: string; policy: ProjectPolicy }> = [];
+    const seen = new Set<string>();
+    for (const project of projects ?? []) {
+      const key = norm(project.path);
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      const stored = Object.entries(policyByProject).find(([k]) => norm(k) === key);
+      rows.push({
+        cwd: stored?.[0] ?? project.path,
+        name: project.name || project.path,
+        policy: stored?.[1] ?? {},
+      });
+    }
+    for (const [key, policy] of Object.entries(policyByProject)) {
+      if (!key || seen.has(norm(key))) continue;
+      seen.add(norm(key));
+      rows.push({ cwd: key, name: key, policy });
+    }
+    return rows;
+  }, [projects, policyByProject]);
+
+  /** 写项目策略：patch 里的 null 表示该键回到继承；patch 为 null 整条清除 */
+  const saveProjectPolicy = async (cwd: string, patch: Record<string, unknown> | null) => {
+    const data = await post({ action: "setProjectPolicy", cwd, policy: patch });
+    setPolicyByProject((data.policyByProject as Record<string, ProjectPolicy> | undefined) ?? {});
+  };
+
+  const MODE_LABELS: Record<ApprovalMode, string> = {
+    off: "关闭",
+    risky: "只拦危险操作",
+    writes: "每次写入都问",
+  };
+  const FALLBACK_LABELS = { reject: "拒绝", queue: "入队继续" } as const;
+  const SELECT_CLASS =
+    "h-7 cursor-pointer rounded-md border border-line bg-panel-2 px-1.5 text-[11px] text-fg outline-none t-fast focus:border-accent/60 disabled:opacity-50";
+
   return (
     <Card>
       <CardHeader>
@@ -730,6 +783,102 @@ function GuardrailsSection({ projects, defaultCwd }: {
                 </button>
               );
             })
+          )}
+        </div>
+
+        {/* 项目策略（模块 5 · 第 2 轮）：按项目放行 / 加严。
+            三个键**各自独立继承** ——「继承」的语义是「这个键跟随全局」，不是「等于默认档」；
+            所以「继承」的文案里必须带上当前全局值，否则用户看不出自己在继承什么。 */}
+        <div className="mt-4 border-t border-line-soft pt-3">
+          <div className="text-[13px] font-medium text-fg">项目策略</div>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-dim">
+            按项目给不同的审批档位：个人小项目可以放全权，重要目录收严。没选过的键跟随全局
+            ——当前全局：{MODE_LABELS[mode ?? "risky"]} · 无人时{FALLBACK_LABELS[fallback]} · MCP 写确认{mcpGlobal ? "开" : "关"}。
+            免确认规则不受影响。
+          </p>
+
+          {policyRows.length === 0 ? (
+            <p className="mt-2 text-[11px] text-dim">
+              还没有可配置的项目 —— 打开过会话的项目目录会自动出现在这里。
+            </p>
+          ) : (
+            <div className="mt-2 flex flex-col gap-2">
+              {policyRows.map((row) => (
+                <div key={row.cwd} className="rounded-lg border border-line bg-panel-2 px-2.5 py-2">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className="min-w-0 flex-1 truncate text-[12px] text-fg"
+                      title={row.cwd}
+                    >
+                      {row.name}
+                    </span>
+                    {Object.keys(row.policy).length > 0 && (
+                      <button
+                        disabled={saving}
+                        onClick={() => void saveProjectPolicy(row.cwd, null)}
+                        className="shrink-0 cursor-pointer text-[11px] text-dim t-fast hover:text-danger disabled:opacity-50"
+                        title="清除该项目的全部档位覆盖，回到全继承"
+                      >
+                        清除该项目设置
+                      </button>
+                    )}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <label className="flex items-center gap-1 text-[11px] text-dim">
+                      审批档
+                      <select
+                        value={row.policy.approvalMode ?? ""}
+                        disabled={saving}
+                        onChange={(e) =>
+                          void saveProjectPolicy(row.cwd, {
+                            approvalMode: e.target.value === "" ? null : e.target.value,
+                          })}
+                        className={SELECT_CLASS}
+                      >
+                        <option value="">继承（{MODE_LABELS[mode ?? "risky"]}）</option>
+                        <option value="off">关闭</option>
+                        <option value="risky">只拦危险操作</option>
+                        <option value="writes">每次写入都问</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-1 text-[11px] text-dim">
+                      无人时
+                      <select
+                        value={row.policy.approvalFallback ?? ""}
+                        disabled={saving}
+                        onChange={(e) =>
+                          void saveProjectPolicy(row.cwd, {
+                            approvalFallback: e.target.value === "" ? null : e.target.value,
+                          })}
+                        className={SELECT_CLASS}
+                      >
+                        <option value="">继承（{FALLBACK_LABELS[fallback]}）</option>
+                        <option value="reject">拒绝</option>
+                        <option value="queue">入队继续</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-1 text-[11px] text-dim">
+                      MCP 写确认
+                      <select
+                        value={row.policy.mcpWriteApproval === undefined
+                          ? ""
+                          : row.policy.mcpWriteApproval ? "on" : "off"}
+                        disabled={saving}
+                        onChange={(e) =>
+                          void saveProjectPolicy(row.cwd, {
+                            mcpWriteApproval: e.target.value === "" ? null : e.target.value === "on",
+                          })}
+                        className={SELECT_CLASS}
+                      >
+                        <option value="">继承（{mcpGlobal ? "开" : "关"}）</option>
+                        <option value="on">开</option>
+                        <option value="off">关</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </div>
 
