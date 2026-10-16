@@ -270,6 +270,30 @@ export function ChatView({
     setRightPanel("observatory");
   }, []);
 
+  /* ---------- 按 id 打开会话（复核区的「打开复核会话」）----------
+     刚起的复核会话可能还没进会话列表：先记下 id，列表刷新到位后再开，
+     否则点了没反应（与 AppShell 的「并行试验 → 查看会话」同一处理）。 */
+  const [pendingOpenId, setPendingOpenId] = useState<string | null>(null);
+  const openSessionById = useCallback(
+    (id: string) => {
+      const found = sessions.find((s) => s.id === id);
+      if (found) {
+        onOpenSession(found);
+        return;
+      }
+      setPendingOpenId(id);
+      onRefreshSessions();
+    },
+    [sessions, onOpenSession, onRefreshSessions],
+  );
+  useEffect(() => {
+    if (!pendingOpenId) return;
+    const found = sessions.find((s) => s.id === pendingOpenId);
+    if (!found) return;
+    setPendingOpenId(null);
+    onOpenSession(found);
+  }, [pendingOpenId, sessions, onOpenSession]);
+
   /* ---------- 并排副屏（只读）----------
      副屏的开合状态放在 ChatView（外壳只持有 sideSessionId 以便写 URL）。
      视口 <1440 不提供开关；带 ?side= 深链接进窄窗时只降级为不渲染，URL 保留。 */
@@ -1316,6 +1340,13 @@ export function ChatView({
               onOpenSubagents={onOpenSubagents}
               onOpenSettings={onOpenSettings}
               turn={turn}
+              review={session?.id ? {
+                sessionId: session.id,
+                modelList,
+                modelNames,
+                onOpenSession: openSessionById,
+                onOpenSide: (id) => onSelectSide?.(id),
+              } : null}
             />
           ) : null}
         </div>

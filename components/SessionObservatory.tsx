@@ -7,24 +7,29 @@ import {
   CheckCircle2,
   Coins,
   ChevronDown,
+  Columns2,
   Copy,
   GitBranch,
+  GitCompare,
   Hash,
   History,
   Layers,
   Loader2,
   ListChecks,
   ListTodo,
+  Plus,
   RotateCcw,
   Share,
   TrendingUp,
   X,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
 import { toast } from "@/components/ui/dialog";
 import { Resizer } from "@/components/ui/Resizer";
+import { ModelPicker } from "@/components/ModelPicker";
+import type { ModelReview, ModelReviewStatus } from "@/lib/model-review";
 import { formatCost, formatDuration, formatTokens, relTime } from "@/lib/format";
 import { copyText } from "@/lib/clipboard";
 import { compactionTrigger, useCompactionSettings } from "@/hooks/useCompactionSettings";
@@ -555,6 +560,7 @@ export function SessionObservatory({
   onOpenSubagents,
   onOpenSettings,
   turn,
+  review,
   budgets,
   /** 观测栏是否展开。收起走宽度过渡（与另外两个侧栏同一节奏），不卸载组件 */
   open = true,
@@ -600,6 +606,17 @@ export function SessionObservatory({
   onOpenSettings?: () => void;
   /** 本轮证据（改动 / 执行 / 验证 + 回滚）。数据源与输入框上方那行是同一个 hook */
   turn?: TurnCheckpointsState | null;
+  /**
+   * 「换模型复核」区（模块 6 · 第 1 轮）。缺省则不渲染该区（如空态新会话）。
+   * 模型可选集与聊天里的 ModelPicker 同源（enabledModels 白名单），不另列一份。
+   */
+  review?: {
+    sessionId: string;
+    modelList: { id: string; name: string; provider: string }[];
+    modelNames: Record<string, string>;
+    onOpenSession: (sessionId: string) => void;
+    onOpenSide: (sessionId: string) => void;
+  } | null;
 }) {
   /** 当前任务清单（与输入框上方面板同一推导；成功的 todo_write 才更新） */
   const todos = useMemo(() => latestTodoState(messages, results), [messages, results]);
@@ -695,6 +712,9 @@ export function SessionObservatory({
 
         {/* 子代理（仅运行中渲染）：位置紧跟「本轮」，不破高频在前原则 */}
         <SubagentSection parentSessionId={sessionStats?.sessionId} onOpenSubagents={onOpenSubagents} />
+
+        {/* 换模型复核（M6R1）：本会话发起的复核 + 本会话作为复核产物的回链 */}
+        {review && <ModelReviewSection {...review} />}
 
         {/* ---------- 上下文窗口（独立区块）---------- */}
         <Section
@@ -908,6 +928,232 @@ export function SessionObservatory({
       </div>
     </aside>
     </>
+  );
+}
+
+const REVIEW_STATUS_LABEL: Record<ModelReviewStatus, string> = {
+  creating: "创建中",
+  running: "复核中",
+  done: "完成",
+  error: "失败",
+};
+
+function reviewStatusClass(status: ModelReviewStatus): string {
+  if (status === "done") return "chip chip-success shrink-0";
+  if (status === "error") return "chip chip-danger shrink-0";
+  return "chip chip-accent shrink-0";
+}
+
+function ReviewStatusIcon({ status }: { status: ModelReviewStatus }) {
+  if (status === "done") return <CheckCircle2 size={10} />;
+  if (status === "error") return <XCircle size={10} />;
+  return <Loader2 size={10} className="anim-spin" />;
+}
+
+/**
+ * 「换模型复核」区（模块 6 · 第 1 轮）。
+ *
+ * 把一个会话的复核关系摆在它自己的观测栏里：本会话发起的复核（带状态与一键并排），
+ * 以及本会话**本身**是某次复核的产物（回链原会话）。
+ *
+ * 发起入口复用聊天里的 `ModelPicker`：可选集与「启用模型」白名单同源，
+ * 不在观测栏再列一份模型名单（两份名单一定会漂移）。复核会话只拿到原任务原文，
+ * 不注入本会话的结论与改动 —— 这是「独立复核」与「让另一个模型附和」的分界。
+ */
+function ModelReviewSection({
+  sessionId,
+  modelList,
+  modelNames,
+  onOpenSession,
+  onOpenSide,
+}: {
+  sessionId: string;
+  modelList: { id: string; name: string; provider: string }[];
+  modelNames: Record<string, string>;
+  onOpenSession: (sessionId: string) => void;
+  onOpenSide: (sessionId: string) => void;
+}) {
+  const [asParent, setAsParent] = useState<ModelReview[]>([]);
+  const [asReview, setAsReview] = useState<ModelReview[]>([]);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pending, setPending] = useState<{ provider: string; modelId: string } | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/model-reviews?sessionId=${encodeURIComponent(sessionId)}`, { cache: "no-store" });
+      if (!res.ok) return;
+      const d = (await res.json()) as { asParent?: ModelReview[]; asReview?: ModelReview[] };
+      setAsParent(d.asParent ?? []);
+      setAsReview(d.asReview ?? []);
+    } catch {
+      /* 网络抖动保留上次快照 */
+    }
+  }, [sessionId]);
+
+  useEffect(() => {
+    setAsParent([]);
+    setAsReview([]);
+    setPending(null);
+    setPickerOpen(false);
+    void load();
+  }, [load]);
+
+  // 复核会话还在跑时轮询（3s，与并排副屏同一节奏）；全部终态后停。
+  const pendingCount = [...asParent, ...asReview].filter(
+    (r) => r.status === "creating" || r.status === "running",
+  ).length;
+  useEffect(() => {
+    if (pendingCount === 0) return;
+    const timer = setInterval(() => void load(), 3000);
+    return () => clearInterval(timer);
+  }, [pendingCount, load]);
+
+  const modelNameOf = (r: ModelReview) =>
+    modelNames[`${r.model.provider}/${r.model.modelId}`] || r.model.modelId;
+
+  const start = useCallback(async () => {
+    if (!pending) {
+      toast("先选一个复核模型");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await fetch("/api/model-reviews", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parentSessionId: sessionId, provider: pending.provider, modelId: pending.modelId }),
+      });
+      const d = (await res.json()) as { review?: ModelReview; error?: string };
+      if (!res.ok || !d.review) throw new Error(d.error || `发起失败（HTTP ${res.status}）`);
+      const created = d.review;
+      setAsParent((prev) => [created, ...prev.filter((r) => r.id !== created.id)]);
+      setPickerOpen(false);
+      setPending(null);
+      toast(`已用 ${pending.modelId} 发起独立复核`);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : String(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }, [pending, sessionId]);
+
+  return (
+    <Section
+      title="复核"
+      icon={<GitCompare size={12} />}
+      meta={asParent.length > 0 ? String(asParent.length) : undefined}
+      action={
+        <button
+          onClick={() => setPickerOpen((v) => !v)}
+          className="btn btn-sm btn-ghost"
+          title="用另一个模型从零重跑同一任务，再并排比较"
+          data-testid="rail-model-review"
+        >
+          <Plus size={10} /> 换模型复核
+        </button>
+      }
+    >
+      {/* 反向：本会话是某次复核的产物 —— 至少让「我在复核谁」可见并可回跳 */}
+      {asReview.length > 0 && (
+        <div className="mb-2 flex flex-col gap-1.5">
+          {asReview.map((r) => (
+            <div key={r.id} className="flex items-center gap-1.5">
+              <span className="chip chip-accent shrink-0">
+                <GitCompare size={10} /> 复核
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[11px] text-muted" title={r.taskPreview}>
+                本会话是 {modelNameOf(r)} 的独立复核
+              </span>
+              <button
+                onClick={() => onOpenSession(r.parentSessionId)}
+                className="btn btn-sm btn-ghost shrink-0"
+                title="打开被复核的原会话"
+                data-testid="rail-review-parent"
+              >
+                原会话
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 发起：模型选择复用聊天里的同一个组件 */}
+      {pickerOpen && (
+        <div className="mb-2 rounded-md border border-line-soft bg-panel-2 p-2">
+          <div className="flex items-center gap-1.5">
+            <ModelPicker
+              modelList={modelList}
+              displayModel={pending}
+              modelNames={modelNames}
+              switching={false}
+              thinkingLevel="auto"
+              thinkingLevels={[]}
+              onModelChange={(provider, modelId) => setPending({ provider, modelId })}
+              onThinkingLevelChange={() => {}}
+              hideDefaultAction
+              emptyLabel="选择复核模型"
+            />
+            <button
+              onClick={() => void start()}
+              disabled={submitting || !pending}
+              className="btn btn-sm btn-primary ml-auto shrink-0"
+              data-testid="rail-model-review-start"
+            >
+              {submitting ? <Loader2 size={10} className="anim-spin" /> : <GitCompare size={10} />} 发起
+            </button>
+          </div>
+          <p className="mt-1.5 text-[10px] leading-relaxed text-dim">
+            复核会话只收到原任务原文，不注入本会话的结论与改动，从零独立跑。
+          </p>
+        </div>
+      )}
+
+      {/* 正向：本会话发起过的复核 */}
+      {asParent.length === 0 ? (
+        <div className="text-[11px] text-dim">还没有换模型复核过这个任务。</div>
+      ) : (
+        <div className="flex flex-col gap-2">
+          {asParent.map((r) => (
+            <div key={r.id} className="flex flex-col gap-1">
+              <div className="flex items-center gap-1.5">
+                <span className={reviewStatusClass(r.status)}>
+                  <ReviewStatusIcon status={r.status} />
+                  {REVIEW_STATUS_LABEL[r.status]}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[11px] text-fg" title={`${r.model.provider}/${r.model.modelId}`}>
+                  {modelNameOf(r)}
+                </span>
+              </div>
+              {r.error && (
+                <span className="truncate text-[10px] text-danger" title={r.error}>
+                  {r.error}
+                </span>
+              )}
+              {r.reviewSessionId && (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => onOpenSide(r.reviewSessionId as string)}
+                    className="btn btn-sm btn-ghost"
+                    title="在右侧副屏与本会话并排对照"
+                    data-testid="rail-review-side"
+                  >
+                    <Columns2 size={10} /> 并排打开
+                  </button>
+                  <button
+                    onClick={() => onOpenSession(r.reviewSessionId as string)}
+                    className="btn btn-sm btn-ghost"
+                    data-testid="rail-review-open"
+                  >
+                    打开复核会话
+                  </button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
   );
 }
 

@@ -19,6 +19,13 @@ export function ModelPicker({
   onModelChange,
   onThinkingLevelChange,
   onReloadModels,
+  /**
+   * 隐藏「设为启动默认」一行。
+   * 供嵌入型用法（如观测栏的「换模型复核」）：那里选模型只是为这一次动作挑一个，
+   * 顺手改全局启动默认是越权。
+   */
+  hideDefaultAction,
+  emptyLabel = "自动选择",
 }: {
   modelList: ModelEntry[];
   displayModel: { provider: string; modelId: string } | null;
@@ -30,6 +37,9 @@ export function ModelPicker({
   onThinkingLevelChange: (level: ThinkingLevelOption) => void;
   /** 刷新模型库后重新拉取列表（由 useAgentSession 的 loadModels 提供）。 */
   onReloadModels?: () => void | Promise<void>;
+  hideDefaultAction?: boolean;
+  /** 未选模型时触发按钮上的占位文案（嵌入型用法传「选择…」比「自动选择」准确） */
+  emptyLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -76,7 +86,7 @@ export function ModelPicker({
   const currentKey = displayModel ? `${displayModel.provider}/${displayModel.modelId}` : null;
   const currentName = displayModel
     ? modelNames[currentKey!] || displayModel.modelId
-    : "自动选择";
+    : emptyLabel;
 
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -171,7 +181,7 @@ export function ModelPicker({
           {/* 推理强度已提为工具行里的常驻 ThinkingPicker（避免两处控制同一件事） */}
 
           {/* 启动默认（对应 CLI 选择器 Ctrl+S）：写入 settings.json 的 defaultProvider/defaultModel/defaultThinkingLevel */}
-          {displayModel && (
+          {displayModel && !hideDefaultAction && (
             <div className="flex items-center gap-2 border-t border-line-soft px-3 py-2">
               {defaults.defaultModel === displayModel.modelId && defaults.defaultProvider === displayModel.provider ? (
                 <span className="flex items-center gap-1 text-[11px] text-accent">
