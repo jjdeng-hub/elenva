@@ -44,7 +44,7 @@ import {
 } from "./subagents";
 import { createSubagentController } from "./subagent-runtime";
 import { createGuardrailsExtension } from "./host-guardrails-extension";
-import { HOST_SYSTEM_PROMPT } from "./host-prompt";
+import { hostSystemPrompt } from "./host-prompt";
 import { getAdditionalAllowedRoots } from "./allowed-roots";
 import { isBuiltInSubagentsEnabled } from "./subagent-settings";
 import { resolveShellTools } from "./powershell-settings";
@@ -2412,7 +2412,8 @@ function webResourceLoaderOptions(
     // 宿主层：把「Web 工作台有别于 CLI」的那几条事实告诉 agent（见 lib/host-prompt.ts）。
     // 用 appendSystemPrompt 而不是项目里的 .pi/APPEND_SYSTEM.md —— 后者只对当前仓库生效
     // 且会要求项目信任，而我们的宿主行为对**打开的每一个项目**都成立。
-    appendSystemPrompt: [HOST_SYSTEM_PROMPT],
+    // 身份段来自受管文件（lib/identity.ts）——每建一个会话重新装配一次，改完新建会话即生效。
+    appendSystemPrompt: [hostSystemPrompt()],
   };
 }
 

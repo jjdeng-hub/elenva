@@ -5,6 +5,7 @@ import {
   Bot,
   Brain,
   Cpu,
+  Fingerprint,
   FlaskConical,
   FolderGit2,
   House,
@@ -34,6 +35,8 @@ export type View =
   | "approvals"
   | "skills"
   | "memory"
+  /** 身份：宿主提示词里「你是谁」那一段（分段编辑 / 版本历史 / 生效预览） */
+  | "identity"
   /** 提示词：模型每轮实际看到的内容（pi 基座 + 宿主层 + 项目指令 + 技能索引） */
   | "prompt"
   | "models"
@@ -186,6 +189,7 @@ export function WorkstationSidebar({
           <NavItem collapsed={isCollapsed} icon={<Cpu size={14} />} label="模型" active={view === "models"} onClick={() => onViewChange("models")} />
           <NavItem collapsed={isCollapsed} icon={<Sparkles size={14} />} label="技能" active={view === "skills"} onClick={() => onViewChange("skills")} />
           <NavItem collapsed={isCollapsed} icon={<Brain size={14} />} label="记忆" active={view === "memory"} onClick={() => onViewChange("memory")} />
+          <NavItem collapsed={isCollapsed} icon={<Fingerprint size={14} />} label="身份" active={view === "identity"} onClick={() => onViewChange("identity")} />
           <NavItem collapsed={isCollapsed} icon={<ScrollText size={14} />} label="提示词" active={view === "prompt"} onClick={() => onViewChange("prompt")} />
           <NavItem collapsed={isCollapsed} icon={<Plug size={14} />} label="插件" active={view === "plugins"} onClick={() => onViewChange("plugins")} />
           <NavItem collapsed={isCollapsed} icon={<Bot size={14} />} label="子代理" active={view === "subagents"} onClick={() => onViewChange("subagents")} />

@@ -8,6 +8,7 @@ import { CodeView } from "@/components/CodeView";
 import { CandidatesPage } from "@/components/CandidatesPage";
 import { ApprovalHistoryPage } from "@/components/ApprovalHistoryPage";
 import { HomeDashboard } from "@/components/HomeDashboard";
+import { IdentityPage } from "@/components/IdentityPage";
 import { MemoryPage, type MemoryProject } from "@/components/MemoryPage";
 import { ModelsPage } from "@/components/ModelsPage";
 import { PluginsPage } from "@/components/PluginsPage";
@@ -37,6 +38,7 @@ const PAGE_TITLES: Record<string, string> = {
   approvals: "审批历史",
   skills: "技能",
   memory: "记忆",
+  identity: "身份",
   prompt: "提示词",
   models: "模型",
   plugins: "插件",
@@ -809,6 +811,7 @@ export function AppShell() {
         {view === "rhythm" && <RhythmPage defaultCwd={defaultCwd} onOpenSession={openSessionById} />}
         {view === "approvals" && <ApprovalHistoryPage onOpenSession={openSessionById} />}
         {view === "memory" && <MemoryPage projects={memoryProjects} />}
+        {view === "identity" && <IdentityPage />}
         {view === "prompt" && <SystemPromptPage defaultCwd={defaultCwd} projects={memoryProjects} />}
         {view === "models" && <ModelsPage />}
         {view === "plugins" && <PluginsPage defaultCwd={defaultCwd} />}
