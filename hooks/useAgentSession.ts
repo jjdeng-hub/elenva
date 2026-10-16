@@ -17,6 +17,7 @@ import { isPromptRejectedError, sendAgentCommand } from "@/lib/agent-client";
 import { clearDraft, rekeyDraft, restoreDraftSubmission } from "@/lib/draft-store";
 import { getPreferredToolPreset, setPreferredToolPreset } from "@/lib/tool-preset-preference";
 import { getPresetFromToolNames, getToolNamesForPreset, type ToolEntry, type ToolPreset } from "@/lib/tool-presets";
+import { normalizeBuiltinSelection } from "@/lib/tool-selection-ui";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { mergeSessionStats, type SessionFileStats } from "@/lib/session-stats";
 import { userMessageKey } from "@/lib/prompt-recovery";
@@ -367,6 +368,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const executeBashRef = useRef<(command: string, excludeFromContext: boolean) => Promise<void> | undefined>(undefined);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const ensuringNewSessionRef = useRef<Promise<string | null> | null>(null);
+  /** 新会话创建时的工具集覆盖（自定义组合无法用三档预设表达；真正的会话仍以 set_tools 落库为准）。 */
+  const newSessionToolNamesRef = useRef<string[] | null>(null);
   const newSessionPromotedRef = useRef(false);
   const newSessionModelOverrideRef = useRef<SelectedModel | null>(null);
   const thinkingLevelOverrideRef = useRef<Exclude<ThinkingLevelOption, "auto"> | null>(null);
@@ -406,6 +409,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   useLayoutEffect(() => {
     if (!existingSessionId && (!isNew || sessionIdRef.current)) return;
     setToolPresetState(getPreferredToolPreset());
+    newSessionToolNamesRef.current = null;
   }, [existingSessionId, isNew, setToolPresetState]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
@@ -684,7 +688,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       const selectedModel = newSessionModelOverrideRef.current;
       const selectedThinkingLevel = thinkingLevelOverrideRef.current;
       if (selectedModel) setPendingModel(selectedModel);
-      const toolNames = getToolNamesForPreset(toolPreset);
+      const toolNames = newSessionToolNamesRef.current ?? getToolNamesForPreset(toolPreset);
       const res = await fetch("/api/agent/new", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1877,14 +1881,21 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     }
   }, [isNew]);
 
-  const handleToolPresetChange = useCallback(async (preset: ToolPreset) => {
-    const toolNames = getToolNamesForPreset(preset);
-    setPreferredToolPreset(preset);
+  /** 应用一份确切的工具名集合（预设与自定义共用）：写盘 + 重建事件流 + 回读状态。 */
+  const applyToolNames = useCallback(async (
+    toolNames: string[],
+    preset: ToolPreset,
+    options: { persistPreference?: boolean } = {},
+  ): Promise<boolean> => {
+    const normalized = normalizeBuiltinSelection(toolNames);
+    if (options.persistPreference) setPreferredToolPreset(preset);
     setToolPresetState(preset);
+    // 新会话：会话尚未创建，先记住组合，ensureNewSession 创建时直接带上。
+    newSessionToolNamesRef.current = normalized;
     const sid = sessionIdRef.current ?? await ensuringNewSessionRef.current;
-    if (!sid) return;
+    if (!sid) return true;
     try {
-      const result = await sendAgentCommand<{ sessionId?: string; recreated?: boolean }>(sid, { type: "set_tools", toolNames });
+      const result = await sendAgentCommand<{ sessionId?: string; recreated?: boolean }>(sid, { type: "set_tools", toolNames: normalized });
       const activeSessionId = result?.sessionId ?? sid;
       if (activeSessionId !== sid) {
         cancelEventStreamGrace();
@@ -1901,10 +1912,23 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       if (sessionHookMountedRef.current && sessionIdRef.current === activeSessionId) {
         setSystemPrompt(state.systemPrompt ?? "");
       }
+      return true;
     } catch (e) {
       console.error("Failed to set tools:", e);
+      addNotice({ message: "切换工具集失败，已保留原设置" });
+      return false;
     }
-  }, [cancelEventStreamGrace, closeEvents, loadTools, setToolPresetState]);
+  }, [addNotice, cancelEventStreamGrace, closeEvents, loadTools, setToolPresetState]);
+
+  const handleToolPresetChange = useCallback((preset: ToolPreset) => {
+    void applyToolNames(getToolNamesForPreset(preset), preset, { persistPreference: true });
+  }, [applyToolNames]);
+
+  /** 细粒度自定义：不做预设偏好持久化（自定义是会话级的，不覆盖新会话默认档）。 */
+  const handleToolSelectionChange = useCallback((toolNames: string[]): Promise<boolean> => {
+    const normalized = normalizeBuiltinSelection(toolNames);
+    return applyToolNames(normalized, getPresetFromToolNames(normalized), { persistPreference: false });
+  }, [applyToolNames]);
 
   const scrollToMessage = useCallback((element: HTMLElement, viewportOffset = 16) => {
     const container = scrollContainerRef.current;
@@ -2164,7 +2188,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     handleRecallQueue,
     handleBuiltinSlashCommand,
     setNoticePaused: setPausedNoticeId,
-    handleToolPresetChange, handleThinkingLevelChange, applySteeringMode, applyFollowUpMode, loadTools, loadSlashCommands, loadModels, setActiveLeafId, setData, setMessages, loadContext,
+    handleToolPresetChange, handleToolSelectionChange, handleThinkingLevelChange, applySteeringMode, applyFollowUpMode, loadTools, loadSystemInfo, loadSlashCommands, loadModels, setActiveLeafId, setData, setMessages, loadContext,
     loadEarlier, loadingEarlier,
     scrollToBottom, scrollUserMsgToTop, scrollToMessage,
     dispatch, setAgentRunning, setForkingEntryId,

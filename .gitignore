@@ -43,6 +43,7 @@ tools/*.mjs
 !tools/scheduled-sessions-selftest.mjs
 !tools/approval-log-selftest.mjs
 !tools/skill-drafts-selftest.mjs
+!tools/tool-selection-ui-selftest.mjs
 tools/*.log
 tools/rev/
 # 临时截图：可能拍到记忆全文等私有内容
