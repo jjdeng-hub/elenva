@@ -50,6 +50,7 @@ tools/*.mjs
 !tools/budget-guard-selftest.mjs
 !tools/subagent-templates-selftest.mjs
 !tools/model-review-selftest.mjs
+!tools/auth-profiles-selftest.mjs
 !tools/skill-advisor-selftest.mjs
 tools/*.log
 tools/rev/
