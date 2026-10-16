@@ -44,6 +44,22 @@ export interface ToolRiskContext {
   cwd: string;
   /** 允许写入的额外根目录（与文件 API 同一套白名单） */
   allowedRoots?: readonly string[];
+  /**
+   * MCP 工具定义上的 annotations（内核 `getAllTools()` 带回，见 M4R6 调研 §1.1④）。
+   * 只对 `mcp__` 工具有意义；取不到时按「没有 annotations」处理。
+   */
+  mcpAnnotations?: McpToolAnnotations;
+}
+
+/**
+ * MCP 服务器自报的工具 hints（结构对齐 pi 的 `ToolAnnotations`）。
+ * 只利用 `readOnlyHint` / `destructiveHint`：前者明确放宽、后者明确收紧。
+ */
+export interface McpToolAnnotations {
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
 }
 
 const SAFE: ToolRisk = { level: "safe", reason: "", ruleKey: "", ruleLabel: "" };
@@ -100,7 +116,7 @@ const BASH_RULES: BashRule[] = [
   bashRule(/\bkill\s+-9\b/i, "destructive", "强制结束进程", "bash:kill-force", "强制结束进程"),
   bashRule(/\bchmod\s+-R\s+777\b|\bchown\s+-R\b/i, "destructive", "递归改动权限/属主", "bash:chmod-r", "递归改权限"),
   bashRule(/\b(drop\s+(table|database)|truncate\s+table)\b/i, "destructive", "删除数据库对象", "bash:sql-drop", "DROP/TRUNCATE 数据库对象"),
-  bashRule(/\b(curl|wget|iwr|invoke-webrequest)\b[^|;&]*\|\s*(sudo\s+)?(ba|z|)sh\b/i, "destructive", "把网上下载的脚本直接喂给 shell 执行", "bash:pipe-shell", "curl | sh 执行远端脚本"),
+  // curl|sh 的规则在下方 RAW_COMMAND_RULES：拆段后 `|` 已被吃掉，见那里的说明
   bashRule(/\bsudo\b|\brunas\b/i, "destructive", "提权执行", "bash:privilege", "sudo 提权"),
   bashRule(/\b(npm|pnpm|yarn|bun)\s+(i|install|add)\s+(-\w+\s+)*-[gG]\b/i, "guarded", "全局安装会改动本机环境，需要联网", "bash:install-global", "全局安装", true),
   bashRule(/\b(pip|pip3)\s+install\b/i, "guarded", "安装 Python 包会执行构建脚本", "bash:pip-install", "pip install", true),
@@ -129,19 +145,40 @@ function splitShellSegments(command: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * 整串命令上的补充规则（**不拆段**）。
+ *
+ * 为什么单列一组：`classifyBash` 先按 `&& ; | \n` 拆段、再对每段跑 `BASH_RULES`，
+ * 而 `bash:pipe-shell` 的正则要求字面 `|` —— `|` 恰好是分隔符，拆完就再也见不到。
+ * 实测（M5R5 报告）：`curl -s URL | sh` 曾判成 safe；`wget -qO- URL | sudo bash`
+ * 只因 `sudo` 命中 privilege 才拦。现与 CLI 侧 `elenva-host-guard/classify.ts`
+ * 的 `RAW_COMMAND_RULES` 同源：先在**整串原始命令**上判这一组。
+ */
+const RAW_COMMAND_RULES: BashRule[] = [
+  bashRule(/\b(curl|wget|iwr|invoke-webrequest)\b[^|;&]*\|\s*(sudo\s+)?(ba|z|)sh\b/i, "destructive", "把网上下载的脚本直接喂给 shell 执行", "bash:pipe-shell", "curl | sh 执行远端脚本"),
+];
+
+function toRisk(rule: BashRule): ToolRisk {
+  return {
+    level: rule.level,
+    reason: rule.reason,
+    ruleKey: rule.ruleKey,
+    ruleLabel: rule.ruleLabel,
+    ...(rule.confirmInRisky ? { confirmInRisky: true } : {}),
+  };
+}
+
 function classifyBash(command: string): ToolRisk {
+  // ① 整串补充规则：需要看穿管道的规则（curl … | sh）在这里判，与 CLI 侧一致
+  for (const rule of RAW_COMMAND_RULES) {
+    if (rule.test.test(command)) return toRisk(rule);
+  }
   const segments = splitShellSegments(command);
   let best: ToolRisk = SAFE;
   for (const segment of segments) {
     for (const rule of BASH_RULES) {
       if (!rule.test.test(segment)) continue;
-      const candidate: ToolRisk = {
-        level: rule.level,
-        reason: rule.reason,
-        ruleKey: rule.ruleKey,
-        ruleLabel: rule.ruleLabel,
-        ...(rule.confirmInRisky ? { confirmInRisky: true } : {}),
-      };
+      const candidate = toRisk(rule);
       if (candidate.level === "destructive") return candidate;
       if (best.level === "safe") best = candidate;
       break;
@@ -211,7 +248,7 @@ export function classifyToolCall(
     return classifyWrite(toolName, input ?? {}, ctx);
   }
   if (toolName.startsWith("mcp__")) {
-    const mcpWrite = classifyMcpWrite(toolName);
+    const mcpWrite = classifyMcpWrite(toolName, ctx.mcpAnnotations);
     if (mcpWrite) return mcpWrite;
     // 读类 MCP 工具落到下面的默认分支（不打扰）
   }
@@ -220,9 +257,16 @@ export function classifyToolCall(
 }
 
 /**
- * MCP 写操作识别：按工具名的词段判断（delete / clear / update / create …）。
- * 命中 → mcpWrite + confirmInRisky（risky 档位也弹卡）；读类返回 null。
- * 真正的弹卡还取决于 mcpWriteApproval 开关（见 host-guardrails-extension）。
+ * MCP 写操作识别：词段启发式 + 服务器 annotations 的**并集兜底**。
+ *
+ * 判定顺序（annotations 只做「明确放宽 / 明确收紧」，不与词段表互相覆盖）：
+ *   ① 词段表命中 → 写操作（词段启发式先行，annotations 不能把它放宽）；
+ *   ② 词段未命中但 destructiveHint === true → 明确收紧，按写操作处理；
+ *   ③ 词段未命中且 readOnlyHint === true → 明确放宽，返回 safe（任何档位都不弹卡）；
+ *   ④ 其余照旧 → null（读类落到默认分支）。
+ *
+ * 命中写操作时给的是 mcpWrite + confirmInRisky；真正的弹卡还取决于
+ * mcpWriteApproval 开关（见 host-guardrails-extension）。
  */
 const MCP_WRITE_SEGMENTS = new Set([
   "delete", "clear", "remove", "update", "create", "write", "append", "add", "set",
@@ -230,20 +274,37 @@ const MCP_WRITE_SEGMENTS = new Set([
   "post", "publish", "replace", "batch", "upload", "insert", "modify", "put", "patch",
 ]);
 
-function classifyMcpWrite(toolName: string): ToolRisk | null {
+function classifyMcpWrite(toolName: string, annotations?: McpToolAnnotations): ToolRisk | null {
   const parsed = parseMcpToolName(toolName);
   const server = parsed?.server ?? "mcp";
   const tool = parsed?.tool ?? toolName;
   const segments = tool.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
-  if (!segments.some((segment) => MCP_WRITE_SEGMENTS.has(segment))) return null;
-  return {
-    level: "guarded",
-    reason: `MCP 写操作：${server} 的 ${tool}`,
-    ruleKey: `mcp-server:${server}`,
-    ruleLabel: `MCP ${server} 的写操作`,
-    confirmInRisky: true,
-    mcpWrite: true,
-  };
+  const wordHit = segments.some((segment) => MCP_WRITE_SEGMENTS.has(segment));
+
+  if (wordHit) {
+    return {
+      level: "guarded",
+      reason: `MCP 写操作：${server} 的 ${tool}`,
+      ruleKey: `mcp-server:${server}`,
+      ruleLabel: `MCP ${server} 的写操作`,
+      confirmInRisky: true,
+      mcpWrite: true,
+    };
+  }
+  // 词段表未命中：destructiveHint 明确收紧（矛盾的 annotations 也以收紧为准）
+  if (annotations?.destructiveHint === true) {
+    return {
+      level: "guarded",
+      reason: `MCP 破坏性操作（服务器标注 destructiveHint）：${server} 的 ${tool}`,
+      ruleKey: `mcp-server:${server}`,
+      ruleLabel: `MCP ${server} 的写操作`,
+      confirmInRisky: true,
+      mcpWrite: true,
+    };
+  }
+  // readOnlyHint 明确放宽：任何审批档位都不弹卡
+  if (annotations?.readOnlyHint === true) return SAFE;
+  return null;
 }
 
 /** 当前审批档位下，这次调用是否需要人工确认 */

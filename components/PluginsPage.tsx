@@ -26,6 +26,15 @@ type McpServer = {
   enabled: boolean;
   transport: "stdio" | "http";
   target: string;
+  /** GET ?probe=1 时附带的连接态（探针结果，60s 缓存） */
+  status?: McpProbeStatus;
+};
+
+/** 连接探针态：已连接 / 失败 / 未启用 / 探测不可用 */
+type McpProbeStatus = {
+  state: "connected" | "failed" | "disabled" | "unavailable";
+  toolCount?: number;
+  error?: string;
 };
 
 /** /api/package-catalog 返回项（npm registry 搜索） */
@@ -131,6 +140,7 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
   /** MCP 服务器（~/.pi/agent/mcp.json；内核在会话启动时连接） */
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [mcpLoading, setMcpLoading] = useState(true);
+  const [mcpProbing, setMcpProbing] = useState(false);
   const [mcpBusy, setMcpBusy] = useState<string | null>(null);
   const [mcpNote, setMcpNote] = useState<string | null>(null);
   /** MCP 写操作确认开关（护栏设置，与审批档位独立） */
@@ -266,15 +276,32 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
     }
   };
 
+  /** 连接探针：单独一次 GET（?probe=1）。失败就保持配置态，不打扰页面。 */
+  const refreshMcpProbe = useCallback(async () => {
+    setMcpProbing(true);
+    try {
+      const res = await fetch("/api/mcp-servers?probe=1", { cache: "no-store" });
+      const data = (await res.json().catch(() => ({}))) as { servers?: McpServer[] };
+      if (Array.isArray(data.servers)) setMcpServers(data.servers);
+    } catch {
+      /* 探针失败：保留配置态 */
+    } finally {
+      setMcpProbing(false);
+    }
+  }, []);
+
   const loadMcp = useCallback(async () => {
     setMcpLoading(true);
+    let count = 0;
     try {
       const [serversData, guardData] = await Promise.all([
         fetch("/api/mcp-servers", { cache: "no-store" }).then((r) => r.json()),
         fetch("/api/guardrails", { cache: "no-store" }).then((r) => r.json()).catch(() => null),
       ]);
       const data = serversData as { servers?: McpServer[]; error?: string };
-      setMcpServers(data.servers ?? []);
+      const servers = data.servers ?? [];
+      count = servers.length;
+      setMcpServers(servers);
       setMcpNote(data.error ?? null);
       const guard = guardData as { mcpWriteApproval?: boolean } | null;
       if (guard && typeof guard.mcpWriteApproval === "boolean") setMcpWriteApproval(guard.mcpWriteApproval);
@@ -283,7 +310,9 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
     } finally {
       setMcpLoading(false);
     }
-  }, []);
+    // 配置先渲染，再后台探一次连接态（有服务器才探）
+    if (count > 0) void refreshMcpProbe();
+  }, [refreshMcpProbe]);
 
   useEffect(() => {
     void loadMcp();
@@ -319,6 +348,8 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
       const data = (await res.json().catch(() => ({}))) as { servers?: McpServer[]; error?: string };
       if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
       if (Array.isArray(data.servers)) setMcpServers(data.servers);
+      // 开关变了，连接态也要重探（服务停了/起来了）
+      void refreshMcpProbe();
       toast(enabled ? `已启用 ${server.name} · 新会话生效` : `已停用 ${server.name} · 新会话生效`);
     } catch (e) {
       toast(`操作失败：${errText(e)}`, 6000);
@@ -831,7 +862,7 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
           )}
           {!mcpLoading && mcpServers.length === 0 && (
             <div className="px-4 py-4 text-[12px] text-dim">
-              {mcpNote ?? "还没有接入任何服务器。接入方式：在 ~/.pi/agent/mcp.json 配置（目前由维护者代管）。"}
+              {mcpNote ?? "未配置：还没有接入任何服务器。接入方式：在 ~/.pi/agent/mcp.json 配置（目前由维护者代管）。"}
             </div>
           )}
           {!mcpLoading && mcpServers.length > 0 && (
@@ -848,6 +879,19 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
                       {!s.enabled && (
                         <span className="rounded-sm bg-panel-2 px-1.5 py-0.5 text-[11px] text-dim">已停用</span>
                       )}
+                      {s.enabled && s.status?.state === "connected" && (
+                        <span className="chip chip-success">已连接 · {s.status.toolCount ?? 0} 工具</span>
+                      )}
+                      {s.enabled && s.status?.state === "failed" && (
+                        <span className="chip chip-danger" title={s.status.error ?? ""}>
+                          失败 ·{" "}
+                          <span className="max-w-[160px] truncate">{s.status.error}</span>
+                        </span>
+                      )}
+                      {s.enabled && s.status?.state === "unavailable" && (
+                        <span className="chip chip-warn" title={s.status.error ?? ""}>无法探测</span>
+                      )}
+                      {s.enabled && !s.status && mcpProbing && <span className="chip">检测中…</span>}
                     </div>
                     <div className="truncate text-[12px] text-dim" title={s.description || s.target}>
                       {s.description || s.target}
@@ -859,7 +903,7 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
             </div>
           )}
           <div className="border-t border-line-soft px-4 py-2 text-[11px] text-dim">
-            改动对新会话生效 · 会话里输入 /mcp 查看连接状态、重连或登录
+            连接态为临时探测结果（60s 缓存）· 改动对新会话生效 · 会话里输入 /mcp 查看、重连或登录
           </div>
         </Card>
       </div>
