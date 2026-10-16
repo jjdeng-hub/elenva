@@ -51,6 +51,7 @@ tools/*.mjs
 !tools/usage-projects-selftest.mjs
 !tools/subagent-templates-selftest.mjs
 !tools/model-review-selftest.mjs
+!tools/model-health-selftest.mjs
 !tools/skill-advisor-selftest.mjs
 !tools/model-notes-selftest.mjs
 tools/*.log
