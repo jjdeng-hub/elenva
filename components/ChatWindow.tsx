@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowDown, ChevronRight, GitBranch, Loader2, MessageSquare, Search, Sparkles, Wrench } from "lucide-react";
+import { ArrowDown, Bot, ChevronRight, GitBranch, Loader2, MessageSquare, MessagesSquare, Search, Wrench } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AgentPhase } from "@/hooks/useAgentSession";
 import { cn } from "@/components/lib/utils";
@@ -433,7 +433,7 @@ export function ChatWindow({
                             : "bg-accent-soft text-accent",
                       )}
                     >
-                      {hit.role === "tool" ? <Wrench size={10} /> : hit.role === "user" ? <MessageSquare size={10} /> : <Sparkles size={10} />}
+                      {hit.role === "tool" ? <Wrench size={10} /> : hit.role === "user" ? <MessageSquare size={10} /> : <Bot size={10} />}
                       {hit.role === "user" ? "用户" : hit.role === "tool" ? "工具" : "回复"}
                     </span>
                     <span className="min-w-0 flex-1 break-words text-[12px] text-muted">
@@ -724,7 +724,7 @@ function phaseToLabel(phase: AgentPhase, running: boolean): string {
 function EmptyChatState({ title }: { title: string }) {
   return (
     <EmptyState
-      icon={<Sparkles size={20} />}
+      icon={<MessagesSquare size={20} />}
       title={title || "开始新对话"}
       hint={
         <>

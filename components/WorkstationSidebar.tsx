@@ -10,6 +10,7 @@ import {
   FlaskConical,
   FolderGit2,
   House,
+  Library,
   ListChecks,
   PanelLeftClose,
   PanelLeftOpen,
@@ -18,7 +19,6 @@ import {
   Server,
   Settings,
   ShieldCheck,
-  Sparkles,
 } from "lucide-react";
 import { useEffect } from "react";
 import { cn } from "@/components/lib/utils";
@@ -191,7 +191,7 @@ export function WorkstationSidebar({
 
       <div className={groupCls}>资源</div>
           <NavItem collapsed={isCollapsed} icon={<Cpu size={14} />} label="模型" active={view === "models"} onClick={() => onViewChange("models")} />
-          <NavItem collapsed={isCollapsed} icon={<Sparkles size={14} />} label="技能" active={view === "skills"} onClick={() => onViewChange("skills")} />
+          <NavItem collapsed={isCollapsed} icon={<Library size={14} />} label="技能" active={view === "skills"} onClick={() => onViewChange("skills")} />
           <NavItem collapsed={isCollapsed} icon={<Brain size={14} />} label="记忆" active={view === "memory"} onClick={() => onViewChange("memory")} />
           <NavItem collapsed={isCollapsed} icon={<Fingerprint size={14} />} label="身份" active={view === "identity"} onClick={() => onViewChange("identity")} />
           <NavItem collapsed={isCollapsed} icon={<ScrollText size={14} />} label="提示词" active={view === "prompt"} onClick={() => onViewChange("prompt")} />

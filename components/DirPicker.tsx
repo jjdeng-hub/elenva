@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowUp, Check, Folder, FolderPlus, HardDrive, Home, Loader2, Sparkles, X } from "lucide-react";
+import { ArrowUp, Check, Folder, FolderPlus, HardDrive, Home, Loader2, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
@@ -355,7 +355,7 @@ export function DirPicker({
               className="btn btn-ghost"
               title={defaultCwd}
             >
-              <Sparkles size={12} /> 使用默认工作区
+              <Home size={12} /> 使用默认工作区
             </button>
           )}
           <span className="ml-auto text-[11px] text-dim">点目录名进入 · 点「选择」直接采用</span>

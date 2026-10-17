@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, Download, FileText, Loader2, Plus, RefreshCw, Save, Search, Sparkles, TrendingUp, X } from "lucide-react";
+import { Archive, ArchiveRestore, Download, FileText, Library, Loader2, Plus, RefreshCw, Save, Search, TrendingUp, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SkillAdvisorReport } from "@/lib/skill-advisor";
@@ -427,7 +427,7 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="page-col py-6">
         <PageHeader
-          icon={<Sparkles size={16} />}
+          icon={<Library size={16} />}
           title="技能"
           subtitle={`管理 Agent 可用的 Skills · 共 ${skills.length} 个`}
           actions={

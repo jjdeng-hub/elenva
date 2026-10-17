@@ -1,6 +1,6 @@
 "use client";
 
-import { Boxes, Check, ChevronRight, Copy, Download, Loader2, Package, Plug, RefreshCw, Search, Server, ShieldCheck, Sparkles, Star, Trash2 } from "lucide-react";
+import { Boxes, Check, ChevronRight, Compass, Copy, Download, Loader2, Package, Plug, RefreshCw, Search, Server, ShieldCheck, Star, Trash2 } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
@@ -738,7 +738,7 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
         <Card className="mb-4 p-4">
           <div className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="flex items-center gap-1.5 text-[13px] font-semibold text-fg">
-              <Sparkles size={14} className="text-accent" />
+              <Compass size={14} className="text-accent" />
               发现插件
             </span>
             <span className="text-[11px] text-dim">来自 npm 的 pi-package 目录 · 按月下载量排序</span>

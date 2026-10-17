@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Loader2, Sparkles, Undo2, Upload } from "lucide-react";
+import { Check, Loader2, MessageSquareText, Undo2, Upload } from "lucide-react";
 import { useState } from "react";
 import { dialogConfirm, toast } from "@/components/ui/dialog";
 import type { GitStatusResponse } from "@/lib/git-types";
@@ -163,7 +163,7 @@ export function CommitBar({
         className="btn btn-sm btn-ghost shrink-0"
         title="让模型读一遍改动，给一条提交信息建议（可再改）"
       >
-        {generating ? <Loader2 size={10} className="anim-spin" /> : <Sparkles size={10} />} 生成信息
+        {generating ? <Loader2 size={10} className="anim-spin" /> : <MessageSquareText size={10} />} 生成信息
       </button>
       <button
         onClick={() => void commit()}

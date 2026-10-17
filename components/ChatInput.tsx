@@ -17,7 +17,7 @@ import {
   Slash,
   Square,
   Undo2,
-  WandSparkles,
+  Wand2,
   Wrench,
   X,
 } from "lucide-react";
@@ -926,7 +926,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   }
                   data-testid="polish-prompt"
                 >
-                  {polishing ? <Loader2 size={14} className="anim-spin" /> : <WandSparkles size={14} />}
+                  {polishing ? <Loader2 size={14} className="anim-spin" /> : <Wand2 size={14} />}
                 </button>
                 {running && (
                   <button

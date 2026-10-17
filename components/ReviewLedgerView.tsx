@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardList, Loader2, MinusCircle, RefreshCw, Sparkles, Upload } from "lucide-react";
+import { ClipboardList, GraduationCap, History, Loader2, MinusCircle, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { EmptyState, Skeleton } from "@/components/ui/bits";
@@ -55,7 +55,7 @@ export function ReviewLedgerView({ onOpenMemoryEntry }: { onOpenMemoryEntry: (fi
     <div className="flex flex-col gap-3">
       <Card>
         <CardHeader>
-          <Sparkles size={12} className="text-dim" />
+          <History size={12} className="text-dim" />
           <CardTitle>复台账</CardTitle>
           {summary && (
             <span className="ml-1 text-[11px] tabular-nums text-dim">
@@ -83,7 +83,7 @@ export function ReviewLedgerView({ onOpenMemoryEntry }: { onOpenMemoryEntry: (fi
           </div>
         </CardHeader>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-          <SummaryStat icon={<Sparkles size={12} />} label="学到" value={summary?.learned ?? 0} tone="accent" />
+          <SummaryStat icon={<GraduationCap size={12} />} label="学到" value={summary?.learned ?? 0} tone="accent" />
           <SummaryStat icon={<Upload size={12} />} label="更新" value={summary?.touched ?? 0} />
           <SummaryStat icon={<MinusCircle size={12} />} label="去掉" value={summary?.removed ?? 0} />
           <SummaryStat icon={<ClipboardList size={12} />} label="工作" value={summary?.work ?? 0} />
@@ -135,7 +135,7 @@ export function ReviewLedgerView({ onOpenMemoryEntry }: { onOpenMemoryEntry: (fi
             </div>
             <div className="flex flex-col gap-3 px-4 py-3">
               {bucket.learned.length > 0 && (
-                <Section icon={<Sparkles size={12} />} title="学到" tone="accent">
+                <Section icon={<GraduationCap size={12} />} title="学到" tone="accent">
                   {bucket.learned.map((item, i) => (
                     <MemoryRow key={i} label={item.label} preview={item.preview} created={item.created} last={item.last} onOpen={() => onOpenMemoryEntry(item.file)} />
                   ))}

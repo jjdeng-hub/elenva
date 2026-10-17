@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Brain, CalendarDays, EyeOff, FileText, Gauge, Inbox, Info, Loader2, Pencil, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2, User, X } from "lucide-react";
+import { AlertTriangle, Brain, CalendarDays, EyeOff, FileText, Gauge, Inbox, Info, ListChecks, Loader2, Pencil, Plus, RefreshCw, RotateCcw, Save, Trash2, User, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { cn } from "@/components/lib/utils";
@@ -1205,7 +1205,7 @@ function MemorySuggestionsBlock({
     >
       {/* ≥1280 双列 / ≥2200 三列（同一组任意断点，按数值排序才不被盖掉）：候选卡同网格行等高；按钮行 mt-auto 贴卡底，避免长短句导致操作位置参差 */}
       <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-fg min-[1280px]:col-span-2 min-[2200px]:col-span-3">
-        <Sparkles size={12} className="text-dim" />
+        <ListChecks size={12} className="text-dim" />
         整理候选 · {suggestions.length} 条
         <span className="ml-auto text-[10px] font-normal text-dim">
           从工作记录里找的沉淀线索；确认后存入记忆，不会改动工作记录
