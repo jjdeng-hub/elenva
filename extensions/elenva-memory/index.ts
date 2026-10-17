@@ -61,7 +61,8 @@ import { loadState, recordAccess, recordEvidence, recordToolCall, saveState, sta
 import { runTidy, renderTidyReport } from "./tidy.js";
 import { readAllStores } from "./stores.js";
 import { recordMemoryOrigin } from "./origins.js";
-import { renderSearchResults, searchEntries } from "./search.js";
+import { renderSearchDetails, renderSearchList, renderSearchResults, findEntriesByIds, searchEntries, DEFAULT_LIST_BUDGET_CHARS } from "./search.js";
+import { reindexIndexes, renderReindexReport } from "./reindex.js";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -130,24 +131,75 @@ function registerElenvaLayer(pi: ExtensionAPI): void {
     name: "memory_find",
     label: "记忆检索（重排）",
     description:
-      "在长期记忆里检索，返回带来源与重排分数的原文。比 memory_search 多三样：相关性重排（词面+相似+重要性）、每条来源置信（scope/日期/引用次数/写入方式）、与其它条目的冲突标注。想不起细节、需要确认某条约定时先用它。已失效条目默认不返回；需要时把 include_invalidated 设为 true 显式查（结果会标注已失效）。",
+      "在长期记忆里检索。默认返回**行式清单**（每条一行摘要 + 来源/失效/冲突标注，带字符预算）——先看有哪些，再用 ids 取正文。比 memory_search 多三样：相关性重排（词面+相似+重要性）、每条来源置信（scope/日期/引用次数/写入方式）、与其它条目的冲突标注。" +
+      "取正文用 ids（如 ids:[\"a1b2c3\"]，清单里的 6 位短 id 即可，按 id 取会返回失效条目并标注）；要看全部详情用 full:true（旧行为）；budget_chars 调清单预算。已失效条目默认不参与查询（list/full）；需要时把 include_invalidated 设为 true。",
     parameters: Type.Object({
-      query: Type.String({ description: "检索词：人名、项目名、命令、数字、关键词，中英文都行" }),
-      limit: Type.Optional(Type.Number({ description: "返回条数，默认 5" })),
+      query: Type.Optional(
+        Type.String({ description: "检索词：人名、项目名、命令、数字、关键词，中英文都行（用 ids 时可省略）" }),
+      ),
+      limit: Type.Optional(
+        Type.Number({ description: "返回条数：清单默认 10，full 默认 5（ids 模式忽略；上限 20）" }),
+      ),
       include_invalidated: Type.Optional(
-        Type.Boolean({ description: "显式包含已失效条目（默认 false）。用于恢复前确认、或查历史结论。" }),
+        Type.Boolean({ description: "查询模式（list/full）显式包含已失效条目（默认 false）。ids 模式恒含失效条目并标注，此开关无效。" }),
+      ),
+      ids: Type.Optional(
+        Type.Array(Type.String(), {
+          description: "按 id（或清单里的 6 位短 id）精确取详情卡；与 query 互斥（给了 ids 就忽略 query）。最多 20 个。",
+        }),
+      ),
+      full: Type.Optional(
+        Type.Boolean({ description: "true = 回到旧「全详情卡」行为（不截断成清单）。与 ids 互斥，ids 优先。" }),
+      ),
+      budget_chars: Type.Optional(
+        Type.Number({ description: `清单层字符预算（默认 ${DEFAULT_LIST_BUDGET_CHARS}）；超限会截断并提示还有多少条。` }),
       ),
     }),
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       const stores = readAllStores(ctx.cwd);
       const state = loadState();
-      const limit = Number.isFinite(params.limit) ? Math.max(1, Math.min(20, Number(params.limit))) : 5;
-      const hits = searchEntries(stores, state, String(params.query ?? ""), limit, {
+      const limit = Number.isFinite(params.limit) ? Math.max(1, Math.min(20, Number(params.limit))) : undefined;
+      const rawIds = Array.isArray(params.ids)
+        ? params.ids.map((id) => String(id)).filter((id) => id.trim().length > 0)
+        : [];
+
+      // L3 详情层：按 id 精确取（显式召回，含失效条目并标注）。
+      if (rawIds.length > 0) {
+        const { hits, missing } = findEntriesByIds(stores, state, rawIds);
+        return {
+          content: [{ type: "text", text: renderSearchDetails(hits, rawIds, missing) }],
+          details: { mode: "ids", hits: hits.length, missing },
+        };
+      }
+
+      const query = String(params.query ?? "");
+      const hits = searchEntries(stores, state, query, limit ?? 5, {
         includeInvalidated: params.include_invalidated === true,
       });
+
+      // 兼容开关：full = 旧「全详情卡」。
+      if (params.full === true) {
+        return {
+          content: [{ type: "text", text: renderSearchResults(hits, query) }],
+          details: { mode: "full", hits: hits.length, includeInvalidated: params.include_invalidated === true },
+        };
+      }
+
+      // L2 清单层（默认）：行式摘要 + 预算截断。
+      const listHits = searchEntries(stores, state, query, limit ?? 10, {
+        includeInvalidated: params.include_invalidated === true,
+      });
+      const text = renderSearchList(listHits, query, {
+        budgetChars: Number.isFinite(params.budget_chars) ? Number(params.budget_chars) : undefined,
+      });
       return {
-        content: [{ type: "text", text: renderSearchResults(hits, String(params.query ?? "")) }],
-        details: { hits: hits.length, includeInvalidated: params.include_invalidated === true },
+        content: [{ type: "text", text }],
+        details: {
+          mode: "list",
+          hits: listHits.length,
+          chars: text.length,
+          includeInvalidated: params.include_invalidated === true,
+        },
       };
     },
   });
@@ -200,6 +252,33 @@ function registerElenvaLayer(pi: ExtensionAPI): void {
     description: "整理记忆：去重、标注冲突、按重要性给出淘汰建议（--apply 执行归档）",
     handler: async (args: string, ctx: ExtensionCommandContext) => {
       await handleTidy(args, ctx);
+    },
+  });
+
+  // ── 3.5 索引可重建：/memory-reindex（R3）───────────────────────────────────
+  //
+  // 依据 ch3 L482：索引必须能被显式维护/重建，否则知识越多越难检索。
+  // sessions.db 是派生物（会话 JSONL + 记忆 Markdown 才是 source of truth），
+  // 所以「坏了能一键重建 + 对账」比「祈祷它不坏」更省事。
+  pi.registerCommand("memory-reindex", {
+    description: "重建会话/记忆检索索引（sessions.db 的 FTS + 记忆镜像重扫），输出对账；幂等、先备份",
+    handler: async (_args: string, ctx: ExtensionCommandContext) => {
+      try {
+        ctx.ui?.notify?.("🔧 重建索引中（先备份 sessions.db）…", "info");
+        const report = await reindexIndexes({ cwd: ctx.cwd });
+        const text = renderReindexReport(report);
+        ctx.ui?.notify?.(
+          report.reconcile.ok
+            ? `索引重建完成：${report.totals.sessions} 会话 / ${report.totals.messages} 消息，对账一致`
+            : `索引重建完成，但对账有 ${report.reconcile.mismatches.length} 处不一致`,
+          report.reconcile.ok ? "info" : "warning",
+        );
+        console.log(text);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        ctx.ui?.notify?.(`索引重建失败：${message}`, "error");
+        console.log(`索引重建失败：${message}`);
+      }
     },
   });
 
