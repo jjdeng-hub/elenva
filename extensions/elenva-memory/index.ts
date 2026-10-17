@@ -26,12 +26,16 @@
  * 偏离（已登记）：书里的 L0/L1 摘要由模型在**写入时**生成；我们先用**确定性截断摘要**（零模型调用、
  * 可回归），若评估显示可检索性下降再升级为 LLM 摘要。
  *
- * ## 与 pi-hermes-memory 的分工
+ * ## 与底座（已收编的 pi-hermes-memory）的分工
+ *
+ * 2026-10-17 起，原先作为第三方包的 `pi-hermes-memory` 已**收编**进
+ * `vendor/pi-hermes-memory/`（见其 `ELENVA-NOTES.md`），本文件是**唯一入口**：
+ * 先注册底座的全部工具 / 钩子 / 命令，再注册本层。
  *
  * | 谁 | 管什么 |
  * |---|---|
- * | pi-hermes-memory | 记忆的**读写工具**（memory_add / replace / remove / search）、存储格式、配额 |
- * | 本扩展 | （配置为 `memoryMode: "policy-only"` 后）**常驻索引的注入**、访问计数、整理与归档 |
+ * | 底座（vendor） | 记忆的**读写工具**（memory_add / replace / remove / search）、session_search、skill_manage、存储格式、配额、SQLite 索引 |
+ * | 本层 | （配置为 `memoryMode: "policy-only"` 后）**常驻索引的注入**、访问计数、整理与归档 |
  *
  * 两边的契约是**文件格式**（`\n§\n` 分隔 + 尾部 `<!-- created=…, last=… -->`），
  * 本扩展从不改这个格式，也只改「条目集合」，不动条目内部文本（除归档动作）。
@@ -51,6 +55,7 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import piHermesMemory from "./vendor/pi-hermes-memory/src/index.js";
 import { buildIndexBlock, stripIndexMessages } from "./index-block.js";
 import { loadState, recordAccess, recordEvidence, recordToolCall, saveState, stateDirFor } from "./state.js";
 import { runTidy, renderTidyReport } from "./tidy.js";
@@ -74,6 +79,16 @@ function indexEnabled(): boolean {
 }
 
 export default function elenvaMemory(pi: ExtensionAPI): void {
+  // ELENVA-FORK（收编入口）：先注册底座的全部工具 / 钩子 / 命令，再注册本层。
+  // 两边的注册面不重叠（底座：memory_add/replace/remove/search、session_search、
+  // skill_manage 与既有命令；本层：memory_find、memory-tidy、context 注入、tool_result 计量）。
+  // 注入面：底座在 `memoryMode: "policy-only"` 下只注入策略提示词（before_agent_start），
+  // 记忆内容概览一律由本层的 context 索引注入负责 —— 这条语义不变。
+  piHermesMemory(pi);
+  registerElenvaLayer(pi);
+}
+
+function registerElenvaLayer(pi: ExtensionAPI): void {
   // ── 1. 常驻索引：每轮把「记忆目录」追加到**上下文末尾** ────────────────────
   //
   // 依据《深入理解 AI Agent》ch2 L914：状态类动态信息应当**追加到上下文末尾**，
