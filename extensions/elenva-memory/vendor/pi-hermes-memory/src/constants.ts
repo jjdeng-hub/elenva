@@ -4,6 +4,8 @@
  * See PLAN.md → "Hermes Source File Reference Map" for exact source lines.
  */
 
+import type { MemoryUsage } from "./types.js";
+
 // ─── Entry delimiter (same as Hermes) ───
 export const ENTRY_DELIMITER = "\n§\n";
 
@@ -48,6 +50,20 @@ export const DEFAULT_FLUSH_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 /** Wall-clock grace after overflow before an automatic consolidation may run. */
 export const DEFAULT_OVERFLOW_GRACE_MS = 180000;
+/**
+ * ELENVA-FORK (R2): default near-full advisory threshold (ratio). A successful
+ * write at or above this water level reports an advisory so the model merges /
+ * condenses before the store reaches its hard cap. `nearFullThreshold: 0`
+ * disables the advisory; the hard cap is unchanged either way.
+ */
+export const DEFAULT_NEAR_FULL_THRESHOLD = 0.85;
+/**
+ * ELENVA-FORK (R2): review/consolidation prompts must produce a merge or
+ * removal for any target at or above this percentage — appending alone is not
+ * allowed. Kept as a fixed rule (independent of the advisory config) so the
+ * budget rule cannot be silently loosened.
+ */
+export const MEMORY_BUDGET_MERGE_THRESHOLD_PERCENT = 85;
 export const DEFAULT_FAILURE_INJECTION_MAX_AGE_DAYS = 7;
 export const DEFAULT_FAILURE_INJECTION_MAX_ENTRIES = 5;
 
@@ -206,6 +222,28 @@ ${projectRule}
 - Failures, corrections, insights, and tool quirks: use target "failure" (keep these categorized as failure memories; do not reroute them to project or global memory).`;
 }
 
+// ─── Memory budget section (ELENVA-FORK R2) ───
+// Review and consolidation prompts get the actual water level of every target,
+// not just the entry text: without it the model cannot tell that it is at 92%
+// and keeps appending, which is exactly how memory debt accumulated.
+export interface MemoryBudgetRow extends MemoryUsage {
+  label: string;
+}
+
+export function buildMemoryBudgetSection(rows: readonly MemoryBudgetRow[]): string {
+  if (rows.length === 0) return "";
+  const lines = rows.map((row) =>
+    `- ${row.label}: ${row.charCount}/${row.limit} chars (${row.percent}%), `
+    + `${row.entryCount} ${row.entryCount === 1 ? "entry" : "entries"}`,
+  );
+  const hot = rows.filter((row) => row.limit > 0 && row.percent >= MEMORY_BUDGET_MERGE_THRESHOLD_PERCENT);
+  const hotNote = hot.length > 0
+    ? `\nTargets at or above ${MEMORY_BUDGET_MERGE_THRESHOLD_PERCENT}%: ${hot.map((row) => row.label).join(", ")}.`
+      + " For each of these you MUST emit at least one merge/condense/remove operation — never append alone."
+    : `\nNo target is at or above ${MEMORY_BUDGET_MERGE_THRESHOLD_PERCENT}%; appending is allowed, but merge near-duplicates when you see them.`;
+  return `--- Memory Budget ---\n${lines.join("\n")}${hotNote}`;
+}
+
 // ─── Background review prompt (ported from _COMBINED_REVIEW_PROMPT in run_agent.py ~L2855) ───
 export const COMBINED_REVIEW_PROMPT = `Review the conversation above and consider these aspects:
 
@@ -219,6 +257,10 @@ export const COMBINED_REVIEW_PROMPT = `Review the conversation above and conside
 - [tool-quirk] Any tool-specific knowledge gained?
 
 For failures, include: what was tried, why it failed, what error occurred, and what worked instead.
+
+**Memory budget**: Every target has a character limit, listed in the Memory Budget section. When a target is at or above 85% of its limit you MUST produce at least one merge/condense/remove operation for that target — appending new entries alone is not allowed. Merge near-duplicates first, then drop superseded or contradicted facts.
+
+**What makes a good entry**: applicable (useful in a future session, not task progress), durable (still true later), legible (a future reader can act on it without this conversation).
 
 **Skills**: Do NOT create or modify skills in this background review. Procedural skills are managed explicitly by the main agent through the skill_manage tool during normal work, not by this review subprocess.
 
@@ -256,6 +298,10 @@ Review these aspects:
 - **Memory**: User persona, preferences, expectations about how the agent should behave, work style.
 - **Failures & Corrections**: What failed, user corrections, insights, conventions, tool quirks.
 
+**Memory budget**: Every target has a character limit, listed in the Memory Budget section. When a target is at or above 85% of its limit you MUST produce at least one merge/condense/remove operation for that target — appending new entries alone is not allowed. Merge near-duplicates first, then drop superseded or contradicted facts.
+
+**What makes a good entry**: applicable (useful in a future session, not task progress), durable (still true later), legible (a future reader can act on it without this conversation).
+
 Do NOT create or modify skills. Only save genuinely durable facts — not task progress, session outcomes, or temporary state.
 
 ${DIRECT_MEMORY_OPERATIONS_SCHEMA}
@@ -278,6 +324,8 @@ export const DIRECT_CONSOLIDATION_SYSTEM_PROMPT = `The memory store you're given
 - Remove outdated or superseded entries (entries older than 30 days without recent references are candidates for removal)
 - Keep the most important and frequently-referenced facts
 - Preserve user preferences and corrections (highest priority)
+
+You MUST shrink the store: every added entry must be paid for by merging or removing at least as much. Never append alone. The Memory Budget section gives the target's chars/limit/percent.
 
 Each entry shows when it was created and last referenced in HTML comments (<!-- created=..., last=... -->). Use this to identify stale entries.
 
@@ -308,6 +356,8 @@ export const CONSOLIDATION_PROMPT = `The memory is at capacity. Review the curre
 - Remove outdated or superseded entries (entries older than 30 days without recent references are candidates for removal)
 - Keep the most important and frequently-referenced facts
 - Preserve user preferences and corrections (highest priority)
+
+You MUST shrink the store: every added entry must be paid for by merging or removing at least as much. Never append alone. The Memory Budget section gives the target's chars/limit/percent.
 
 Each entry shows when it was created and last referenced in HTML comments (<!-- created=..., last=... -->). Use this to identify stale entries.
 

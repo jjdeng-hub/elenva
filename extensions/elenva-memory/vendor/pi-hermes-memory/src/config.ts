@@ -14,6 +14,7 @@ import {
   DEFAULT_CONSOLIDATION_TIMEOUT_MS,
   DEFAULT_FLUSH_COMPACT_TIMEOUT_MS,
   DEFAULT_OVERFLOW_GRACE_MS,
+  DEFAULT_NEAR_FULL_THRESHOLD,
   DEFAULT_FAILURE_INJECTION_MAX_AGE_DAYS,
   DEFAULT_FAILURE_INJECTION_MAX_ENTRIES,
   DEFAULT_SESSION_RETENTION_DAYS,
@@ -59,6 +60,7 @@ const DEFAULT_CONFIG: MemoryConfig = {
   flushCompactTimeoutMs: DEFAULT_FLUSH_COMPACT_TIMEOUT_MS,
   memoryOverflowStrategy: "auto-consolidate",
   overflowGraceMs: DEFAULT_OVERFLOW_GRACE_MS,
+  nearFullThreshold: DEFAULT_NEAR_FULL_THRESHOLD,
   autoConsolidate: true,
   correctionDetection: true,
   failureInjectionEnabled: true,
@@ -132,6 +134,12 @@ export function loadConfig(configPath = DEFAULT_CONFIG_PATH): MemoryConfig {
         hasMemoryOverflowStrategy = true;
       }
       if (isNonNegativeNumber(parsed.overflowGraceMs)) config.overflowGraceMs = parsed.overflowGraceMs;
+      // Accept both a ratio (0..1) and a percentage (0..100): ELENVA config is
+      // hand-edited, so `nearFullThreshold: 90` must mean the same as `0.9`.
+      if (isNonNegativeNumber(parsed.nearFullThreshold)) {
+        if (parsed.nearFullThreshold <= 1) config.nearFullThreshold = parsed.nearFullThreshold;
+        else if (parsed.nearFullThreshold <= 100) config.nearFullThreshold = parsed.nearFullThreshold / 100;
+      }
       if (typeof parsed.correctionDetection === "boolean") config.correctionDetection = parsed.correctionDetection;
       if (isStringArray(parsed.correctionStrongPatterns)) config.correctionStrongPatterns = parsed.correctionStrongPatterns;
       if (isStringArray(parsed.correctionWeakPatterns)) config.correctionWeakPatterns = parsed.correctionWeakPatterns;

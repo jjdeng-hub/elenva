@@ -71,6 +71,13 @@ export interface MemoryConfig {
   memoryOverflowStrategy?: MemoryOverflowStrategy;
   /** Wall-clock grace after overflow before automatic consolidation. Default: 180000 */
   overflowGraceMs?: number;
+  /**
+   * Water level (ratio 0..1, or 0..100 interpreted as a percentage) at or
+   * above which a *successful* write reports a near-full advisory. `0`
+   * disables it. ELENVA-FORK (R2): advisory only — never blocks or mutates.
+   * Default: 0.85
+   */
+  nearFullThreshold?: number;
   /** Legacy alias for memoryOverflowStrategy. Default: true */
   autoConsolidate: boolean;
   /** Detect user corrections and trigger immediate memory save. Default: true */
@@ -114,9 +121,25 @@ export type MemoryCategory =
   | "convention"
   | "tool-quirk";
 
+export interface MemoryUsage {
+  /** Characters currently stored (entries joined by the entry delimiter). */
+  charCount: number;
+  /** Character limit for the target. */
+  limit: number;
+  /** charCount / limit as an integer percentage (may exceed 100). */
+  percent: number;
+  /** Number of entries in the target. */
+  entryCount: number;
+}
+
 export interface MemoryResult {
   success: boolean;
   error?: string;
+  /**
+   * ELENVA-FORK (R2): set on capacity errors so callers (auto-consolidation,
+   * flush, review) can detect overflow structurally instead of matching on a
+   * localized error string. */
+  overflow?: boolean;
   message?: string;
   warning?: string;
   warnings?: string[];
