@@ -25,7 +25,10 @@ export async function GET() {
     for (const file of listAgentMemoryFiles().files) {
       const snapshot = readAgentMemorySnapshot(file.id);
       const pairs = findMemoryConflicts(
-        snapshot.entries.map((entry) => ({ text: entry.text, created: entry.created })),
+        // R2r2：失效条目不再参与冲突候选（它们已退场，标它们「矛盾」只会制造噪声）。
+        snapshot.entries
+          .filter((entry) => !entry.invalidated)
+          .map((entry) => ({ text: entry.text, created: entry.created })),
       );
       if (pairs.length > 0) groups.push({ file: file.id, label: file.label, pairs });
     }

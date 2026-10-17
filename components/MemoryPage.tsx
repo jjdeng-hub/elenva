@@ -61,6 +61,10 @@ type MemoryEntry = {
   text: string;
   created: string | null;
   last: string | null;
+  /** R2r2 失效状态：ISO 日期 = 已失效；null / 缺省 = 有效 */
+  invalidated?: string | null;
+  /** 失效原因（已归一） */
+  reason?: string | null;
   origin?: MemoryOrigin;
 };
 
@@ -790,8 +794,16 @@ function AgentMemoryView({ scrollRef, initialId = "memory" }: { scrollRef: RefOb
                         </div>
                       ) : (
                         <>
+                          {entry.invalidated && (
+                            <div className="mb-1 flex items-center gap-1">
+                              <span className="chip chip-warn" title={entry.reason ?? undefined}>
+                                已失效 {entry.invalidated}
+                              </span>
+                              {entry.reason && <span className="text-[10px] text-dim">{entry.reason}</span>}
+                            </div>
+                          )}
                           <div className="flex items-start gap-2">
-                            <pre className="min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-fg">
+                            <pre className={`min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed ${entry.invalidated ? "text-dim line-through" : "text-fg"}`}>
                               {entry.text}
                             </pre>
                             <div className="flex shrink-0 items-center gap-1">

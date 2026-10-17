@@ -147,6 +147,8 @@ export function parseCorrectionItems(
 ): CorrectionItem[] {
   const items: CorrectionItem[] = [];
   for (const entry of parseMemoryEntries(raw)) {
+    // R2r2：已失效的纠正条目已退场，不再进收件箱（否则会把「已推翻的教训」当成待处理项）。
+    if (entry.invalidated) continue;
     if (!isCorrectionText(entry.text)) continue;
     const core = stripCorrectionTag(entry.text);
     const [statement, failureReason] = splitFailureReason(core);

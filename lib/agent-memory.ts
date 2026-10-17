@@ -283,11 +283,22 @@ export interface AgentMemoryEntry {
   text: string;
   created: string | null;
   last: string | null;
+  /** R2r2 失效状态：ISO 日期 = 已失效；null / undefined = 有效（旧格式默认态） */
+  invalidated?: string | null;
+  /** 失效原因（≤120 字符，写入时已归一） */
+  reason?: string | null;
 }
 
 const ENTRY_DELIMITER = "\n§\n";
+// R2r2：尾部注释额外容忍可选 `, invalidated=YYYY-MM-DD[, reason=…]`；
+// 旧格式（无这两个字段）与旧解析器完全一致 → 有效默认态。
 const ENTRY_META_PATTERN =
-  /^([\s\S]*?)\s*<!--\s*created=([^,]+),\s*last=([^,>]+)(?:,\s*project64=[A-Za-z0-9_-]+)?\s*-->\s*$/;
+  /^([\s\S]*?)\s*<!--\s*created=([^,]+),\s*last=([^,>]+)(?:,\s*project64=[A-Za-z0-9_-]+)?(?:,\s*invalidated=([^,>]+))?(?:,\s*reason=([^>]*?))?\s*-->\s*$/;
+
+/** 合法失效日期（与扩展同口径）：不是 ISO 日期就当作「未失效」 */
+export function parseInvalidatedAt(value: string | null | undefined): string | null {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
 
 export function parseMemoryEntries(raw: string): AgentMemoryEntry[] {
   return raw
@@ -296,8 +307,15 @@ export function parseMemoryEntries(raw: string): AgentMemoryEntry[] {
     .filter(Boolean)
     .map((chunk) => {
       const match = ENTRY_META_PATTERN.exec(chunk);
-      if (!match) return { text: chunk.trim(), created: null, last: null };
-      return { text: match[1].trim(), created: match[2].trim(), last: match[3].trim() };
+      if (!match) return { text: chunk.trim(), created: null, last: null, invalidated: null, reason: null };
+      const invalidated = parseInvalidatedAt(match[4]?.trim());
+      return {
+        text: match[1].trim(),
+        created: match[2].trim(),
+        last: match[3].trim(),
+        invalidated,
+        reason: invalidated && match[5]?.trim() ? match[5].trim() : null,
+      };
     })
     .filter((entry) => entry.text.length > 0);
 }
@@ -319,9 +337,26 @@ export function serializeMemoryEntries(entries: AgentMemoryEntry[], previous: Ag
       const before = known.get(text);
       const created = entry.created?.trim() || before?.created?.trim() || todayStamp();
       const last = before ? before.last?.trim() || todayStamp() : todayStamp();
-      return `${text} <!-- created=${created}, last=${last} -->`;
+      // R2r2：失效状态是可选的——没给就沿用磁盘上同一条的旧值；从未失效过就完全不加字段。
+      const invalidated = parseInvalidatedAt(entry.invalidated ?? before?.invalidated ?? null);
+      const rawReason = entry.reason ?? before?.reason ?? null;
+      const reason = invalidated && rawReason && rawReason.trim() ? `, reason=${normalizeInvalidationReason(rawReason)}` : "";
+      const invalidation = invalidated ? `, invalidated=${invalidated}${reason}` : "";
+      return `${text} <!-- created=${created}, last=${last}${invalidation} -->`;
     })
     .join(ENTRY_DELIMITER);
+}
+
+/** R2r2：失效原因归一（与扩展同口径）——压空白、逗号换全角、去 `-->`、截断 120 */
+export function normalizeInvalidationReason(reason: string | null | undefined): string {
+  const raw = typeof reason === "string" ? reason : "";
+  const flat = raw
+    .replace(/\s+/g, " ")
+    .replace(/,/g, "，")
+    .replace(/-+>/g, "→")
+    .replace(/>/g, "＞")
+    .trim();
+  return flat.length > 120 ? `${flat.slice(0, 119)}…` : flat;
 }
 
 function hashText(text: string): string {
@@ -438,6 +473,8 @@ export function writeAgentMemoryFile(id: string, input: AgentMemoryWriteInput): 
       text,
       created: typeof raw.created === "string" ? raw.created : null,
       last: typeof raw.last === "string" ? raw.last : null,
+      invalidated: parseInvalidatedAt(typeof raw.invalidated === "string" ? raw.invalidated : null),
+      reason: typeof raw.reason === "string" ? raw.reason : null,
     });
   }
 

@@ -243,6 +243,11 @@ export function collectMemoryItems(files: MemoryFileRef[]): ReviewLedgerMemoryIt
     for (const entry of parseMemoryEntries(readText(file.path))) {
       const text = entry.text.trim();
       if (!text) continue;
+      // R2r2：失效条目是「已退场的历史」，不再算作本轮学到的知识；
+      // 它们仍在文件里（可 restore），只是不进复台账的「新增 / 更新」。
+      // 另：失效只改元数据不改正文，下面的快照差分按正文比对，
+      // 因此一次「标失效」不会被误读成「删除了某条」。
+      if (entry.invalidated) continue;
       out.push({
         file: file.id,
         label: file.label,
@@ -429,6 +434,8 @@ function entryMap(raw: string): Map<string, string> {
 /**
  * 快照差集：相邻两份状态间「前有后无」的条目视为被去掉，记在**后一份快照**的时间点。
  * 近似：条目被改写（而非删除）同样会表现为旧文本消失 —— 展示层标注。
+ * R2r2：标失效不改正文，所以失效条目的正文仍在前 / 后两份快照的 entryMap 里，
+ * 不会被记成「去掉」；只有真正从文件消失（remove / tidy 清出）才进 removed。
  */
 export function collectRemovals(files: MemoryFileRef[]): ReviewLedgerRemovedItem[] {
   const out: ReviewLedgerRemovedItem[] = [];
