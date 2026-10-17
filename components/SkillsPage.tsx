@@ -612,8 +612,8 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
                   >
                     <span
                       className={cn(
-                        "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-all",
-                        enabled ? "left-[18px]" : "left-0.5",
+                        "absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-sm t-base",
+                        enabled ? "translate-x-4" : "translate-x-0",
                       )}
                     />
                   </button>

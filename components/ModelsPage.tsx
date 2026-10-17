@@ -772,7 +772,7 @@ export function ModelsPage() {
                   <span className="truncate font-mono text-[11px] text-dim">
                     {e.provider || e.providerName} / {e.id}
                   </span>
-                  <span className="ml-auto shrink-0 text-[11px] text-accent">添加 →</span>
+                  <span className="ml-auto shrink-0 text-[11px] text-accent">添加</span>
                 </button>
               ))}
             </div>

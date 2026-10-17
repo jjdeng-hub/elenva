@@ -357,6 +357,15 @@
     font-size: var(--fs-caption);
   }
 
+  /* 微标签：弹层/列表/小节头的元信息标签，全站同一档（11px / 500 / 0.02em）。
+     颜色由调用点的工具类给（text-dim / text-accent 等），此处不写死。
+     Latin 标签（provider 名等）可在调用点叠 `uppercase`；中文标签不必。 */
+  .label-micro {
+    font-size: var(--fs-caption);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+
   /* ================= 品牌空态底纹 =================
      28px 细网格 + 径向遮罩（从中心向外淡出），让 logo / 标语 / 输入框浮于其上。
      **静态**纹理，不是装饰性动画。

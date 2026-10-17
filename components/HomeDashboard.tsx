@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Cpu, Gauge, KeyRound, Loader2, Play } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, Cpu, Gauge, KeyRound, Loader2, Play } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
 import { basename, formatCost, formatTokens, relTime, timeLabel } from "@/lib/format";
@@ -417,9 +417,9 @@ export function HomeDashboard({
               <span className="text-[12px] font-semibold text-warn">等你处理（{waitCount}）</span>
               <button
                 onClick={() => setTab("attention")}
-                className="ml-auto cursor-pointer text-[12px] font-medium text-accent t-fast hover:text-accent-hover"
+                className="ml-auto inline-flex cursor-pointer items-center gap-1 text-[12px] font-medium text-accent t-fast hover:text-accent-hover"
               >
-                查看全部 →
+                查看全部 <ArrowRight size={12} />
               </button>
             </div>
             <div className="mt-1 flex flex-col">
@@ -473,7 +473,7 @@ export function HomeDashboard({
               data-testid="guide-setup"
               className="btn btn-primary h-9 shrink-0 px-3.5"
             >
-              接入模型 →
+              接入模型
             </button>
           </div>
         )}
@@ -526,7 +526,7 @@ export function HomeDashboard({
                 onClick={onViewAll}
                 className="flex items-center gap-1 text-[12px] font-medium text-accent cursor-pointer hover:text-accent-hover"
               >
-                查看全部 →
+                查看全部 <ArrowRight size={12} />
               </button>
             </div>
             {/* 标签页 */}
@@ -795,9 +795,9 @@ export function HomeDashboard({
               </h2>
               <button
                 onClick={onOpenSystem}
-                className="cursor-pointer text-[12px] font-medium text-accent t-fast hover:text-accent-hover"
+                className="inline-flex cursor-pointer items-center gap-1 text-[12px] font-medium text-accent t-fast hover:text-accent-hover"
               >
-                查看 →
+                查看 <ArrowRight size={12} />
               </button>
             </div>
             {snap ? (

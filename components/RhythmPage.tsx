@@ -157,8 +157,8 @@ function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean
     >
       <span
         className={cn(
-          "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-all",
-          on ? "left-[18px]" : "left-0.5",
+          "absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-sm t-base",
+          on ? "translate-x-4" : "translate-x-0",
         )}
       />
     </button>

@@ -234,7 +234,7 @@ function DiffBlock({ lines }: { lines: ParsedDiffLine[] }) {
  * 技能草稿卡（`skill_draft` 工具调用）。
  *
  * 模型只出草稿、不写文件（见扩展 `extensions/elenva-skills`）；落盘是人的动作：
- * 保存 → `POST /api/skills/draft/save`；重名 → 409，卡上提示且不覆盖。
+ * 保存走 `POST /api/skills/draft/save`；重名则 409，卡上提示且不覆盖。
  * 「已保存」既来自本次保存，也在挂载时用 `GET /api/skills/draft/save?name=`
  * 做一次磁盘存在性检测 —— 刷新页面后卡片仍显示已保存。
  */

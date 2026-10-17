@@ -616,7 +616,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           {/* slash 命令菜单 */}
           {showSlashMenu && (
             <div className="absolute bottom-full left-0 z-50 mb-2 w-80 overflow-hidden rounded-card border border-line bg-panel shadow-lg">
-              <div className="flex items-center gap-1.5 border-b border-line-soft px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-dim">
+              <div className="label-micro flex items-center gap-1.5 border-b border-line-soft px-3 py-1.5 text-dim">
                 <Slash size={10} /> 命令
               </div>
               <div className="max-h-56 overflow-y-auto py-1">
@@ -644,7 +644,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           {/* @文件 菜单 */}
           {showFileMenu && (
             <div className="absolute bottom-full left-0 z-50 mb-2 w-96 overflow-hidden rounded-card border border-line bg-panel shadow-lg">
-              <div className="flex items-center gap-1.5 border-b border-line-soft px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-dim">
+              <div className="label-micro flex items-center gap-1.5 border-b border-line-soft px-3 py-1.5 text-dim">
                 <Folder size={10} /> 文件引用 {filesLoading && <Loader2Inline />}
               </div>
               <div className="max-h-56 overflow-y-auto py-1">
@@ -672,7 +672,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
               data-testid="queue-strip"
               className="mb-1.5 flex flex-wrap items-center gap-1.5 rounded-lg border border-accent/25 bg-accent-soft/40 px-2.5 py-1.5"
             >
-              <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-accent">
+              <span className="label-micro shrink-0 text-accent">
                 队列
               </span>
               {queuedMessages!.steering.map((t, i) => (
@@ -916,7 +916,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                   onClick={() => void handlePolish()}
                   disabled={!canPolish}
                   className={cn(
-                    "flex size-8 shrink-0 items-center justify-center rounded-full transition-all",
+                    "flex size-8 shrink-0 items-center justify-center rounded-full t-fast",
                     canPolish ? "cursor-pointer text-dim hover:bg-hover hover:text-fg" : "text-dim/50",
                   )}
                   title={
@@ -933,7 +933,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                     onClick={() => submit("steer")}
                     disabled={!canSend}
                     className={cn(
-                      "flex size-8 items-center justify-center rounded-full transition-all",
+                      "flex size-8 items-center justify-center rounded-full t-fast",
                       canSend
                         ? "cursor-pointer border border-accent/40 bg-accent-soft text-accent hover:bg-active"
                         : "text-dim/60",
@@ -956,7 +956,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                     onClick={() => submit()}
                     disabled={!canSend}
                     className={cn(
-                      "flex size-8 shrink-0 items-center justify-center rounded-full transition-all cursor-pointer",
+                      "flex size-8 shrink-0 items-center justify-center rounded-full t-fast cursor-pointer",
                       canSend
                         ? "bg-accent text-accent-fg hover:bg-accent-hover"
                         : "bg-panel-2 text-dim",

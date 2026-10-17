@@ -90,7 +90,7 @@ export function MenuItem({
 /** 带 X 关闭按钮的标题条（配合 Popover 使用） */
 export function PopoverHeader({ label, onClose }: { label: React.ReactNode; onClose?: () => void }) {
   return (
-    <div className="flex items-center gap-1.5 border-b border-line-soft px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-dim">
+    <div className="label-micro flex items-center gap-1.5 border-b border-line-soft px-3 py-1.5 text-dim">
       <span className="min-w-0 flex-1 truncate">{label}</span>
       {onClose && (
         <button onClick={onClose} className="cursor-pointer rounded-sm p-0.5 hover:bg-hover hover:text-fg" title="关闭">

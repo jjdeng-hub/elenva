@@ -261,7 +261,7 @@ export function DirPicker({
           {/* 常用位置：把「C: → Users → 用户名 → Desktop」四层缩成一次点击 */}
           {places.length > 0 && (
             <>
-              <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-dim">
+              <div className="label-micro px-2 pb-1 pt-1.5 text-dim">
                 常用位置
               </div>
               <div className="flex flex-wrap gap-1.5 px-2 pb-2">
@@ -282,7 +282,7 @@ export function DirPicker({
 
           {drives.length > 0 && (
             <>
-              <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-dim">
+              <div className="label-micro px-2 pb-1 pt-1.5 text-dim">
                 磁盘
               </div>
               {drives.map((d) => (
@@ -299,7 +299,7 @@ export function DirPicker({
           )}
 
           {dirs.length > 0 && (
-            <div className="px-2 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-dim">
+            <div className="label-micro px-2 pb-1 pt-1.5 text-dim">
               子目录
             </div>
           )}

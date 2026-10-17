@@ -43,7 +43,7 @@ export function ExtensionStrip({
             placement === "aboveEditor" ? "mb-1.5" : "mt-1.5",
           )}
         >
-          <div className="flex items-center gap-1 border-b border-line-soft px-2.5 py-1 text-[10px] font-medium uppercase tracking-wide text-dim">
+          <div className="label-micro flex items-center gap-1 border-b border-line-soft px-2.5 py-1 text-dim">
             <Puzzle size={10} /> 扩展
           </div>
           <pre className="max-h-40 overflow-auto px-2.5 py-1.5 font-mono text-[11px] leading-relaxed text-muted whitespace-pre-wrap">

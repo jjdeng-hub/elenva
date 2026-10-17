@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  ArrowRight,
   Bot,
   AlertTriangle,
   CheckCircle2,
@@ -335,7 +336,7 @@ function TrendsSection({ trends }: { trends: TurnTrendsResult }) {
         className="flex flex-wrap items-baseline gap-x-1.5 rounded-md border border-line-soft bg-panel-2/50 px-2 py-1.5 text-[11px] tabular-nums text-dim"
         data-testid="trend-totals"
       >
-        <span className="text-[10px] uppercase tracking-wide">合计</span>
+        <span className="label-micro">合计</span>
         <span className="text-fg">{formatCost(totals.cost)}</span>
         <span>·</span>
         <span>{totals.toolCalls} 工具</span>
@@ -436,7 +437,7 @@ function TurnSection({
         <div className="flex flex-col gap-2.5">
           {latest.files.length > 0 && (
             <div>
-              <div className="mb-1 text-[10px] uppercase tracking-wide text-dim">改动 {latest.files.length}</div>
+              <div className="label-micro mb-1 text-dim">改动 {latest.files.length}</div>
               <div className="flex flex-col" data-testid="rail-turn-files">
                 {latest.files.slice(0, MAX_VISIBLE_FILES).map((file) => {
                   const rel = relativize(file.path, cwd);
@@ -489,7 +490,7 @@ function TurnSection({
 
           {latest.commands.length > 0 && (
             <div>
-              <div className="mb-1 text-[10px] uppercase tracking-wide text-dim">执行 {latest.commands.length}</div>
+              <div className="label-micro mb-1 text-dim">执行 {latest.commands.length}</div>
               <div className="flex flex-col gap-0.5" data-testid="rail-turn-commands">
                 {latest.commands.slice(-MAX_VISIBLE_COMMANDS).map((run, index) => (
                   <div key={`${index}-${run.command}`} className="flex items-start gap-1.5 rounded-md px-1.5 py-0.5">
@@ -808,9 +809,9 @@ export function SessionObservatory({
               <button
                 onClick={() => onOpenGit(cwd)}
                 data-testid="observatory-open-git"
-                className="shrink-0 cursor-pointer rounded-md px-1.5 py-0.5 text-[11px] text-accent t-fast hover:bg-accent-soft"
+                className="inline-flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] text-accent t-fast hover:bg-accent-soft"
               >
-                打开 Git 变更 →
+                打开 Git 变更 <ArrowRight size={12} />
               </button>
             )}
           </div>
@@ -872,7 +873,7 @@ export function SessionObservatory({
         {/* ---------- 会话信息（底部折叠区：运行环境 + 会话产物 + 会话文件）----------
             低频信息集中到最后：默认收起，要用时展开。 ---------- */}
         <CollapsibleSection title="会话信息" icon={<Hash size={12} />} testId="rail-session-info">
-          <div className="text-[10px] uppercase tracking-wide text-dim">运行环境</div>
+          <div className="label-micro text-dim">运行环境</div>
           {displayModel ? (
             <Stat label="模型" value={`${displayModel.provider}/${displayModel.modelId}`} />
           ) : (
@@ -887,7 +888,7 @@ export function SessionObservatory({
 
           {(onExportHtml || onClone) && (
             <div className="mt-3 border-t border-line-soft pt-2.5">
-              <div className="text-[10px] uppercase tracking-wide text-dim">会话产物</div>
+              <div className="label-micro text-dim">会话产物</div>
               <div className="mt-1.5 flex flex-col gap-1.5">
                 {onExportHtml && (
                   <button onClick={onExportHtml} className="btn btn-sm btn-ghost w-full" data-testid="rail-export">
@@ -905,7 +906,7 @@ export function SessionObservatory({
 
           {sessionStats?.sessionFile && (
             <div className="mt-3 border-t border-line-soft pt-2.5">
-              <div className="text-[10px] uppercase tracking-wide text-dim">会话文件</div>
+              <div className="label-micro text-dim">会话文件</div>
               <div className="mt-0.5 flex items-start gap-1.5">
                 <span
                   className="min-w-0 flex-1 break-all font-mono text-[10px] leading-relaxed text-dim/80"

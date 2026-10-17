@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowRight,
   Boxes,
   Loader2,
   Monitor,
@@ -56,8 +57,8 @@ function Toggle({ on, onChange, disabled, label }: { on: boolean; onChange: (v: 
     >
       <span
         className={cn(
-          "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-all",
-          on ? "left-[18px]" : "left-0.5",
+          "absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-sm t-base",
+          on ? "translate-x-4" : "translate-x-0",
         )}
       />
     </button>
@@ -352,8 +353,8 @@ function ToolsSection() {
           >
             <span
               className={cn(
-                "absolute top-0.5 size-4 rounded-full bg-white shadow-sm transition-all",
-                psEnabled ? "left-[18px]" : "left-0.5",
+                "absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-sm t-base",
+                psEnabled ? "translate-x-4" : "translate-x-0",
               )}
             />
           </button>
@@ -1177,7 +1178,7 @@ function HostPromptCard() {
               {/* 这里给的是**静态层**；模型每轮实际看到的内容还包含记忆块、计划模式等
                   动态注入，那个只能在真实会话里看 —— 所以指路到「提示词」页。 */}
               <a href="#prompt" className="btn btn-sm btn-ghost" data-testid="open-prompt-page">
-                看模型实际收到的完整提示词 →
+                看模型实际收到的完整提示词 <ArrowRight size={12} />
               </a>
             </div>
 

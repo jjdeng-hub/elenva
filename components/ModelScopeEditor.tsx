@@ -317,7 +317,7 @@ export function ModelScopeEditor() {
           groups.map(([provider, list]) => (
             <div key={provider} className="border-t border-line-soft py-1.5 first:border-t-0">
               <div className="flex items-center gap-2 py-1">
-                <span className="text-[11px] font-semibold uppercase tracking-wide text-dim">{provider}</span>
+                <span className="label-micro uppercase text-dim">{provider}</span>
                 <span className="text-[11px] text-dim">
                   {list.filter((m) => selectedRefs.has(refOf(m))).length}/{list.length}
                 </span>

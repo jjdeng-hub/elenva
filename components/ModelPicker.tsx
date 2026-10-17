@@ -160,7 +160,7 @@ export function ModelPicker({
             )}
             {groups.map(([provider, models]: [string, ModelEntry[]]) => (
               <div key={provider}>
-                <div className="px-3 pb-0.5 pt-2 text-[11px] font-semibold uppercase tracking-wide text-dim">
+                <div className="label-micro px-3 pb-0.5 pt-2 uppercase text-dim">
                   {provider}
                 </div>
                 {models.map((m) => {
