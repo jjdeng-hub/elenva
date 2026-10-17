@@ -713,7 +713,7 @@ function AgentMemoryView({ scrollRef, initialId = "memory" }: { scrollRef: RefOb
                 里还没写过任何条目。
                 {index.installed
                   ? " 记忆扩展已装上，下次会话里让 Agent 记点什么就会出现。"
-                  : " 本机 ~/.pi/agent/settings.json 的 packages 里没有 pi-hermes-memory —— 装上带记忆工具的扩展后才会写。"}
+                  : " 本机没检测到记忆扩展 —— 在插件页装内置扩展 elenva-memory 后才会写。"}
               </>
             }
           />
@@ -723,7 +723,7 @@ function AgentMemoryView({ scrollRef, initialId = "memory" }: { scrollRef: RefOb
           <CardHeader className="flex-wrap">
             <CardTitle>Agent 记忆</CardTitle>
             {index.installed ? (
-              <span className="chip chip-accent">pi-hermes-memory 已启用</span>
+              <span className="chip chip-accent">记忆扩展已启用（自持）</span>
             ) : (
               <span className="chip chip-warn">未检测到 pi-hermes-memory</span>
             )}

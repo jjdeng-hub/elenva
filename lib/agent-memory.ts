@@ -53,7 +53,7 @@ export interface AgentMemoryIndex {
   /** 项目级记忆的根目录（<agentDir>/projects-memory） */
   projectsDir: string;
   dirExists: boolean;
-  /** 本机 pi 用户设置（~/.pi/agent/settings.json）的 packages 里有没有 pi-hermes-memory */
+  /** 本机是否装了记忆扩展（自持扩展 <agentDir>/extensions/elenva-memory/，或旧装法 settings.json 的 packages） */
   installed: boolean;
   files: AgentMemoryFile[];
 }
@@ -175,8 +175,19 @@ function fileMeta(id: string, label: string, kind: AgentMemoryKind, path: string
   }
 }
 
-/** ~/.pi/agent/settings.json 的 packages 里是否挂了 pi-hermes-memory（含 npm:/本地路径/带版本） */
+/**
+ * 本机是否装了记忆扩展（决定记忆页显「已启用」还是「未检测到」）。两种落位都算：
+ *  ① **自持扩展**（记忆 2.0 起的主路径）：`<agentDir>/extensions/elenva-memory/` —— 底座
+ *     从 `settings.packages` 摘除后（packages: []）扩展自持，vendor 在 `vendor/pi-hermes-memory/`。
+ *     以前只看 packages，于是页面一直误报「未检测到」。
+ *  ② 兼容旧装法（回滚 / 手动 `pi install`）：`<agentDir>/settings.json` 的 packages 里挂了
+ *     pi-hermes-memory（含 npm: / 本地路径 / 带版本）。
+ * 两者都没有 = 未装。
+ */
 export function isPiHermesMemoryConfigured(): boolean {
+  // ① 自持扩展：以扩展目录（而非 packages）为准
+  if (existsSync(join(getAgentDir(), "extensions", "elenva-memory"))) return true;
+  // ② 兼容旧装法：settings.json 的 packages
   const settingsPath = getPiSettingsPath();
   if (!existsSync(settingsPath)) return false;
   try {
