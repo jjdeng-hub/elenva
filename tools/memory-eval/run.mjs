@@ -25,7 +25,7 @@
  *    这里用 `<sandbox>/store`。
  * 2. 运行前后各取一次真实 `~/.pi/agent/pi-hermes-memory/*.md` 的 mtime+size 快照，
  *    只要变了就判夹具失败（FAIL）——评估绝不允许写进真实记忆。
- * 3. 报告落 `.audit/memory-eval/reports/`（本地数据，不进仓库）。
+ * 3. 报告落 `tools/memory-eval/reports/`（本地数据，不进仓库）。
  *
  * ## 口径（读分数前先读这里）
  *
@@ -38,11 +38,11 @@
  *
  * ## 用法
  *
- *   node .audit/memory-eval/run.mjs                     # 全部用例
- *   node .audit/memory-eval/run.mjs --layer L1          # 只跑某层（L1/L2/L3/L4）
- *   node .audit/memory-eval/run.mjs --case l1-account   # 只跑一条
- *   node .audit/memory-eval/run.mjs --keep              # 保留沙箱（出问题好排查）
- *   node .audit/memory-eval/run.mjs --model X --judge-model Y
+ *   node tools/memory-eval/run.mjs                     # 全部用例
+ *   node tools/memory-eval/run.mjs --layer L1          # 只跑某层（L1/L2/L3/L4）
+ *   node tools/memory-eval/run.mjs --case l1-account   # 只跑一条
+ *   node tools/memory-eval/run.mjs --keep              # 保留沙箱（出问题好排查）
+ *   node tools/memory-eval/run.mjs --model X --judge-model Y
  *
  * 退出码：0 = 全部用例跑完；1 = 夹具自身出错（真实记忆被动过 / 沙箱起不来）；
  *        2 = 有用例没跑完（超时/崩溃）——分数本身不设通过线，它是度量不是门禁。
@@ -75,7 +75,7 @@ function parseArgs(argv) {
     else if (arg === "--judge-model") out.judgeModel = next();
     else if (arg === "--cli") out.cli = next();
     else if (arg === "--help" || arg === "-h") {
-      console.log("用法见文件头注释：node .audit/memory-eval/run.mjs [--layer L1] [--case id] [--keep]");
+      console.log("用法见文件头注释：node tools/memory-eval/run.mjs [--layer L1] [--case id] [--keep]");
       process.exit(0);
     } else {
       console.error(`未知参数：${arg}`);

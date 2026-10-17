@@ -160,6 +160,24 @@ user 消息**注入（`<memory_index>` 包裹，开头写明「框架自动注�
 - 依据：Graphiti 双时序的简化版（标失效保留历史）；与 ch3 L505「证据不足保留待确认 / 不强行收敛」同向。
   回归夹具：`selftest-r2b.mjs`（71 断言，含隔离「忘掉 X」全链）与 `tools/rev/memory-supersede-e2e.mjs`（装扩展后真跑）。
 
+## 面板治理与周期整理（2026-10-17；记忆 2.0 R4）
+
+除会话内的 `memory_status` 工具，失效 / 恢复现在也能在**记忆页**逐条操作：
+
+- **网页条目级失效 / 恢复**：每条右侧「标失效 / 恢复」按钮（二次确认 + 可选原因），走
+  `POST /api/memory/status`（`{file, text, action: invalidate|restore, reason?, revision?}`）。
+  服务端 `lib/agent-memory.ts` 的 `setAgentMemoryEntryStatus` 按正文**精确匹配唯一一条**、
+  只翻转该条的 `invalidated`/`reason`（其余条目原样保留），复用写入链（revision 并发校验 → 备份 → 原子写）；
+  **唯一豁免是配额校验**（`enforceLimit: false`）——失效是满额时的逃生口（与扩展 `setStatus` 同口径）；
+  `reason` 写入前归一（逗号换全角 / 去 `-->` / 截断 120）。失败路径：`not-found`（正文被改过 → 提示刷新）、
+  `conflict`（409）。自测：`tools/memory-status-selftest.mjs`（11 项：原子性 / 备份 / reason 归一 / 并发 / 满额逃生 / 路由）。
+- **记忆周整理（节律只读任务）**：`node extensions/elenva-memory/tidy-cli.mjs --weekly` 输出四段式
+  「周整理提案」——【一、水位】（含上次整理对照）【二、失效条目（可清出，含预计释放字符）】
+  【三、近重复 / 冲突候选】【四、本周建议】（确定性、不调模型）；`--weekly` 与 `--apply` 互斥（只读）。
+  已挂为节律每周任务（周一 09:40，`safety=readonly`，cwd 指仓库根）。
+  **只读档实测摩擦**：`node <脚本>` 与 `memory_find`/`memory_status` 都会被只读档拦下；任务提示词因此走
+  `node -e 'import("./…")'` + `cat`/`grep` 的只读路径。
+
 ## 验收（改了这个扩展就跑）
 
 ```bash

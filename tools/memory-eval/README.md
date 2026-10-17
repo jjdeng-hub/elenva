@@ -13,10 +13,10 @@
 ## 怎么跑
 
 ```bash
-node .audit/memory-eval/run.mjs                     # 全部用例（10 条，约 5-6 分钟）
-node .audit/memory-eval/run.mjs --memory-layer legacy   # 对照组：pi-hermes-memory 全文注入
-node .audit/memory-eval/run.mjs --layer L4 --repeat 3   # 带随机性的层重复采样，看成功率
-node .audit/memory-eval/run.mjs --case l1-account --keep # 单条；--keep 保留沙箱好排查
+node tools/memory-eval/run.mjs                     # 全部用例（10 条，约 5-6 分钟）
+node tools/memory-eval/run.mjs --memory-layer legacy   # 对照组：pi-hermes-memory 全文注入
+node tools/memory-eval/run.mjs --layer L4 --repeat 3   # 带随机性的层重复采样，看成功率
+node tools/memory-eval/run.mjs --case l1-account --keep # 单条；--keep 保留沙箱好排查
 ```
 
 `--memory-layer`（默认 `layered`）：`layered` = 沙箱切成 `policy-only` 并拷入

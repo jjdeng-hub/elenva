@@ -194,3 +194,20 @@ Web 消费方降级 / E2E「忘掉 X」全链）。
 
 本层自测：`selftest-r3.mjs`（47 断言：三模式 / 预算截断 / 清单标注 / ids×失效 / token 对比 /
 reindex 幂等 + 对账 + 损坏恢复）；隔离 E2E：`e2e-r3.mjs`（19 断言，装扩展后真跑注册面）。
+
+## R4 面板治理与周期整理（ELENVA-FORK · 2026-10-17）
+
+对应记忆 2.0 模块 2 补轮 R4（末轮）。**vendor 源码未改**——本轮改的是本层与 Web 侧：
+
+24. **`tidy.ts` / `tidy-cli.mjs`（本层）** —— 新增 `renderWeeklyProposal()` 与 `--weekly`：
+    四段式「周整理提案」（水位含上次整理对照 / 失效条目可清出与预计释放字符 / 近重复与冲突候选 /
+    一句确定性建议）。只读：不写任何文件、不调模型；`--weekly` 与 `--apply` 互斥。
+    `selftest.mjs` 补 3 条断言（共 47 通过）。
+25. **Web 侧**（`lib/agent-memory.ts` / `app/api/memory/status` / `components/MemoryPage.tsx`）：
+    条目级「标失效 / 恢复」——单条原子（按正文精确匹配、只翻转目标条目、复用备份/revision/原子写），
+    并**豁免配额校验**（满额逃生口，与 vendor `setStatus` 同口径）。自测
+    `tools/memory-status-selftest.mjs`（11 项）。修了一处序列化器活雷：`null` 曾被 `??` 当「未指定」
+    而沿用了旧失效日期，导致恢复失效——现区分 `undefined`（沿用）/ `null`（显式清除）。
+26. **节律**（`lib/schedules` 存储，非本层代码）：本机挂「记忆周整理（只读）」任务
+    （weekly 周一 09:40，`safety=readonly`），run-now 真跑出四段提案。实测只读档会拦下
+    `node <脚本>` 与 `memory_find`/`memory_status` —— 任务提示词改走 `node -e 'import("./…")'` + `cat`/`grep`。
