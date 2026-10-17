@@ -536,9 +536,13 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
             <div className="py-3 text-[12px] text-dim">没有找到可安装的内置项</div>
           )}
 
-          {!builtinLoading &&
-            builtinItems.map((item) => (
-              <div key={item.path} className="flex items-center gap-3 border-t border-line-soft py-2.5 first:border-t-0">
+          {!builtinLoading && builtinItems.length > 0 && (
+            <div className="grid grid-cols-1 gap-x-6 xl:grid-cols-2">
+            {builtinItems.map((item) => (
+              <div
+                key={item.path}
+                className="flex items-center gap-3 border-t border-line-soft py-2.5 first:border-t-0 xl:border-t-0 xl:border-b"
+              >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="truncate text-[13px] font-medium text-fg">{item.name}</span>
@@ -580,14 +584,17 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
                 )}
               </div>
             ))}
+            </div>
+          )}
 
           {builtinNote && !builtinLoading && (
             <div className="border-t border-line-soft pt-2 text-[11px] text-dim">{builtinNote}</div>
           )}
         </Card>
 
-        {/* 安装栏 */}
-        <Card className="mb-4 p-4">
+        {/* 安装栏 + 已安装：两张短卡在 xl 同排（同一 grid 行），<xl 保持上下 */}
+        <div className="mb-4 grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
+        <Card className="p-4">
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
             <span className="text-[13px] font-semibold text-fg">安装插件</span>
             <span className="text-[11px] text-dim">从 npm、Git 仓库或本地路径安装</span>
@@ -647,6 +654,82 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
             </div>
           </details>
         </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>已安装</CardTitle>
+              <span className="ml-auto text-[12px] text-dim">{packages.length} 个</span>
+            </CardHeader>
+            {loading && (
+              <div className="flex items-center gap-2 px-4 py-5 text-[12px] text-dim">
+                <Loader2 size={14} className="animate-spin" /> 加载中…
+              </div>
+            )}
+            {!loading && packages.length === 0 && (
+              <div className="px-4 py-5 text-[12px] text-dim">没有安装任何插件</div>
+            )}
+            <div className="grid items-start gap-3 px-4 py-4 lg:grid-cols-2">
+              {packages.map((p) => (
+                <div key={`${p.scope}-${p.source}`} className="flex items-center gap-3 rounded-lg border border-line bg-panel-2/40 p-3">
+                  <Package size={14} className="shrink-0 text-dim" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-[13px] font-medium text-fg" title={p.source}>
+                        {p.packageName || p.source}
+                      </span>
+                      {p.version && <span className="font-mono text-[12px] text-dim">{p.version}</span>}
+                      <span className="rounded-sm bg-panel-2 px-1.5 py-0.5 text-[11px] text-dim">
+                        {p.scope === "global" ? "全局" : "项目"}
+                      </span>
+                      {p.status === "missing" && (
+                        <span className="rounded-sm bg-danger/10 px-1.5 py-0.5 text-[11px] text-danger">缺失</span>
+                      )}
+                    </div>
+                    <div className="text-[12px] text-dim">
+                      {p.counts.extensions} 扩展 · {p.counts.skills} 技能 · {p.counts.prompts} 命令
+                      {updateMsg[`${p.scope}-${p.source}`] && (
+                        <span className={cn("ml-2", updateMsg[`${p.scope}-${p.source}`].includes("可用") ? "text-accent" : "")}>
+                          · {updateMsg[`${p.scope}-${p.source}`]}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {p.canCheckForUpdates && defaultCwd && (
+                    <button
+                      onClick={() => checkUpdate(p)}
+                      disabled={anyBusy}
+                      className="mr-1 flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-line px-2.5 text-[12px] text-muted t-fast hover:text-fg disabled:opacity-50"
+                      title="检查插件更新"
+                    >
+                      <RefreshCw size={12} className={cn(busy === `check:${p.source}` && "animate-spin")} />
+                      检查更新
+                    </button>
+                  )}
+                  <button
+                    onClick={() => action(p, p.disabled ? "enable" : "disable")}
+                    disabled={anyBusy}
+                    className={cn(
+                      "flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border px-2.5 text-[12px] t-fast disabled:opacity-50",
+                      p.disabled ? "border-accent/40 text-accent hover:bg-accent-soft" : "border-line text-muted hover:text-fg",
+                    )}
+                  >
+                    {busy === `act:${p.source}` && <Loader2 size={12} className="animate-spin" />}
+                    {p.disabled ? "启用" : "禁用"}
+                  </button>
+                  <button
+                    onClick={() => remove(p)}
+                    disabled={anyBusy}
+                    className="flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-line px-2.5 text-[12px] text-muted t-fast hover:border-danger/40 hover:text-danger disabled:opacity-50"
+                    title="移除插件"
+                  >
+                    {busy === `remove:${p.source}` ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+                    移除
+                  </button>
+                </div>
+              ))}
+            </div>
+          </Card>
+        </div>
 
         {/* 发现插件（npm registry 搜索） */}
         <Card className="mb-4 p-4">
@@ -756,81 +839,6 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
               })}
             </div>
           )}
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>已安装</CardTitle>
-            <span className="ml-auto text-[12px] text-dim">{packages.length} 个</span>
-          </CardHeader>
-          {loading && (
-            <div className="flex items-center gap-2 px-4 py-5 text-[12px] text-dim">
-              <Loader2 size={14} className="animate-spin" /> 加载中…
-            </div>
-          )}
-          {!loading && packages.length === 0 && (
-            <div className="px-4 py-5 text-[12px] text-dim">没有安装任何插件</div>
-          )}
-          <div className="grid items-start gap-3 px-4 py-4 lg:grid-cols-2">
-            {packages.map((p) => (
-              <div key={`${p.scope}-${p.source}`} className="flex items-center gap-3 rounded-lg border border-line bg-panel-2/40 p-3">
-                <Package size={14} className="shrink-0 text-dim" />
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-[13px] font-medium text-fg" title={p.source}>
-                      {p.packageName || p.source}
-                    </span>
-                    {p.version && <span className="font-mono text-[12px] text-dim">{p.version}</span>}
-                    <span className="rounded-sm bg-panel-2 px-1.5 py-0.5 text-[11px] text-dim">
-                      {p.scope === "global" ? "全局" : "项目"}
-                    </span>
-                    {p.status === "missing" && (
-                      <span className="rounded-sm bg-danger/10 px-1.5 py-0.5 text-[11px] text-danger">缺失</span>
-                    )}
-                  </div>
-                  <div className="text-[12px] text-dim">
-                    {p.counts.extensions} 扩展 · {p.counts.skills} 技能 · {p.counts.prompts} 命令
-                    {updateMsg[`${p.scope}-${p.source}`] && (
-                      <span className={cn("ml-2", updateMsg[`${p.scope}-${p.source}`].includes("可用") ? "text-accent" : "")}>
-                        · {updateMsg[`${p.scope}-${p.source}`]}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                {p.canCheckForUpdates && defaultCwd && (
-                  <button
-                    onClick={() => checkUpdate(p)}
-                    disabled={anyBusy}
-                    className="mr-1 flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-line px-2.5 text-[12px] text-muted t-fast hover:text-fg disabled:opacity-50"
-                    title="检查插件更新"
-                  >
-                    <RefreshCw size={12} className={cn(busy === `check:${p.source}` && "animate-spin")} />
-                    检查更新
-                  </button>
-                )}
-                <button
-                  onClick={() => action(p, p.disabled ? "enable" : "disable")}
-                  disabled={anyBusy}
-                  className={cn(
-                    "flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border px-2.5 text-[12px] t-fast disabled:opacity-50",
-                    p.disabled ? "border-accent/40 text-accent hover:bg-accent-soft" : "border-line text-muted hover:text-fg",
-                  )}
-                >
-                  {busy === `act:${p.source}` && <Loader2 size={12} className="animate-spin" />}
-                  {p.disabled ? "启用" : "禁用"}
-                </button>
-                <button
-                  onClick={() => remove(p)}
-                  disabled={anyBusy}
-                  className="flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-line px-2.5 text-[12px] text-muted t-fast hover:border-danger/40 hover:text-danger disabled:opacity-50"
-                  title="移除插件"
-                >
-                  {busy === `remove:${p.source}` ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
-                  移除
-                </button>
-              </div>
-            ))}
-          </div>
         </Card>
 
         <Card className="mt-4">
