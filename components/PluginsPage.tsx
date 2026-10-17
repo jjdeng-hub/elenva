@@ -537,7 +537,7 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
           )}
 
           {!builtinLoading && builtinItems.length > 0 && (
-            <div className="grid grid-cols-1 gap-x-6 xl:grid-cols-2">
+            <div className="grid grid-cols-1 gap-x-6 xl:grid-cols-2 min-[2200px]:grid-cols-3">
             {builtinItems.map((item) => (
               <div
                 key={item.path}
