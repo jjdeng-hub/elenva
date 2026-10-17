@@ -120,7 +120,12 @@ const MAX_CONFLICTS = 8;
 export interface TidyResult {
   duplicates: Array<{ scope: StoreFile["scope"]; kept: MemoryEntry; dropped: MemoryEntry[] }>;
   conflicts: Array<ConflictRecord & { title?: string }>;
+  /** 容量压力下的全部候选（= 失效建议 + 归档建议，保留给汇总/旧消费方） */
   evictions: EvictionSuggestion[];
+  /** R2r2：建议「标失效」的条目（被推翻 / 参与冲突 / 变更标记）——非破坏性，可恢复 */
+  invalidationSuggestions: EvictionSuggestion[];
+  /** R2r2：建议「归档」的条目（已失效残留 / 纯噪声 / 重复淘汰）——物理移出文件 */
+  archiveSuggestions: EvictionSuggestion[];
   summary: string;
   applied: string[];
   accessAfterApply?: ElenvaMemoryState["access"];
@@ -134,7 +139,15 @@ export interface TidyOptions {
 
 export function runTidy(stores: StoreSet, state: ElenvaMemoryState, options: TidyOptions = {}): TidyResult {
   const evictionRatio = options.evictionRatio ?? 0.95;
-  const result: TidyResult = { duplicates: [], conflicts: [], evictions: [], summary: "", applied: [] };
+  const result: TidyResult = {
+    duplicates: [],
+    conflicts: [],
+    evictions: [],
+    invalidationSuggestions: [],
+    archiveSuggestions: [],
+    summary: "",
+    applied: [],
+  };
 
   for (const store of stores.stores) {
     const scored = scoreEntries(store.entries, state);
@@ -178,19 +191,45 @@ export function runTidy(stores: StoreSet, state: ElenvaMemoryState, options: Tid
       }
     }
 
-    // ③ 容量淘汰建议（ch3 L221 第一层：低于阈值的可压缩/可删除）
+    // ③ 容量淘汰建议（ch3 L221 第一层：低于阈值的可压缩 / 可删除）
+    // R2r2 分流：「失效建议」（被推翻 / 参与冲突 / 变更标记，非破坏性）与
+    // 「归档建议」（已失效残留 / 纯噪声 / 重复淘汰，物理移出）。
+    const inConflict = new Set<string>();
+    for (const conflict of result.conflicts) {
+      inConflict.add(conflict.a);
+      inConflict.add(conflict.b);
+    }
     if (store.rawChars > store.limit * evictionRatio) {
       const target = store.limit * 0.9;
       let projected = store.rawChars;
       for (const item of [...scored].sort((a, b) => a.score - b.score)) {
         if (projected <= target) break;
         projected -= item.entry.text.length + 3;
-        result.evictions.push({ entry: item.entry, score: item.score, storeScope: store.scope, file: store.file });
+        const candidate: EvictionSuggestion = { entry: item.entry, score: item.score, storeScope: store.scope, file: store.file };
+        result.evictions.push(candidate);
+        if (inConflict.has(item.entry.id) || CHANGE_MARKERS.test(item.entry.text)) {
+          result.invalidationSuggestions.push(candidate);
+        } else {
+          result.archiveSuggestions.push(candidate);
+        }
       }
     }
+    // 已失效条目的清出：即使未达容量线也归「归档建议」（它们已不参与注入，清出零语义损失）。
+    const suggestedIds = new Set(result.evictions.map((item) => item.entry.id));
+    for (const entry of store.entries) {
+      if (!entry.invalidated || suggestedIds.has(entry.id)) continue;
+      result.evictions.push({
+        entry,
+        score: scoreEntries([entry], state)[0]?.score ?? 0,
+        storeScope: store.scope,
+        file: store.file,
+      });
+      result.archiveSuggestions.push({ entry, score: 0, storeScope: store.scope, file: store.file });
+      suggestedIds.add(entry.id);
+    }
 
-    // ④ apply：归档重复与淘汰条目（不删除）
-    if (options.apply && (result.duplicates.some((d) => d.scope === store.scope) || result.evictions.some((e) => e.file === store.file))) {
+    // ④ apply：归档重复与归档建议；失效建议**只标记不删除**（可恢复）
+    if (options.apply && (result.duplicates.some((d) => d.scope === store.scope) || result.archiveSuggestions.some((e) => e.file === store.file) || result.invalidationSuggestions.some((e) => e.file === store.file))) {
       const dropIds = new Set<string>();
       const keptIds = new Set<string>();
       for (const group of result.duplicates) {
@@ -198,21 +237,41 @@ export function runTidy(stores: StoreSet, state: ElenvaMemoryState, options: Tid
         keptIds.add(group.kept.id);
         for (const dropped of group.dropped) dropIds.add(dropped.id);
       }
-      for (const eviction of result.evictions) {
+      for (const eviction of result.archiveSuggestions) {
         if (eviction.file !== store.file) continue;
         if (keptIds.has(eviction.entry.id)) continue;
         dropIds.add(eviction.entry.id);
       }
+      const invalidateIds = new Set<string>();
+      for (const suggestion of result.invalidationSuggestions) {
+        if (suggestion.file !== store.file) continue;
+        if (dropIds.has(suggestion.entry.id) || keptIds.has(suggestion.entry.id)) continue;
+        invalidateIds.add(suggestion.entry.id);
+      }
+
       const toArchive = store.entries.filter((entry) => dropIds.has(entry.id));
       if (toArchive.length > 0) {
-        const archiveFile = archiveEntries(store, toArchive, "tidy：去重合并 / 容量淘汰");
-        const remaining = store.entries.filter((entry) => !dropIds.has(entry.id));
+        const archiveFile = archiveEntries(store, toArchive, "tidy：去重合并 / 失效残留清出");
+        result.applied.push(`${store.scope}：归档 ${toArchive.length} 条 → ${archiveFile ?? "（未落盘）"}`);
+      }
+
+      const today = new Date().toISOString().slice(0, 10);
+      let invalidatedCount = 0;
+      const remaining = store.entries
+        .filter((entry) => !dropIds.has(entry.id))
+        .map((entry) => {
+          if (!invalidateIds.has(entry.id)) return entry;
+          invalidatedCount += 1;
+          return { ...entry, invalidated: entry.invalidated ?? today, reason: entry.reason ?? "tidy：被推翻 / 与其它条目冲突" };
+        });
+      if (toArchive.length > 0 || invalidatedCount > 0) {
         writeFileAtomic(store.file, serializeEntries(remaining));
         store.entries = remaining;
         store.rawChars = serializeEntries(remaining).length;
-        result.applied.push(
-          `${store.scope}：归档 ${toArchive.length} 条 → ${archiveFile ?? "（未落盘）"}；余 ${remaining.length} 条 / ${store.rawChars} 字符`,
-        );
+        if (invalidatedCount > 0) {
+          result.applied.push(`${store.scope}：标记失效 ${invalidatedCount} 条（不删除，可用 memory_status restore 恢复）`);
+        }
+        result.applied.push(`${store.scope}：余 ${remaining.length} 条 / ${store.rawChars} 字符`);
       }
     }
   }
@@ -232,7 +291,8 @@ export function runTidy(stores: StoreSet, state: ElenvaMemoryState, options: Tid
   const parts = [
     `重复 ${result.duplicates.length} 组`,
     `冲突 ${result.conflicts.length} 组${omittedConflicts > 0 ? `（另有 ${omittedConflicts} 组未列出）` : ""}`,
-    `淘汰建议 ${result.evictions.length} 条`,
+    `失效建议 ${result.invalidationSuggestions.length} 条`,
+    `归档建议 ${result.archiveSuggestions.length} 条`,
   ];
   result.summary = parts.join("、");
   if (options.apply) result.accessAfterApply = state.access;
@@ -257,10 +317,16 @@ export function renderTidyReport(result: TidyResult): string {
       lines.push(`- ${conflict.a} ↔ ${conflict.b}（相似度 ${conflict.sim}）：${conflict.reason}`);
     }
   }
-  if (result.evictions.length > 0) {
-    lines.push("", "【容量淘汰建议（按重要性从低到高）】");
-    for (const eviction of result.evictions) {
-      lines.push(`- [${eviction.storeScope}] ${head(eviction.entry.text)}（分数 ${eviction.score.toFixed(2)}）`);
+  if (result.invalidationSuggestions.length > 0) {
+    lines.push("", "【失效建议（被推翻 / 冲突 / 变更标记；apply 时只标记失效，不删除）】");
+    for (const suggestion of result.invalidationSuggestions) {
+      lines.push(`- [${suggestion.storeScope}] ${head(suggestion.entry.text)}（分数 ${suggestion.score.toFixed(2)}）`);
+    }
+  }
+  if (result.archiveSuggestions.length > 0) {
+    lines.push("", "【归档建议（已失效残留 / 纯噪声 / 重复淘汰；apply 时移入 archive/）】");
+    for (const suggestion of result.archiveSuggestions) {
+      lines.push(`- [${suggestion.storeScope}] ${head(suggestion.entry.text)}（分数 ${suggestion.score.toFixed(2)}）`);
     }
   }
   if (result.applied.length > 0) {

@@ -130,19 +130,24 @@ function registerElenvaLayer(pi: ExtensionAPI): void {
     name: "memory_find",
     label: "记忆检索（重排）",
     description:
-      "在长期记忆里检索，返回带来源与重排分数的原文。比 memory_search 多三样：相关性重排（词面+相似+重要性）、每条来源置信（scope/日期/引用次数/写入方式）、与其它条目的冲突标注。想不起细节、需要确认某条约定时先用它。",
+      "在长期记忆里检索，返回带来源与重排分数的原文。比 memory_search 多三样：相关性重排（词面+相似+重要性）、每条来源置信（scope/日期/引用次数/写入方式）、与其它条目的冲突标注。想不起细节、需要确认某条约定时先用它。已失效条目默认不返回；需要时把 include_invalidated 设为 true 显式查（结果会标注已失效）。",
     parameters: Type.Object({
       query: Type.String({ description: "检索词：人名、项目名、命令、数字、关键词，中英文都行" }),
       limit: Type.Optional(Type.Number({ description: "返回条数，默认 5" })),
+      include_invalidated: Type.Optional(
+        Type.Boolean({ description: "显式包含已失效条目（默认 false）。用于恢复前确认、或查历史结论。" }),
+      ),
     }),
     execute: async (_toolCallId, params, _signal, _onUpdate, ctx) => {
       const stores = readAllStores(ctx.cwd);
       const state = loadState();
       const limit = Number.isFinite(params.limit) ? Math.max(1, Math.min(20, Number(params.limit))) : 5;
-      const hits = searchEntries(stores, state, String(params.query ?? ""), limit);
+      const hits = searchEntries(stores, state, String(params.query ?? ""), limit, {
+        includeInvalidated: params.include_invalidated === true,
+      });
       return {
         content: [{ type: "text", text: renderSearchResults(hits, String(params.query ?? "")) }],
-        details: { hits: hits.length },
+        details: { hits: hits.length, includeInvalidated: params.include_invalidated === true },
       };
     },
   });

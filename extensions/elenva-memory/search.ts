@@ -41,6 +41,11 @@ export interface SearchHit {
   conflictIds: string[];
 }
 
+/** R2r2：默认排除失效条目；`includeInvalidated: true` 时显式召回并标注。 */
+export interface SearchOptions {
+  includeInvalidated?: boolean;
+}
+
 /** 查询分词：ASCII 词 + 中文连续段的 2-gram（中文没有词边界，2-gram 足够抓「记忆」这种实词）。 */
 export function queryTerms(query: string): string[] {
   const terms = new Set<string>();
@@ -53,14 +58,24 @@ export function queryTerms(query: string): string[] {
   return [...terms];
 }
 
-export function searchEntries(set: StoreSet, state: ElenvaMemoryState, query: string, limit = 5): SearchHit[] {
+export function searchEntries(
+  set: StoreSet,
+  state: ElenvaMemoryState,
+  query: string,
+  limit = 5,
+  options: SearchOptions = {},
+): SearchHit[] {
   const terms = queryTerms(query);
   if (terms.length === 0) return [];
   const queryShingles = shinglesOf(query);
-  const scored = new Map(scoreEntries(set.stores.flatMap((store) => store.entries), state).map((item) => [item.entry.id, item]));
+  // R2r2：失效条目不参与默认检索（不进权重）；显式开关才召回。
+  const pool = set.stores
+    .flatMap((store) => store.entries)
+    .filter((entry) => options.includeInvalidated === true || !entry.invalidated);
+  const scored = new Map(scoreEntries(pool, state).map((item) => [item.entry.id, item]));
 
   const hits: SearchHit[] = [];
-  for (const entry of set.stores.flatMap((store) => store.entries)) {
+  for (const entry of pool) {
     const normalized = normalizeText(entry.text);
     const overlap = terms.filter((term) => normalized.includes(term.toLowerCase())).length / terms.length;
     const similarity = jaccardOf(queryShingles, shinglesOf(entry.text));
@@ -126,8 +141,11 @@ export function renderSearchResults(hits: SearchHit[], query: string, total = hi
       hit.signals.accesses > 0 ? `引用过 ${hit.signals.accesses} 次` : null,
       hit.evidence ? `写入于 ${hit.evidence.at.slice(0, 10)}（${hit.evidence.tool}）` : null,
     ].filter(Boolean);
+    const invalid = hit.entry.invalidated
+      ? `\n  ⚠️ 此条已失效（${hit.entry.invalidated}${hit.entry.reason ? `：${hit.entry.reason}` : ""}）——默认不参与检索，仅显式查询可见；确需恢复用 memory_status restore。`
+      : "";
     const conflict = hit.conflictIds.length > 0 ? `\n  ⚠️ 与 ${hit.conflictIds.map((id) => id.slice(0, 6)).join(" / ")} 疑似冲突：两条都读一遍再下结论。` : "";
-    return `[${SCOPE_LABEL[hit.entry.scope]} #${hit.entry.id.slice(0, 6)}] ${parts.join(" ｜ ")}\n  ${hit.entry.text}${conflict}`;
+    return `[${SCOPE_LABEL[hit.entry.scope]} #${hit.entry.id.slice(0, 6)}] ${parts.join(" ｜ ")}\n  ${hit.entry.text}${invalid}${conflict}`;
   });
 
   return `${header}\n\n${body.join("\n\n")}`;

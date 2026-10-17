@@ -31,6 +31,13 @@ export interface MemoryEntry {
   text: string;
   created: string | null;
   last: string | null;
+  /**
+   * R2r2 失效状态：ISO 日期（YYYY-MM-DD）表示已失效；null / undefined = 有效。
+   * 旧格式条目没有该字段 → 默认有效（兼容红线）。
+   */
+  invalidated: string | null;
+  /** 失效原因（≤120 字符，写入时已归一）；无 = null */
+  reason: string | null;
   /** 稳定标识：正文归一化后的哈希，用于访问计数与冲突标注 */
   id: string;
 }
@@ -124,7 +131,14 @@ export function entryId(text: string): string {
   return `${fnv(0x811c9dc5)}${fnv(0x01000193)}`.slice(0, 12);
 }
 
-const METADATA_PATTERN = /^([\s\S]*?)\s*<!--\s*created=([^,]+),\s*last=([^,>]+)(?:,\s*project64=([A-Za-z0-9_-]+))?\s*-->\s*$/;
+// R2r2：尾部元数据额外容忍可选 `invalidated=YYYY-MM-DD[, reason=…]`；
+// 旧格式（无这两个字段）与旧解析器完全一致 → 有效默认态。
+const METADATA_PATTERN = /^([\s\S]*?)\s*<!--\s*created=([^,]+),\s*last=([^,>]+)(?:,\s*project64=([A-Za-z0-9_-]+))?(?:,\s*invalidated=([^,>]+))?(?:,\s*reason=([^>]*?))?\s*-->\s*$/;
+
+/** 合法失效日期（与 vendor decodeEntry 同口径）：不是 ISO 日期就当作「未失效」 */
+export function parseInvalidatedAt(value: string | null | undefined): string | null {
+  return value && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : null;
+}
 
 export function parseEntries(raw: string, scope: MemoryEntry["scope"]): MemoryEntry[] {
   return raw
@@ -136,7 +150,9 @@ export function parseEntries(raw: string, scope: MemoryEntry["scope"]): MemoryEn
       const text = (match ? match[1] : chunk).trim();
       const created = match ? match[2].trim() : null;
       const last = match ? match[3].trim() : null;
-      return { scope, text, created, last, id: entryId(text) };
+      const invalidated = match ? parseInvalidatedAt(match[5]?.trim()) : null;
+      const reason = invalidated && match?.[6]?.trim() ? match[6].trim() : null;
+      return { scope, text, created, last, invalidated, reason, id: entryId(text) };
     })
     .filter((entry) => entry.text.length > 0);
 }
@@ -239,10 +255,31 @@ export function serializeEntries(entries: MemoryEntry[]): string {
     .map((entry) => {
       const created = entry.created ?? new Date().toISOString().slice(0, 10);
       const last = entry.last ?? created;
-      return `${entry.text} <!-- created=${created}, last=${last} -->`;
+      // R2r2：只有带合法失效日期的条目才追加 invalidated/reason；其余字节不变。
+      const invalidated = parseInvalidatedAt(entry.invalidated);
+      const reason = invalidated && entry.reason ? `, reason=${normalizeInvalidationReason(entry.reason)}` : "";
+      const invalidation = invalidated ? `, invalidated=${invalidated}${reason}` : "";
+      return `${entry.text} <!-- created=${created}, last=${last}${invalidation} -->`;
     })
     .join(ENTRY_DELIMITER);
 }
+
+/**
+ * R2r2：失效原因归一（与 vendor 同口径）——压空白、逗号换全角、去 `-->` / `>`、
+ * 截断到 120 字符。写文件前必须过这一道，否则元数据注释会被自己的分隔符打断。
+ */
+export function normalizeInvalidationReason(reason: string | null | undefined): string {
+  const raw = typeof reason === "string" ? reason : "";
+  const flat = raw
+    .replace(/\s+/g, " ")
+    .replace(/,/g, "，")
+    .replace(/-+>/g, "→")
+    .replace(/>/g, "＞")
+    .trim();
+  return flat.length > INVALIDATION_REASON_MAX ? `${flat.slice(0, INVALIDATION_REASON_MAX - 1)}…` : flat;
+}
+
+export const INVALIDATION_REASON_MAX = 120;
 
 export function archiveEntries(store: StoreFile, entries: MemoryEntry[], reason: string): string | null {
   if (entries.length === 0) return null;
