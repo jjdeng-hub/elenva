@@ -36,6 +36,7 @@ tools/*.mjs
 !tools/memory-origins-selftest.mjs
 !tools/memory-conflicts-selftest.mjs
 !tools/memory-suggestions-selftest.mjs
+!tools/memory-status-selftest.mjs
 !tools/review-ledger-selftest.mjs
 !tools/corrections-selftest.mjs
 !tools/pending-approvals-selftest.mjs

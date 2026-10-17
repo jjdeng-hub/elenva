@@ -337,10 +337,12 @@ export function serializeMemoryEntries(entries: AgentMemoryEntry[], previous: Ag
       const before = known.get(text);
       const created = entry.created?.trim() || before?.created?.trim() || todayStamp();
       const last = before ? before.last?.trim() || todayStamp() : todayStamp();
-      // R2r2：失效状态是可选的——没给就沿用磁盘上同一条的旧值；从未失效过就完全不加字段。
-      const invalidated = parseInvalidatedAt(entry.invalidated ?? before?.invalidated ?? null);
-      const rawReason = entry.reason ?? before?.reason ?? null;
-      const reason = invalidated && rawReason && rawReason.trim() ? `, reason=${normalizeInvalidationReason(rawReason)}` : "";
+      // R2r2：失效状态是可选的——`undefined` = 未指定（沿用磁盘上同一条），
+      // `null` = **显式清除**（恢复），字符串 = 失效日期。两者必须区分：`??` 会把 null 当未指定。
+      const invalidatedSource = entry.invalidated === undefined ? (before?.invalidated ?? null) : entry.invalidated;
+      const invalidated = parseInvalidatedAt(invalidatedSource);
+      const reasonSource = entry.reason === undefined ? (before?.reason ?? null) : entry.reason;
+      const reason = invalidated && reasonSource && reasonSource.trim() ? `, reason=${normalizeInvalidationReason(reasonSource)}` : "";
       const invalidation = invalidated ? `, invalidated=${invalidated}${reason}` : "";
       return `${text} <!-- created=${created}, last=${last}${invalidation} -->`;
     })
@@ -401,6 +403,11 @@ export interface AgentMemoryWriteInput {
   entries: AgentMemoryEntry[];
   /** 客户端读到的 revision；传了且不一致 → 判定为并发冲突 */
   revision?: string;
+  /**
+   * 是否执行配额校验（默认 true）。设 false 只用于**元数据级**改动（标失效 / 恢复）——
+   * 见 setAgentMemoryEntryStatus：那是满额时的逃生口，硬拒就再也退不出满额。
+   */
+  enforceLimit?: boolean;
 }
 
 export type AgentMemoryWriteResult =
@@ -416,7 +423,7 @@ export type AgentMemoryWriteResult =
     }
   | {
       ok: false;
-      code: "unknown-file" | "conflict" | "over-limit" | "invalid";
+      code: "unknown-file" | "conflict" | "over-limit" | "invalid" | "not-found";
       error: string;
       chars?: number;
       limit?: number;
@@ -473,13 +480,17 @@ export function writeAgentMemoryFile(id: string, input: AgentMemoryWriteInput): 
       text,
       created: typeof raw.created === "string" ? raw.created : null,
       last: typeof raw.last === "string" ? raw.last : null,
-      invalidated: parseInvalidatedAt(typeof raw.invalidated === "string" ? raw.invalidated : null),
-      reason: typeof raw.reason === "string" ? raw.reason : null,
+      // undefined 保留为 undefined（序列化时沿用磁盘旧值）；null = 显式清除（恢复）
+      invalidated:
+        raw.invalidated === undefined
+          ? undefined
+          : parseInvalidatedAt(typeof raw.invalidated === "string" ? raw.invalidated : null),
+      reason: raw.reason === undefined ? undefined : typeof raw.reason === "string" ? raw.reason : null,
     });
   }
 
   const next = serializeMemoryEntries(clean, snapshot.entries);
-  if (next.length > snapshot.limit) {
+  if (input.enforceLimit !== false && next.length > snapshot.limit) {
     return {
       ok: false,
       code: "over-limit",
@@ -507,6 +518,64 @@ export function writeAgentMemoryFile(id: string, input: AgentMemoryWriteInput): 
     revision: after.revision,
     backup,
   };
+}
+
+/**
+ * 条目级「标失效 / 恢复」（单条原子）。
+ *
+ * 与整份 PUT 的区别：按正文（trim 后**完全相等**）定位到唯一一条，只翻转该条的
+ * `invalidated` / `reason`，其余条目原样保留；定位不到（正文被改过 / 已删）返回 `not-found`，
+ * 由调用方提示刷新——绝不模糊匹配、绝不误伤别的条目。
+ *
+ * 复用写入链契约：读快照 → revision 并发校验 → 备份（失败即中止）→ 原子写；
+ * **唯一豁免**是配额校验（`enforceLimit: false`）——失效是满额时的逃生口（与扩展
+ * `memory_status` 同口径：状态变更是纯元数据，不该被字符上限拦下）。
+ *
+ * 语义与扩展 `setStatus` 对齐：重复失效保留原失效日期（只补充原因）、恢复清空日期与原因、
+ * `reason` 写入前归一（逗号换全角 / 去 `-->` / 截断 120）。
+ */
+export interface AgentMemoryStatusInput {
+  text: string;
+  action: "invalidate" | "restore";
+  reason?: string | null;
+  revision?: string;
+}
+
+export function setAgentMemoryEntryStatus(id: string, input: AgentMemoryStatusInput): AgentMemoryWriteResult {
+  if (!isAgentMemoryFileId(id)) return { ok: false, code: "unknown-file", error: `未知记忆文件标识：${id}` };
+  if (input.action !== "invalidate" && input.action !== "restore") {
+    return { ok: false, code: "invalid", error: "action 只能是 invalidate / restore" };
+  }
+  const target = typeof input.text === "string" ? input.text.trim() : "";
+  if (!target) return { ok: false, code: "invalid", error: "缺少要操作的条目正文" };
+
+  const snapshot = readAgentMemorySnapshot(id);
+  if (typeof input.revision === "string" && input.revision !== snapshot.revision) {
+    return { ok: false, code: "conflict", error: "文件刚被改动过（可能是会话里的新记忆写入），请刷新后再操作" };
+  }
+  const index = snapshot.entries.findIndex((entry) => entry.text.trim() === target);
+  if (index < 0) {
+    return { ok: false, code: "not-found", error: "没找到这条记忆（可能已被改动或删除），请刷新后重试" };
+  }
+
+  const entry = snapshot.entries[index];
+  const next: AgentMemoryEntry =
+    input.action === "invalidate"
+      ? {
+          ...entry,
+          invalidated: entry.invalidated ?? todayStamp(),
+          reason:
+            input.reason != null && input.reason.trim()
+              ? normalizeInvalidationReason(input.reason)
+              : (entry.reason ?? null),
+        }
+      : { ...entry, invalidated: null, reason: null };
+
+  return writeAgentMemoryFile(id, {
+    entries: snapshot.entries.map((item, k) => (k === index ? next : item)),
+    revision: snapshot.revision,
+    enforceLimit: false,
+  });
 }
 
 /**

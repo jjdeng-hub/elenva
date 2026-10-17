@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Brain, CalendarDays, FileText, Gauge, Inbox, Info, Loader2, Pencil, Plus, RefreshCw, Save, Sparkles, Trash2, User, X } from "lucide-react";
+import { AlertTriangle, Brain, CalendarDays, EyeOff, FileText, Gauge, Inbox, Info, Loader2, Pencil, Plus, RefreshCw, RotateCcw, Save, Sparkles, Trash2, User, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { cn } from "@/components/lib/utils";
@@ -240,6 +240,8 @@ function AgentMemoryView({ scrollRef, initialId = "memory" }: { scrollRef: RefOb
   const [adding, setAdding] = useState(false);
   const [newDraft, setNewDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  /** 正在标失效 / 恢复的条目下标（null = 无；防重复点击） */
+  const [statusBusy, setStatusBusy] = useState<number | null>(null);
   const detailSeq = useRef(0);
   const pickedInitial = useRef(false);
   /** 详情卡（右侧内容区）：配额块「去整理」的滚动落点 */
@@ -374,6 +376,56 @@ function AgentMemoryView({ scrollRef, initialId = "memory" }: { scrollRef: RefOb
         toast(e instanceof Error ? e.message : String(e));
       } finally {
         setSaving(false);
+      }
+    },
+    [detail],
+  );
+
+  /**
+   * 条目级「标失效 / 恢复」：单条原子（`POST /api/memory/status`），只翻转这一条的状态，
+   * 其余条目与正文都不动 —— 与整份 PUT 保存分工明确。失效可逆，但仍是破坏性动作，
+   * 所以先过二次确认；失效时可选填一句原因（留空 = 只记日期）。
+   */
+  const setEntryStatus = useCallback(
+    async (i: number, action: "invalidate" | "restore") => {
+      if (!detail) return;
+      const entry = detail.entries[i];
+      if (!entry) return;
+      let reason: string | null = null;
+      if (action === "invalidate") {
+        const input = await dialogPrompt({
+          title: "标为失效",
+          message: "条目仍保留在文件里（历史 / 可随时恢复），但不再进常驻索引与检索。可填一句原因，留空也行。",
+          defaultValue: "",
+          placeholder: "为什么失效（可留空）",
+          confirmText: "标失效",
+          allowEmpty: true,
+        });
+        if (input === null) return; // 取消
+        reason = input.trim() || null;
+      } else {
+        const ok = await dialogConfirm({
+          title: "恢复这条记忆？",
+          message: "恢复后它会重新进入常驻索引与检索。",
+          confirmText: "恢复",
+        });
+        if (!ok) return;
+      }
+      setStatusBusy(i);
+      try {
+        const res = await fetch("/api/memory/status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ file: detail.file.id, text: entry.text, action, reason, revision: detail.revision }),
+        });
+        const d = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!res.ok || !d.ok) throw new Error(d.error || `操作失败（HTTP ${res.status}）`);
+        toast(action === "invalidate" ? "已标失效（可随时恢复）" : "已恢复");
+        setReloadKey((k) => k + 1);
+      } catch (e) {
+        toast(e instanceof Error ? e.message : String(e));
+      } finally {
+        setStatusBusy(null);
       }
     },
     [detail],
@@ -796,7 +848,7 @@ function AgentMemoryView({ scrollRef, initialId = "memory" }: { scrollRef: RefOb
                         <>
                           {entry.invalidated && (
                             <div className="mb-1 flex items-center gap-1">
-                              <span className="chip chip-warn" title={entry.reason ?? undefined}>
+                              <span className="chip chip-warn" title={entry.reason ?? "可在右侧恢复"}>
                                 已失效 {entry.invalidated}
                               </span>
                               {entry.reason && <span className="text-[10px] text-dim">{entry.reason}</span>}
@@ -826,6 +878,25 @@ function AgentMemoryView({ scrollRef, initialId = "memory" }: { scrollRef: RefOb
                                 </>
                               ) : (
                                 <>
+                                  {entry.invalidated ? (
+                                    <button
+                                      onClick={() => void setEntryStatus(i, "restore")}
+                                      disabled={saving || statusBusy === i}
+                                      title="恢复这条（重新进入索引与检索）"
+                                      className="btn btn-icon"
+                                    >
+                                      {statusBusy === i ? <Loader2 size={12} className="anim-spin" /> : <RotateCcw size={12} />}
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => void setEntryStatus(i, "invalidate")}
+                                      disabled={saving || statusBusy === i}
+                                      title="标为失效（保留在文件里，可恢复）"
+                                      className="btn btn-icon"
+                                    >
+                                      {statusBusy === i ? <Loader2 size={12} className="anim-spin" /> : <EyeOff size={12} />}
+                                    </button>
+                                  )}
                                   <button
                                     onClick={() => {
                                       setEditIndex(i);
