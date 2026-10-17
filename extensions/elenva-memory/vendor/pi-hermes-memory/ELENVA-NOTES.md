@@ -58,3 +58,48 @@
   见第 1 条的处理。
 - 上游的 ABI 自愈路径（node 版本与编译期不一致时 `npm rebuild`）随 `better-sqlite3` 一起移除——
   内置模块不存在 ABI 不匹配问题。
+
+## R2 写路径闭环（ELENVA-FORK · 2026-10-17）
+
+对应记忆 2.0 模块 2 补轮 R2r1。目标：让「写而不删」在机制上不再可能积债——未满先提醒、
+满了给路径、复盘带着预算干活。**契约冻结项全部未动**（工具名 / 文件格式 / config 既有键名 /
+快照命名 / `sessions.db`）；新增 config 键 `nearFullThreshold`（缺省 = 默认行为）。
+
+逐条：
+
+6. **`src/types.ts`** —— `MemoryConfig.nearFullThreshold?: number`（比值 0..1，或 0..100 视作
+   百分比；`0` 关闭）；`MemoryResult.overflow?: boolean`（容量错误的机器可读标记，替代对
+   本地化错误文案做 `startsWith` 匹配）；新增 `MemoryUsage { charCount, limit, percent, entryCount }`。
+7. **`src/constants.ts`** —— `DEFAULT_NEAR_FULL_THRESHOLD = 0.85`；
+   `MEMORY_BUDGET_MERGE_THRESHOLD_PERCENT = 85`；`MemoryBudgetRow` + `buildMemoryBudgetSection()`；
+   复盘 / 直连复盘 / 巩固四段提示词补「预算段 + ≥85% 必须产出合并/精简、不允许只追加」规则；
+   复盘侧顺带并进「好记忆三标准」（applicable / durable / legible）短版。
+8. **`src/config.ts`** —— 解析 `nearFullThreshold`（0..1 原样、>1 且 ≤100 除 100，其余忽略），
+   缺省写进 `DEFAULT_CONFIG`。
+9. **`src/store/memory-store.ts`** —— 写结果侧三件事：
+   - 新增公开 `getUsage(target)`（供复盘/巩固提示词读每目标水位）；
+   - `successResponse()` 在**成功**返回上附近满预警（`warning` / `warnings`，并经由
+     `finalizeTargetMutation` 並入 `message`）：`⚠ MEMORY.md 水位 92%（4600/5000）——建议本次会话内
+     合并/精简；示例对象：「…」（n 字符）`；覆盖 memory / user / failure（项目 store 同代码路径），
+     与 cap 是否 enforce 无关（policy-only 下同样提醒）；
+   - `memoryFullError()` / `replaceUnlocked()` / `applyMutationPlan()` 的溢出错误升级为结构化引导：
+     水位 + 限额 + **需腾出字符数** + `memory_replace` 合并配方 + `memory_remove` 淘汰配方 +
+     最长 3 条候选（摘要 + 字符数），并标 `overflow: true`；
+   - `addWithConsolidation()` 的 grace / deferred / failed / 未腾够 四条文案同样附「按上面的配方
+     手动腾空间」指引；判overflow 改用 `result.overflow === true`（不再对错误文案做前缀匹配）。
+   - 红线：**不自动截断、不自动删**；`fifo-evict` 仅调用签名多传 projectedTotal，行为不变。
+10. **`src/handlers/background-review.ts`** —— `ReviewPromptInput` 新增可选 `budget`；
+    `setupBackgroundReview` 每目标读 `store.getUsage()`（+ 项目 store）拼成
+    `{label, charCount, limit, percent, entryCount}`，注入 subprocess 与 direct 两条 prompt 的
+    `--- Memory Budget ---` 段。
+11. **`src/handlers/auto-consolidate.ts`** —— `buildConsolidationPrompt()` 与直连巩固的 user prompt
+    都带上预算段（数字来源 `store.getUsage(target)`）。
+
+本轮自测：`extensions/elenva-memory/selftest-r2.mjs`（50 断言：水位矩阵 × add/replace/remove、
+引导回路 E2E、复盘输入断言）。
+
+> **现场发现（未改，留待决策）**：ELENVA 现网 config `memoryMode = "policy-only"` 时
+> `capEnforced = false`（`memory-store.ts`），因此 `memory_add` 在现网**不会被硬拒**，`reject` /
+> `auto-consolidate` 路径实际处于休眠；索引层「满额会硬拒写入」的提醒与控制路径存在口径差。
+> R2 的近满预警不依赖 cap，故在现网即生效；若要满额引导真正跑起来，需要把 `capEnforced` 与
+> 注入模式解耦（另开一轮评估，不在本轮改）。
