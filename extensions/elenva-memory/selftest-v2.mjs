@@ -73,13 +73,14 @@ const expectedTools = [
   "memory_add",
   "memory_replace",
   "memory_remove",
+  "memory_status",
   "memory_search",
   "session_search",
   "skill_manage",
   "memory_find",
 ];
 const missingTools = expectedTools.filter((name) => !toolNames.includes(name));
-check("工具面齐全（底座 6 + memory_find）", missingTools.length === 0, `missing=${missingTools.join(",") || "none"}`);
+check("工具面齐全（底座 7 + memory_find）", missingTools.length === 0, `missing=${missingTools.join(",") || "none"}`);
 const dupTools = toolNames.filter((name, index) => toolNames.indexOf(name) !== index);
 check("工具无重复注册", dupTools.length === 0, `dups=${[...new Set(dupTools)].join(",") || "none"}`);
 check(
