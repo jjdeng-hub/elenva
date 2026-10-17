@@ -1021,8 +1021,12 @@ function MemoryQuotaBlock({ files, onGoto }: { files: AgentMemoryFile[]; onGoto:
   const nearCount = rows.filter((f) => quotaLevelOf(f.chars, f.limit) !== "ok").length;
 
   return (
-    <div data-testid="memory-quota" className="flex flex-col gap-2 rounded-lg border border-line-soft bg-panel-2 p-3">
-      <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-fg">
+    <div
+      data-testid="memory-quota"
+      className="grid grid-cols-1 gap-2 rounded-lg border border-line-soft bg-panel-2 p-3 xl:grid-cols-2"
+    >
+      {/* xl 双列：宽屏用列换纵向滚动（<1280 回退单列）；标题行跨两列，行卡片由 grid 拉伸等高 */}
+      <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-fg xl:col-span-2">
         <Gauge size={12} className="text-dim" />
         配额 · {rows.length} 个文件
         <span className="ml-auto text-[10px] font-normal text-dim">
@@ -1195,8 +1199,12 @@ function MemorySuggestionsBlock({
   onDismiss: (suggestion: MemorySuggestion) => void;
 }) {
   return (
-    <div data-testid="memory-suggestions" className="flex flex-col gap-2 rounded-lg border border-line bg-panel-2 p-3">
-      <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-fg">
+    <div
+      data-testid="memory-suggestions"
+      className="grid grid-cols-1 gap-2 rounded-lg border border-line bg-panel-2 p-3 xl:grid-cols-2"
+    >
+      {/* xl 双列：候选卡同网格行等高；按钮行 mt-auto 贴卡底，避免长短句导致操作位置参差 */}
+      <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-fg xl:col-span-2">
         <Sparkles size={12} className="text-dim" />
         整理候选 · {suggestions.length} 条
         <span className="ml-auto text-[10px] font-normal text-dim">
@@ -1214,7 +1222,8 @@ function MemorySuggestionsBlock({
             data-testid="suggestion-item"
             className="flex flex-col gap-1.5 rounded-md border border-line-soft bg-panel px-3 py-2"
           >
-            <div className="flex items-start gap-2">
+            {/* 同一网格行等高：行 flex-1 撑满卡片，按钮组 self-end 贴卡底（长短句不参差） */}
+            <div className="flex flex-1 items-start gap-2">
               <div className="min-w-0 flex-1">
                 <p className="line-clamp-2 break-words text-[12px] leading-relaxed text-fg">{item.line}</p>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] tabular-nums text-dim">
@@ -1225,7 +1234,7 @@ function MemorySuggestionsBlock({
                   </span>
                 </div>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
+              <div className="flex shrink-0 items-center gap-1 self-end">
                 <Popover
                   align="right"
                   trigger={({ toggle }) => (
