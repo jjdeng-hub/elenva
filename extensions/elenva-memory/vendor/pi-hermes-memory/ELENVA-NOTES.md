@@ -121,3 +121,43 @@
 > `capEnforced = false`，`memory_add` 不会被硬拒、`reject`/`auto-consolidate` 路径休眠。R2 收尾已把
 > `capEnforced` 与注入模式解耦（见第 12 条）：`policy-only` 只管「不注入全文」，配额默认执行。
 > 近满预警不依赖 cap，两者现在都生效。
+
+## R2r2 失效标记（ELENVA-FORK · 2026-10-17）
+
+对应记忆 2.0 模块 2 补轮 R2r2。目标：「写而不删」的另一半 —— 删除退居最后手段，常规治理 =
+**标记失效**（历史可查、可回溯、可恢复）。契约冻结项全部未动（工具名**新增**一个 `memory_status`、
+文件格式**向后兼容**地追加可选字段、config 既有键、快照命名、`sessions.db` 结构）。依据（简化版
+Graphiti 双时序 + ch3 L505「证据不足不强行收敛」）。
+
+**格式（可选追加字段）**：`<!-- created=…, last=…[, project64=…][, invalidated=YYYY-MM-DD][, reason=…] -->`
+- 未失效条目**序列化字节与旧版一致**（新字段完全不出现）；
+- 旧格式（无 `invalidated`）解析为**有效**（兼容红线）；非法日期同样降级为有效；
+- `reason` 写入时归一：压空白、逗号→全角、`-->`→`→`、`>`→`＞`、截断 120 字符（避免破坏注释分隔）。
+
+14. **`src/store/memory-store.ts`** —— 导出 `parseEntryMetadata` / `normalizeInvalidationReason` /
+    `INVALIDATION_REASON_MAX`；`encodeEntry` / `decodeEntry` 支持 `invalidated`/`reason`；
+    `getInvalidatedEntries()`；`getMemoryEntries/getUserEntries/getAllFailureEntries` 新增
+    `{includeInvalidated}`（默认排除）；快照注入（`loadFromDisk` / `formatProjectBlock`）排除失效条目；
+    `getFailureEntries` 排除失效条目；`nearFullAdvisory` 报失效条数；
+    **新增 `setStatus(target, oldText, 'invalidate'|'restore', reason?)`**（走 `runTargetMutation`
+    加锁 + 触发 SQLite 对账），状态变更**不跑内容扫描、不受 cap 限制**（满额时「忘掉」仍必须可行）。
+15. **`src/store/sqlite-memory-store.ts`** —— `parseMetadataComment` / `parseMarkdownMemoryEntry`
+    识别可选 `invalidated`；`reconcileMarkdownMemoryScope` **跳过失效条目**（于是 SQLite 镜面里不存在，
+    `memory_search` 默认查不到）；恢复时随下一次对账重新插入（Markdown 仍是 source of truth）。
+16. **`src/types.ts`** —— `MemoryUsage.invalidatedCount?`；`MemoryMutationOperation.action` 增
+    `"invalidate"`（+ `reason`）。
+17. **`src/store/memory-store.ts` 的 `applyMutationPlan`** —— 原子计划支持 `invalidate`（供复盘/
+    巩固的直连 JSON 操作走原子路径）。
+18. **`src/handlers/review-memory-ops.ts`** —— `ReviewMemoryOperation.action` 增 `"invalidate"`（+ `reason`）；
+    解析与应用都支持 `setStatus(..., "invalidate", ...)`。
+19. **`src/tools/memory-tool.ts`** —— 新工具 **`memory_status`**（`invalidate` / `restore` / `list`），
+    复用项目 store 解析、错误目标提示与工具结果渲染。
+20. **`src/constants.ts`** —— policy 提示词（full/compact）与 `MEMORY_TOOL_DESCRIPTION`、`<available-memory-tools>`
+    增补 `memory_status` 与「忘掉 = 标失效（可恢复）；物理删除仅限明确要求或纯噪声」；
+    复盘 / 复盘 system / 巩固 / 巩固 system 四段提示词的「删除被推翻的事实」升级为
+    「先标失效（附 reason）；合并近重复照旧；物理删除仅限明确指示或纯噪声」；
+    直连 operations schema 增 `action:"invalidate"` + `reason`。
+
+本层（`extensions/elenva-memory/`）与 Web 侧另见其源码注释；本轮自测：
+`selftest-r2b.mjs`（71 断言：格式兼容 / 隔离 roundtrip / SQLite 镜面 / 提示词 / tidy 分流 /
+Web 消费方降级 / E2E「忘掉 X」全链）。

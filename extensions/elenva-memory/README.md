@@ -107,6 +107,24 @@ user 消息**注入（`<memory_index>` 包裹，开头写明「框架自动注�
 - 背景：hermes 自带「后台复盘」（每 10 轮 / 15 次工具调用跑一次 LLM 复盘，自动捕获 failure）——
   记忆增长是**双通道**（模型主动写 + 自动捕获），而淘汰原先只有手动。这条提醒就是淘汰侧的自动触发点。
 
+## 失效标记（2026-10-17；记忆 2.0 R2r2）
+
+「写而不删」的另一半：**删除退居最后手段，常规治理 = 标记失效**。
+
+- **格式**（可选字段，追加在尾部注释里）：`<!-- created=…, last=…, invalidated=YYYY-MM-DD, reason=… -->`。
+  未失效的条目**字节不变**；旧格式条目没有 `invalidated` → 默认有效（兼容红线）。`reason` 写入时归一
+  （逗号换全角、去 `-->`、截断 120 字符）。
+- **语义**：失效条目仍在文件里（保留历史 / 可恢复），但**不进常驻索引、不进 `memory_find`/`memory_search`**；
+  显式可查（`memory_status action=list` 或 `memory_find(include_invalidated=true)`）。
+- **操作面**：新工具 **`memory_status`**（`invalidate` / `restore` / `list`）。「用户要求忘掉 X」的标准动作是
+  `memory_status invalidate`，不是 `memory_remove`。
+- **水位**：失效条目**计入文件体积**（charCount），但注入侧排除；近满预警会点出「其中 N 条已失效，可清出」。
+- **tidy 分流**：候选拆成「失效建议」（被推翻 / 冲突 / 变更标记 → apply 时只标记）与
+  「归档建议」（已失效残留 / 纯噪声 / 重复淘汰 → apply 时移入 `archive/`）。
+- **复盘 / 巩固提示词**：被推翻的事实改为「先标失效（附 reason）」；物理删除仅限明确指示或纯噪声。
+- 依据：Graphiti 双时序的简化版（标失效保留历史）；与 ch3 L505「证据不足保留待确认 / 不强行收敛」同向。
+  回归夹具：`selftest-r2b.mjs`（71 断言，含隔离「忘掉 X」全链）与 `tools/rev/memory-supersede-e2e.mjs`（装扩展后真跑）。
+
 ## 验收（改了这个扩展就跑）
 
 ```bash
