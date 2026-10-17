@@ -214,3 +214,10 @@ CI（`.github/workflows/gates.yml`）在 push / PR 时跑同样三道门 + 生�
   每条可改 / 删 / 增，写入走 `PUT /api/memory` → `lib/agent-memory.ts`（并发校验 revision / 配额校验 /
   写前备份到 `~/.pi/agent/backups/memory-ui-*` / 原子写）；条目格式由服务端序列化，不会破坏 `§` + 元数据契约。
   未做：整文件源码模式；写入后 SQLite 检索镜像要等会话启动时由扩展对齐（常驻索引每轮直读文件，立即生效）。
+- **`tools/memory-eval` 自 R1 收编后跑不起来（2026-10-17 发现，本轮未修）**：`run.mjs` 的
+  `installExtensionInto()` 只拷顶层 `*.ts`，vendor 目录（R1a 搬入）没被带进沙箱 → 沙箱里扩展加载失败
+  （`Cannot find module './vendor/pi-hermes-memory/src/index.js'`）。另：`settings.packages` 仍写死
+  `npm:pi-hermes-memory`，layered 模式下会与 vendored 扩展**双注册**。修法：改为按 `install.mjs` 同款
+  拷 `.ts` + README + vendor（递归），并让 layered 模式的 `packages` 为空。修好前，记忆类改动的
+  质量回归用 `extensions/elenva-memory/selftest-r*.mjs` + `e2e-r3.mjs` 代替（token / 行为断言），
+  但 L5「细节在摘要之外」的端到端质量结论仍缺一次 memory-eval 复测。

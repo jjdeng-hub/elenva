@@ -161,3 +161,36 @@ Graphiti 双时序 + ch3 L505「证据不足不强行收敛」）。
 本层（`extensions/elenva-memory/`）与 Web 侧另见其源码注释；本轮自测：
 `selftest-r2b.mjs`（71 断言：格式兼容 / 隔离 roundtrip / SQLite 镜面 / 提示词 / tidy 分流 /
 Web 消费方降级 / E2E「忘掉 X」全链）。
+
+## R3 检索升级：三层渐进披露 + 索引可重建（ELENVA-FORK · 2026-10-17）
+
+对应记忆 2.0 模块 2 补轮 R3。目标：让「按需取」真正分级（先看有哪些、再取正文），并把
+`sessions.db` 从「坏了没法修」变成「一条命令可重建 + 对账」。**契约冻结项全部未动**
+（工具名 / 文件格式 / config 既有键名 / 快照命名 / `sessions.db` 结构）。
+
+本轮改动**全在层（`extensions/elenva-memory/`），vendor 源码未改**——`memory_find` 是层自己注册的
+工具，`/memory-reindex` 只是调用 vendor 已有的 `indexAllSessions` / `syncMarkdownMemoriesToSqlite` /
+`DatabaseManager`。逐条：
+
+21. **`search.ts`** —— 三层输出：
+    - **L2 清单层** `renderSearchList(hits, query, {budgetChars})`：每条一行
+      `- [SCOPE #短id] 日期 · ≤90 字符摘要 · 标注（引用/失效/冲突）`；默认预算 2000 字符，
+      超限截断并显式写「还有 N 条未展开：收窄查询，或用 ids 取详情」。
+    - **L3 详情层** `findEntriesByIds` + `renderSearchDetails`：按 id（或 6 位短 id 前缀）精确取详情卡；
+      **恒含失效条目并标注**（显式召回不被默认排除挡住）；未命中 id 有回执。
+    - **兼容开关** `renderSearchResults` 原样保留（`full: true` 回旧行为）。
+    - 新增 `summarizeForList`（确定性截断，与索引层同款）、`DEFAULT_LIST_BUDGET_CHARS` / `LIST_SUMMARY_MAX`。
+22. **`index.ts`（`memory_find` 工具）** —— 参数增 `ids` / `full` / `budget_chars`；`query` 改为可选
+    （ids 模式不需要）；默认输出改清单（`details.mode = "list" | "ids" | "full"`）；清单默认 limit 10、
+    full 默认 5（ids 忽略 limit）。`include_invalidated` 只作用于 list/full，ids 模式恒含失效条目。
+23. **`reindex.ts`（新）** —— `/memory-reindex`：先备份 `sessions.db`（含 `-wal` / `-shm`）到
+    `<memoryDir>/backups/sessions.db.reindex-<时间戳>` → FTS5 `'rebuild'` 重建 `message_fts` / `memory_fts`
+    → 强制对账 Markdown 记忆镜像 → 从会话 JSONL 全量补齐（遵守 retention）→ 对账。
+    - **FTS 完整性口径**：用 `INSERT INTO <fts>(<fts>, rank) VALUES('integrity-check', 1)`，
+      **不用「FTS 行数 vs 内容表行数」**——外部内容表的 `SELECT COUNT(*)` 读的是内容表，
+      索引被清空时照样返回内容表行数（实测，测不出坏索引）。
+    - 对账项：磁盘会话文件 vs `sessions` 行、Markdown 全局条目 vs 镜像行、两个 FTS 的 integrity-check。
+    - 幂等：第二次跑增量为 0、计数不变；`renderReindexReport` 输出人读报告。
+
+本层自测：`selftest-r3.mjs`（47 断言：三模式 / 预算截断 / 清单标注 / ids×失效 / token 对比 /
+reindex 幂等 + 对账 + 损坏恢复）；隔离 E2E：`e2e-r3.mjs`（19 断言，装扩展后真跑注册面）。

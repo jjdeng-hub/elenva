@@ -62,8 +62,10 @@ node extensions/elenva-memory/selftest-v2.mjs    # 收编后骨架自检（26 �
 ## 用法
 
 - `/memory-tidy`：会话内整理（只报告）；`/memory-tidy --apply`：执行归档。
+- `/memory-reindex`：重建检索索引（见下「索引可重建」）；幂等、先备份、输出对账。
 - `node extensions/elenva-memory/tidy-cli.mjs [--apply] [--cwd <dir>]`：不开会话直接跑。
-- `memory_find(query, limit?)`：模型侧工具（重排 + 来源 + 冲突标注）；索引层会引导它先用这个。
+- `memory_find(query?, limit?, include_invalidated?, ids?, full?, budget_chars?)`：模型侧工具。**默认给清单**（每条一行摘要 + 标注），
+  `ids: ["<短id>"]` 取正文详情，`full: true` 回旧详情卡；索引层会引导它先用这个。
 - 状态落在 `<agentRoot>/elenva-memory/`：`state.json`（访问计数 / 冲突 / 写入留痕 / 工具调用次数 / 上次整理）、
   `index-log.jsonl`（每轮注入了多少字符 —— 评估夹具的常驻成本指标就读它）。
 - 环境变量：`ELENVA_MEMORY_INDEX=off` 关掉索引注入；`ELENVA_MEMORY_INDEX_BUDGET=<字符数>` 改预算。
@@ -107,6 +109,39 @@ user 消息**注入（`<memory_index>` 包裹，开头写明「框架自动注�
 - 背景：hermes 自带「后台复盘」（每 10 轮 / 15 次工具调用跑一次 LLM 复盘，自动捕获 failure）——
   记忆增长是**双通道**（模型主动写 + 自动捕获），而淘汰原先只有手动。这条提醒就是淘汰侧的自动触发点。
 
+## 检索三层渐进披露（2026-10-17；记忆 2.0 R3）
+
+依据 ch3 L482 的 L0/L1/L2 分层：**先看有哪些，再取是什么**。`memory_find` 默认不再直接灌详情卡：
+
+| 层 | 入口 | 输出 |
+|---|---|---|
+| L2 清单（默认） | `memory_find(query)` | 每条一行：`[SCOPE #短id] 日期 · ≤90 字符摘要 · 标注`；默认预算 2000 字符，超限写「还有 N 条未展开」 |
+| L3 详情 | `memory_find(ids: ["a1b2c3"])` | 按 id（或清单里的 6 位短 id）取详情卡（正文 + 元数据 + 失效/冲突标注） |
+| 兼容开关 | `memory_find(query, full: true)` | 旧「全详情卡」行为 |
+
+- **token 经济性**：`selftest-r3.mjs` 的 ≥10 命中场景实测 **list 1867 字符 vs full 7336 字符（25.4%）**，即省约 75%。
+- **标注不因精简而丢**：失效（`⚠️ 已失效`）与冲突（`⚠️ 与 … 疑似冲突`）都压在清单**同一行内**。
+- **`ids` 与 `include_invalidated` 的组合语义**：`include_invalidated` 只作用于查询模式（list/full）；
+  按 id 取是**显式召回**，恒返回失效条目并标注（清单里看到失效条目的 id 后，直接取正文是自然动作）。
+- 默认条数：清单 10 条、full 5 条（`limit` 可覆盖，ids 忽略 limit）。
+
+## 索引可重建（2026-10-17；记忆 2.0 R3）
+
+`sessions.db` 是派生物（会话 JSONL + 记忆 Markdown 才是 source of truth），所以「坏了能一键重建 + 对账」：
+
+```
+/memory-reindex
+```
+
+1. **先备份**：`sessions.db`（含 `-wal` / `-shm`）→ `<memoryDir>/backups/sessions.db.reindex-<时间戳>`；
+2. **重建 FTS**：`message_fts` / `memory_fts` 用 FTS5 `'rebuild'`；
+3. **重扫记忆**：强制对账 Markdown → `memories` 镜像；
+4. **重扫会话**：从 JSONL 全量补齐（遵守 retention）；
+5. **对账**：磁盘文件 vs 索引行、Markdown 条目 vs 镜像行、两个 FTS 的 `integrity-check`（带 `rank=1`，
+   外部内容表才会校对索引与内容表）。
+
+幂等（第二次零增量）；场景验证见 `selftest-r3.mjs` 与 `e2e-r3.mjs`（清空 FTS → 重建 → `session_search` 恢复）。
+
 ## 失效标记（2026-10-17；记忆 2.0 R2r2）
 
 「写而不删」的另一半：**删除退居最后手段，常规治理 = 标记失效**。
@@ -126,6 +161,17 @@ user 消息**注入（`<memory_index>` 包裹，开头写明「框架自动注�
   回归夹具：`selftest-r2b.mjs`（71 断言，含隔离「忘掉 X」全链）与 `tools/rev/memory-supersede-e2e.mjs`（装扩展后真跑）。
 
 ## 验收（改了这个扩展就跑）
+
+```bash
+node extensions/elenva-memory/selftest.mjs        # 纯函数
+node extensions/elenva-memory/selftest-v2.mjs     # 骨架 / 注册面 / FTS
+node extensions/elenva-memory/selftest-r2.mjs     # 写路径闭环
+node extensions/elenva-memory/selftest-r2b.mjs    # 失效标记
+node extensions/elenva-memory/selftest-r3.mjs     # 三层检索 + reindex
+e2e：node extensions/elenva-memory/e2e-r3.mjs    # 装扩展后真跑注册面（隔离 agentDir）
+```
+
+记忆相关改动另跑（见 `docs/agent-design-standard.md` 第五节）：
 
 ```bash
 node tools/memory-eval/run.mjs                      # 双层模式（默认）
