@@ -10,12 +10,14 @@ import type { DatabaseManager } from "../store/db.js";
 import type { MemoryCategory, MemoryConfig, MemoryResult, ThinkingLevel } from "../types.js";
 
 export interface ReviewMemoryOperation {
-  action: "add" | "replace" | "remove";
+  action: "add" | "replace" | "remove" | "invalidate";
   target: "memory" | "user" | "project" | "failure";
   content?: string;
   old_text?: string;
   category?: MemoryCategory;
   failure_reason?: string;
+  /** ELENVA-FORK (R2r2): optional reason for an `invalidate` operation. */
+  reason?: string;
 }
 
 export interface ApplyReviewOperationsResult {
@@ -402,7 +404,7 @@ function isReviewTarget(value: unknown): value is ReviewMemoryOperation["target"
 }
 
 function isReviewAction(value: unknown): value is ReviewMemoryOperation["action"] {
-  return value === "add" || value === "replace" || value === "remove";
+  return value === "add" || value === "replace" || value === "remove" || value === "invalidate";
 }
 
 export function parseReviewOperations(text: string): ReviewMemoryOperation[] | null {
@@ -437,6 +439,7 @@ function mapOperationsArray(operations: unknown): ReviewMemoryOperation[] | null
     if (typeof op.old_text === "string") operation.old_text = op.old_text;
     if (isMemoryCategory(op.category)) operation.category = op.category;
     if (typeof op.failure_reason === "string") operation.failure_reason = op.failure_reason;
+    if (typeof op.reason === "string") operation.reason = op.reason;
     parsed.push(operation);
   }
 
@@ -498,6 +501,7 @@ export async function applyReviewOperations(
       oldText: operation.old_text,
       category: target === "failure" ? operation.category ?? "failure" : operation.category,
       failureReason: operation.failure_reason,
+      reason: operation.reason,
       project: target === "failure" ? projectName ?? undefined : undefined,
     }));
     const result = await activeStore.applyMutationPlan(memoryTarget, mutationOperations, {
@@ -583,6 +587,20 @@ export async function applyReviewOperations(
           continue;
         }
         result = await activeStore.remove(memoryTarget, op.old_text, options.signal);
+        if (result.success) {
+          appliedCount++;
+        } else {
+          skippedCount++;
+        }
+        break;
+      }
+      case "invalidate": {
+        // ELENVA-FORK (R2r2): "drop superseded facts" means retire, not delete.
+        if (!op.old_text) {
+          skippedCount++;
+          continue;
+        }
+        result = await activeStore.setStatus(memoryTarget, op.old_text, "invalidate", op.reason, options.signal);
         if (result.success) {
           appliedCount++;
         } else {

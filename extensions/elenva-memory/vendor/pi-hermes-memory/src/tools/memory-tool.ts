@@ -480,5 +480,71 @@ Remove one existing entry. The target and old_text fields are required.`,
       old_text: Type.String({ description: "Substring identifying the entry to remove." }),
     }),
   );
+
+  // ELENVA-FORK (R2r2): lifecycle tool — "forget X" is invalidate, not remove.
+  // The entry stays on disk (history / recovery), leaves injection + search,
+  // and can be revived. Physical removal stays available but is the last resort.
+  pi.registerTool({
+    name: "memory_status",
+    label: "Memory Status",
+    description: `${commonDescription}
+
+Change or inspect one entry's lifecycle status.
+- action "invalidate": mark an entry invalid (the default way to "forget" something). It stays on disk for history/audit, drops out of the injected index and search, and can be brought back.
+- action "restore": revive a previously invalidated entry.
+- action "list": list the invalidated entries of a target (explicit lookup path).
+
+Prefer invalidate over memory_remove. Physically remove an entry only when the user explicitly asks for deletion, or when it is pure noise.`,
+    promptSnippet: "Memory Status: invalidate / restore entries (forget without deleting)",
+    promptGuidelines: [
+      "When the user asks to forget, drop, or stop using a remembered fact, invalidate it instead of removing it.",
+      "Use restore when an invalidated entry turns out to be needed again.",
+      "Only call memory_remove when the user explicitly asks to delete, or the entry is pure noise.",
+    ],
+    renderResult: createSharedToolResultRenderer(memoryResultView),
+    parameters: Type.Object({
+      target,
+      action: StringEnum(["invalidate", "restore", "list"] as const, {
+        description: "invalidate = retire (reversible); restore = revive; list = show invalidated entries.",
+      }),
+      old_text: Type.Optional(Type.String({ description: "Substring identifying the entry (required for invalidate/restore)." })),
+      reason: Type.Optional(Type.String({ description: "Why the entry is being invalidated (optional, ≤120 chars, normalized on write)." })),
+    }),
+    async execute(_toolCallId, params, signal, _onUpdate, ctx?: { cwd?: string }) {
+      const rawParams = params as { target: "memory" | "user" | "project" | "failure"; action: "invalidate" | "restore" | "list"; old_text?: string; reason?: string };
+      if (bindProjectFromCwd && ctx?.cwd) {
+        await bindProjectFromCwd(ctx.cwd);
+      }
+      const rawTarget = rawParams.target;
+      const activeProjectStore = resolveProjectStore(projectStore);
+      const activeProjectName = resolveProjectName(projectName);
+      if (rawTarget === "project" && !activeProjectStore) {
+        const failed = { success: false, error: "Project memory is not available (no project detected)." };
+        return { content: [{ type: "text" as const, text: JSON.stringify(failed) }], details: failed };
+      }
+      const activeStore = rawTarget === "project" ? activeProjectStore! : store;
+      const memoryTarget: "memory" | "user" | "failure" = rawTarget === "project" ? "memory" : rawTarget;
+      attachMutationObserver(activeStore, rawTarget === "project");
+
+      if (rawParams.action === "list") {
+        const rows = activeStore.getInvalidatedEntries(memoryTarget);
+        const lines = rows.length === 0
+          ? [`目标 ${rawTarget}：没有已失效条目。`]
+          : rows.map((row) => `- ${row.text}（失效于 ${row.invalidated}${row.reason ? `：${row.reason}` : ""}）`);
+        const text = `已失效条目（${rawTarget}，${rows.length} 条）：\n${lines.join("\n")}`;
+        return { content: [{ type: "text" as const, text }], details: { success: true, target: rawTarget, count: rows.length, entries: rows } };
+      }
+
+      const oldText = rawParams.old_text?.trim();
+      if (!oldText) {
+        const failed = { success: false, error: `${rawParams.action} requires old_text.` };
+        return { content: [{ type: "text" as const, text: JSON.stringify(failed) }], details: failed };
+      }
+      let result = await activeStore.setStatus(memoryTarget, oldText, rawParams.action, rawParams.reason, signal);
+      result = addWrongTargetHint(result, rawTarget, oldText, store, activeProjectStore);
+      if (rawTarget === "project" && result.success) result = { ...result, target: "project" };
+      return { content: [{ type: "text" as const, text: formatMemoryToolText(result) }], details: result };
+    },
+  });
   return configureProjectStore;
 }
