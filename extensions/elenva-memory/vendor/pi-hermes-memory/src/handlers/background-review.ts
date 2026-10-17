@@ -9,9 +9,11 @@
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
+  buildMemoryBudgetSection,
   buildMemoryTargetRoutingGuidance,
   COMBINED_REVIEW_PROMPT,
   DIRECT_REVIEW_SYSTEM_PROMPT,
+  type MemoryBudgetRow,
 } from "../constants.js";
 import { MemoryStore } from "../store/memory-store.js";
 import { DatabaseManager } from "../store/db.js";
@@ -45,6 +47,8 @@ export interface ReviewPromptInput {
   currentMemory: string;
   currentUser: string;
   currentProject: string | null;
+  /** ELENVA-FORK (R2): per-target water levels for the budget rule. */
+  budget?: MemoryBudgetRow[];
 }
 
 export function buildSubprocessReviewPrompt(input: ReviewPromptInput): string {
@@ -52,13 +56,19 @@ export function buildSubprocessReviewPrompt(input: ReviewPromptInput): string {
     COMBINED_REVIEW_PROMPT,
     "",
     buildMemoryTargetRoutingGuidance(input.currentProject !== null),
+  ];
+
+  const budgetSection = buildMemoryBudgetSection(input.budget ?? []);
+  if (budgetSection) reviewPrompt.push("", budgetSection);
+
+  reviewPrompt.push(
     "",
     "--- Current Memory ---",
     input.currentMemory || "(empty)",
     "",
     "--- Current User Profile ---",
     input.currentUser || "(empty)",
-  ];
+  );
 
   if (input.currentProject !== null) {
     reviewPrompt.push(
@@ -78,13 +88,18 @@ export function buildSubprocessReviewPrompt(input: ReviewPromptInput): string {
 }
 
 export function buildDirectReviewUserPrompt(input: ReviewPromptInput): string {
-  const sections = [
+  const sections = [];
+
+  const budgetSection = buildMemoryBudgetSection(input.budget ?? []);
+  if (budgetSection) sections.push(budgetSection, "");
+
+  sections.push(
     "--- Current Memory ---",
     input.currentMemory || "(empty)",
     "",
     "--- Current User Profile ---",
     input.currentUser || "(empty)",
-  ];
+  );
 
   if (input.currentProject !== null) {
     sections.push(
@@ -261,11 +276,20 @@ export function setupBackgroundReview(
       const parts = applyRecentMessageLimit(allParts, config.reviewRecentMessages);
       const activeProjectStore = resolveProjectStore(projectStore);
       const activeProjectName = resolveProjectName(projectName);
+      const budget: MemoryBudgetRow[] = [
+        { label: "MEMORY.md", ...store.getUsage("memory") },
+        { label: "USER.md", ...store.getUsage("user") },
+        { label: "failures.md", ...store.getUsage("failure") },
+      ];
+      if (activeProjectStore) {
+        budget.push({ label: "project MEMORY.md", ...activeProjectStore.getUsage("memory") });
+      }
       const promptInput: ReviewPromptInput = {
         parts,
         currentMemory: store.getMemoryEntries().join("\n§\n"),
         currentUser: store.getUserEntries().join("\n§\n"),
         currentProject: activeProjectStore ? activeProjectStore.getMemoryEntries().join("\n§\n") : null,
+        budget,
       };
       const subprocessPrompt = buildSubprocessReviewPrompt(promptInput);
       const directPrompt = buildDirectReviewUserPrompt(promptInput);

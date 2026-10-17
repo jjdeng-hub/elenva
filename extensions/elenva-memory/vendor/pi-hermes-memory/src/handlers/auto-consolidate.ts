@@ -26,8 +26,9 @@ import {
   DEFAULT_CONSOLIDATION_TIMEOUT_MS,
   DIRECT_CONSOLIDATION_SYSTEM_PROMPT,
   ENTRY_DELIMITER,
+  buildMemoryBudgetSection,
 } from "../constants.js";
-import type { ConsolidationResult, MemoryConfig } from "../types.js";
+import type { ConsolidationResult, MemoryConfig, MemoryUsage } from "../types.js";
 import { AGENT_ROOT } from "../paths.js";
 import { execChildPrompt } from "./pi-child-process.js";
 import { runDirectMemoryCompletion, usesDirectTransport } from "./review-memory-ops.js";
@@ -164,9 +165,12 @@ function buildConsolidationPrompt(
   target: MemoryTarget,
   toolTarget: ToolMemoryTarget,
   entries: string[],
+  usage: MemoryUsage,
 ): string {
   return [
     CONSOLIDATION_PROMPT,
+    "",
+    buildMemoryBudgetSection([{ label: labelForTarget(target, toolTarget), ...usage }]),
     "",
     `--- Current ${labelForTarget(target, toolTarget)} Entries ---`,
     entries.join(ENTRY_DELIMITER) || "(empty)",
@@ -190,6 +194,8 @@ export async function triggerConsolidation(
 ): Promise<ConsolidationResult> {
   const entries = entriesForTarget(store, target);
   const currentContent = entries.join(ENTRY_DELIMITER);
+  const usage = store.getUsage(target);
+  const budgetSection = buildMemoryBudgetSection([{ label: labelForTarget(target, toolTarget), ...usage }]);
   const runDirect = deps.runDirectMemoryCompletion ?? runDirectMemoryCompletion;
 
   if (directCtx && usesDirectTransport(llmConfig)) {
@@ -201,6 +207,8 @@ export async function triggerConsolidation(
         {
           systemPrompt: DIRECT_CONSOLIDATION_SYSTEM_PROMPT,
           userPrompt: [
+            budgetSection,
+            "",
             `--- Current ${labelForTarget(target, toolTarget)} Entries (target: '${toolTarget}') ---`,
             currentContent || "(empty)",
             "",
@@ -276,7 +284,7 @@ export async function triggerConsolidation(
       }
     }
 
-    const result = await execChildPrompt(pi, buildConsolidationPrompt(target, toolTarget, promptEntries), llmConfig, {
+    const result = await execChildPrompt(pi, buildConsolidationPrompt(target, toolTarget, promptEntries, usage), llmConfig, {
       signal,
       timeoutMs,
       retryWithoutOverrides: true,
