@@ -55,13 +55,18 @@ writeFileSync(
   joinEntries(entry("虚构：作者偏好简洁中文回复。", "2026-10-01", "2026-10-01")),
 );
 writeFileSync(join(memoryDir, "failures.md"), ""); // 空文件：不该抛，也不出条目
+const demoCurrentPath = join(projectsDir, "demo-proj", "MEMORY.md");
 writeFileSync(
-  join(projectsDir, "demo-proj", "MEMORY.md"),
+  demoCurrentPath,
   joinEntries(
     entry("虚构：demo-proj 里禁用原生模块。", "2026-10-03", "2026-10-03"),
     entry("虚构：demo-proj 的构建要带 --webpack。", "2026-10-03", "2026-10-16"),
   ),
 );
+// 「去掉」条目按「后一份状态」的 ms 定日期，最后一对的后一份 = 当前文件的 statSync().mtime
+// （lib 读真实 mtime）——同样必须锚定到注入的 now，否则跨午夜必红（2026-10-17 实锤）。
+const demoNowMs = Date.parse("2026-10-16T12:00:00Z") - 60_000; // 19:59 CST → 10-16 桶
+utimesSync(demoCurrentPath, new Date(demoNowMs), new Date(demoNowMs));
 
 // 快照差分：老的 recovery 里有「将被去掉」的一条，当前文件里没有
 const removedText = "虚构：这条旧结论下一轮整理时会被去掉。";
