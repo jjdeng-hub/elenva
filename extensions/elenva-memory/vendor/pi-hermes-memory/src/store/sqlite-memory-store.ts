@@ -138,7 +138,15 @@ function parseMarkdownScopeSyncState(value: unknown): MarkdownScopeSyncState | n
   return { sha256, entryCount };
 }
 
-export interface ParsedMarkdownMemoryEntry extends SqliteMemorySyncInput {}
+export interface ParsedMarkdownMemoryEntry extends SqliteMemorySyncInput {
+  /**
+   * ELENVA-FORK (R2r2): ISO date when the entry was invalidated, or null for a
+   * valid entry. Invalidated entries are deliberately **not** mirrored into
+   * SQLite, so `memory_search` never returns them; restoring re-inserts them
+   * on the next reconcile (Markdown stays the source of truth).
+   */
+  invalidated?: string | null;
+}
 
 function today(): string {
   return new Date().toISOString().split('T')[0];
@@ -264,8 +272,10 @@ function isShortCjkLiteralQuery(query: string): boolean {
     && /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]+$/u.test(trimmed);
 }
 
-function parseMetadataComment(raw: string): { text: string; created: string; lastReferenced: string; project: string | null } {
-  const match = raw.match(/^(.*?)\s*<!--\s*created=([^,]+),\s*last=([^,>]+)(?:,\s*project64=([A-Za-z0-9_-]+))?\s*-->\s*$/);
+function parseMetadataComment(raw: string): { text: string; created: string; lastReferenced: string; project: string | null; invalidated: string | null } {
+  // ELENVA-FORK (R2r2): tolerate the optional `invalidated=` / `reason=` suffix.
+  // Legacy entries (no invalidated field) parse exactly as before and stay valid.
+  const match = raw.match(/^(.*?)\s*<!--\s*created=([^,]+),\s*last=([^,>]+)(?:,\s*project64=([A-Za-z0-9_-]+))?(?:,\s*invalidated=([^,>]+))?(?:,\s*reason=([^>]*?))?\s*-->\s*$/);
   if (match) {
     let project: string | null = null;
     if (match[4]) {
@@ -276,6 +286,7 @@ function parseMetadataComment(raw: string): { text: string; created: string; las
       created: match[2].trim(),
       lastReferenced: match[3].trim(),
       project,
+      invalidated: match[5] && /^\d{4}-\d{2}-\d{2}$/.test(match[5].trim()) ? match[5].trim() : null,
     };
   }
 
@@ -285,6 +296,7 @@ function parseMetadataComment(raw: string): { text: string; created: string; las
     created: fallback,
     lastReferenced: fallback,
     project: null,
+    invalidated: null,
   };
 }
 
@@ -366,6 +378,7 @@ export function parseMarkdownMemoryEntry(
       project: parsedProject,
       created,
       lastReferenced,
+      invalidated: metadata.invalidated,
     };
   }
 
@@ -404,6 +417,7 @@ export function parseMarkdownMemoryEntry(
     correctedTo,
     created,
     lastReferenced,
+    invalidated: metadata.invalidated,
   };
 }
 
@@ -550,6 +564,10 @@ export function reconcileMarkdownMemoryScope(
 
     for (const rawEntry of rawEntries) {
       const parsed = parseMarkdownMemoryEntry(rawEntry, target, normalizedProject);
+      // ELENVA-FORK (R2r2): invalidated entries are excluded from the search
+      // mirror. Omitting them here makes the orphan sweep below delete any
+      // stale row; a later restore re-inserts the row.
+      if (parsed.invalidated) continue;
       desiredIdentities.add(JSON.stringify([
         normalizeCategory(parsed.category),
         parsed.content.trim(),

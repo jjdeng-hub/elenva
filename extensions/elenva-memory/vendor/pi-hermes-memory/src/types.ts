@@ -137,6 +137,12 @@ export interface MemoryUsage {
   percent: number;
   /** Number of entries in the target. */
   entryCount: number;
+  /**
+   * ELENVA-FORK (R2r2): number of entries marked invalidated. They still
+   * occupy file space (charCount includes them) but are excluded from
+   * injection and search; surfaced so review / advisory can point at them.
+   */
+  invalidatedCount?: number;
 }
 
 export interface MemoryResult {
@@ -162,12 +168,14 @@ export interface MemoryResult {
 }
 
 export interface MemoryMutationOperation {
-  action: "add" | "replace" | "remove";
+  action: "add" | "replace" | "remove" | "invalidate";
   content?: string;
   oldText?: string;
   category?: MemoryCategory;
   failureReason?: string;
   project?: string;
+  /** ELENVA-FORK (R2r2): optional reason for an `invalidate` operation. */
+  reason?: string;
 }
 
 export interface MemorySnapshot {

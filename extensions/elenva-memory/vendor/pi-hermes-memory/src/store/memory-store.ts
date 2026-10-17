@@ -62,6 +62,54 @@ const TARGET_FILE_LABEL: Record<"memory" | "user" | "failure", string> = {
   failure: "failures.md",
 };
 
+/**
+ * ELENVA-FORK (R2r2): normalize an invalidation reason so it can never break
+ * the file contract. Commas are rewritten to fullwidth (the metadata comment
+ * is comma-separated), `-->` / `>` are neutralized, whitespace is collapsed,
+ * and the result is truncated to `INVALIDATION_REASON_MAX` characters.
+ */
+export function normalizeInvalidationReason(reason: string | null | undefined): string {
+  const raw = typeof reason === "string" ? reason : "";
+  const flat = raw
+    .replace(/\s+/g, " ")
+    .replace(/,/g, "，")
+    .replace(/-+>/g, "→")
+    .replace(/>/g, "＞")
+    .trim();
+  return flat.length > INVALIDATION_REASON_MAX ? `${flat.slice(0, INVALIDATION_REASON_MAX - 1)}…` : flat;
+}
+
+/**
+ * ELENVA-FORK (R2r2): shared metadata-comment parser. Optional fields are
+ * appended in a fixed order (created, last, project64?, invalidated?, reason?)
+ * so every legacy reader keeps matching the old prefix; new readers tolerate
+ * their absence. Returns null for entries without a metadata comment.
+ */
+export function parseEntryMetadata(raw: string): {
+  text: string;
+  created: string;
+  lastReferenced: string;
+  project64: string | null;
+  invalidated: string | null;
+  reason: string | null;
+} | null {
+  const match = raw.match(
+    /^([\s\S]*?)\s*<!--\s*created=([^,]+),\s*last=([^,>]+)(?:,\s*project64=([A-Za-z0-9_-]+))?(?:,\s*invalidated=([^,>]+))?(?:,\s*reason=([^>]*?))?\s*-->\s*$/,
+  );
+  if (!match) return null;
+  return {
+    text: match[1].trim(),
+    created: match[2].trim(),
+    lastReferenced: match[3].trim(),
+    project64: match[4] ?? null,
+    invalidated: match[5]?.trim() ?? null,
+    reason: match[6]?.trim() ?? null,
+  };
+}
+
+/** Length cap for `reason=`; keeps the metadata comment from growing unbounded. */
+export const INVALIDATION_REASON_MAX = 120;
+
 /** Single-line truncation for advisory / guidance candidate previews. */
 function previewText(text: string, max: number): string {
   const flat = text.replace(/\s+/g, " ").trim();
@@ -157,7 +205,8 @@ export class MemoryStore {
     const limit = this.charLimit(target);
     const charCount = this.charCount(target);
     const percent = limit > 0 ? Math.floor((charCount / limit) * 100) : 0;
-    return { charCount, limit, percent, entryCount: this.entriesFor(target).length };
+    const invalidatedCount = this.entriesFor(target).filter((entry) => this.isInvalidated(entry)).length;
+    return { charCount, limit, percent, entryCount: this.entriesFor(target).length, invalidatedCount };
   }
 
   private nearFullThreshold(): number {
@@ -188,7 +237,13 @@ export class MemoryStore {
         .join("、");
       lines.push(
         `⚠ ${TARGET_FILE_LABEL[target]} 水位 ${percent}%（${current}/${limit}）——建议本次会话内合并/精简；`
-        + (examples ? `示例对象：${examples}` : "目前没有可合并的长条目。"),
+        + (examples ? `示例对象：${examples}` : "目前没有可合并的长条目。")
+        + (() => {
+          // ELENVA-FORK (R2r2): invalidated entries stay in the file (they count
+          // toward the cap) but no longer inject — point at them as free space.
+          const invalidated = this.entriesFor(target).filter((entry) => this.isInvalidated(entry)).length;
+          return invalidated > 0 ? `其中 ${invalidated} 条已失效（不参与注入，可 memory_status list 查看后清出）。` : "";
+        })(),
       );
     }
     return lines.length > 0 ? lines.join("\n") : null;
@@ -266,8 +321,9 @@ export class MemoryStore {
     // Deduplicate preserving order
     // Capture frozen snapshot for system prompt injection
     // Strip metadata comments — the LLM doesn't need to see timestamps
-    const strippedMemory = this.memoryEntries.map((e) => this.stripMetadata(e));
-    const strippedUser = this.userEntries.map((e) => this.stripMetadata(e));
+    // ELENVA-FORK (R2r2): invalidated entries are excluded from injection.
+    const strippedMemory = this.visibleEntries(this.memoryEntries);
+    const strippedUser = this.visibleEntries(this.userEntries);
     this.snapshot = {
       memory: this.renderBlock("memory", strippedMemory),
       user: this.renderBlock("user", strippedUser),
@@ -314,7 +370,8 @@ export class MemoryStore {
     return this.failureEntries
       .filter((entry) => {
         const decoded = this.decodeEntry(entry);
-        return decoded.created >= cutoffStr;
+        // ELENVA-FORK (R2r2): invalidated failures are not injected as active lessons.
+        return decoded.invalidated === null && decoded.created >= cutoffStr;
       })
       .map((entry) => this.stripMetadata(entry));
   }
@@ -546,6 +603,26 @@ export class MemoryStore {
           continue;
         }
 
+        if (operation.action === "invalidate") {
+          // ELENVA-FORK (R2r2): reversible retirement inside an atomic plan.
+          const replacements = new Map(matches.map((entry) => {
+            const decoded = this.decodeEntry(entry);
+            return [
+              entry,
+              this.encodeEntry(
+                decoded.text,
+                decoded.created,
+                decoded.lastReferenced,
+                decoded.project ?? undefined,
+                decoded.invalidated ?? today,
+                operation.reason ?? decoded.reason ?? "superseded",
+              ),
+            ];
+          }));
+          plannedEntries = plannedEntries.map((entry) => replacements.get(entry) ?? entry);
+          continue;
+        }
+
         const content = operation.content?.trim() ?? "";
         if (!content) return { success: false, error: "Memory mutation replace requires content." };
         const scanError = scanContent(content);
@@ -664,6 +741,73 @@ export class MemoryStore {
     );
   }
 
+  // ─── ELENVA-FORK (R2r2): lifecycle — invalidate / restore ───
+  //
+  // "Delete" is the last resort; the normal way to retire a superseded fact is
+  // to mark it invalid. The entry stays on disk (history / audit / recovery),
+  // is excluded from injection + search, and can be brought back with restore.
+  // Legacy entries have no `invalidated` field and are valid by default.
+
+  async setStatus(
+    target: "memory" | "user" | "failure",
+    oldText: string,
+    action: "invalidate" | "restore",
+    reason?: string | null,
+    signal?: AbortSignal,
+  ): Promise<MemoryResult> {
+    return this.runTargetMutation(
+      target,
+      (markMutation) => this.setStatusUnlocked(target, oldText, action, reason, markMutation),
+      signal,
+    );
+  }
+
+  private async setStatusUnlocked(
+    target: "memory" | "user" | "failure",
+    oldText: string,
+    action: "invalidate" | "restore",
+    reason: string | null | undefined,
+    markMutation: () => void,
+  ): Promise<MemoryResult> {
+    oldText = normalizeMemoryLookupText(oldText);
+    if (!oldText) return { success: false, error: "old_text cannot be empty." };
+
+    await this.syncTargetFromDiskIfChanged(target);
+    const entries = this.entriesFor(target);
+    // Match against stripped text (includes invalidated entries, so restore works).
+    const matches = entries.filter((e) => this.stripMetadata(e).includes(oldText));
+
+    if (matches.length === 0) return { success: false, error: `No entry matched '${oldText}'.` };
+    if (matches.length > 1 && !this.areDistinctScopedFailureCopies(target, matches)) {
+      return {
+        success: false,
+        error: `Multiple entries matched '${oldText}'. Be more specific.`,
+        matches: matches.map((e) => this.stripMetadata(e).slice(0, 80) + (this.stripMetadata(e).length > 80 ? "..." : "")),
+      };
+    }
+
+    const today = new Date().toISOString().split("T")[0];
+    const replacements = new Map(matches.map((entry) => {
+      const decoded = this.decodeEntry(entry);
+      const nextInvalidated = action === "invalidate" ? (decoded.invalidated ?? today) : null;
+      const nextReason = action === "invalidate" ? (reason ?? decoded.reason ?? null) : null;
+      return [entry, this.encodeEntry(decoded.text, decoded.created, decoded.lastReferenced, decoded.project ?? undefined, nextInvalidated, nextReason)];
+    }));
+
+    // Status changes are metadata-only: they never run the content scanner and
+    // are deliberately not submitted to the character cap (invalidating a
+    // superseded fact must stay possible even at 100% — it is the escape hatch).
+    this.setEntries(target, entries.map((entry) => replacements.get(entry) ?? entry));
+    await this.saveToDisk(target);
+    markMutation();
+
+    const verb = action === "invalidate" ? "Entry invalidated (kept on disk; use memory_status restore to revive)." : "Entry restored (valid again).";
+    const message = reason
+      ? `${verb} reason: ${normalizeInvalidationReason(reason)}`
+      : verb;
+    return this.successResponse(target, message);
+  }
+
   private async removeUnlocked(
     target: "memory" | "user" | "failure",
     oldText: string,
@@ -722,7 +866,8 @@ export class MemoryStore {
    * Uses only the memory entries (no user split) with a project-labelled header.
    */
   formatProjectBlock(projectName: string): string {
-    const block = this.renderProjectBlock(projectName, this.memoryEntries);
+    // ELENVA-FORK (R2r2): project injection also drops invalidated entries.
+    const block = this.renderProjectBlock(projectName, this.visibleEntries(this.memoryEntries));
     return block ? this.fenceBlock(block) : "";
   }
 
@@ -730,17 +875,26 @@ export class MemoryStore {
    * All failure entries (no age filter), metadata stripped.
    * Used by consolidation, which must consider the full file size —
    * unlike getFailureEntries(), which filters by age for injection.
+   * ELENVA-FORK (R2r2): invalidated entries are excluded by default; pass
+   * `includeInvalidated` on the consolidation path so they can be cleared out.
    */
-  getAllFailureEntries(): string[] {
-    return this.failureEntries.map((e) => this.stripMetadata(e));
+  getAllFailureEntries(options: { includeInvalidated?: boolean } = {}): string[] {
+    return this.visibleEntries(this.failureEntries, options);
   }
 
-  getMemoryEntries(): string[] {
-    return this.memoryEntries.map((e) => this.stripMetadata(e));
+  getMemoryEntries(options: { includeInvalidated?: boolean } = {}): string[] {
+    return this.visibleEntries(this.memoryEntries, options);
   }
 
-  getUserEntries(): string[] {
-    return this.userEntries.map((e) => this.stripMetadata(e));
+  getUserEntries(options: { includeInvalidated?: boolean } = {}): string[] {
+    return this.visibleEntries(this.userEntries, options);
+  }
+
+  /** Strip metadata and (unless asked otherwise) drop invalidated entries. */
+  private visibleEntries(rawEntries: string[], options: { includeInvalidated?: boolean } = {}): string[] {
+    return rawEntries
+      .filter((entry) => options.includeInvalidated === true || !this.isInvalidated(entry))
+      .map((entry) => this.stripMetadata(entry));
   }
 
   /** Raw Markdown entries, including metadata, for exact SQLite reconciliation. */
@@ -754,31 +908,75 @@ export class MemoryStore {
    * Encode metadata (created, lastReferenced) as an HTML comment appended to entry text.
    * The comment is invisible in markdown and transparent to the § delimiter.
    */
-  private encodeEntry(text: string, created: string, lastReferenced: string, project?: string): string {
+  private encodeEntry(
+    text: string,
+    created: string,
+    lastReferenced: string,
+    project?: string,
+    invalidated?: string | null,
+    reason?: string | null,
+  ): string {
     const projectMetadata = project?.trim()
       ? `, project64=${Buffer.from(project.trim(), "utf-8").toString("base64url")}`
       : "";
-    return `${text} <!-- created=${created}, last=${lastReferenced}${projectMetadata} -->`;
+    // ELENVA-FORK (R2r2): invalidation is an *optional additive* suffix, so an
+    // entry that has never been invalidated serializes byte-for-byte like before.
+    const normalizedReason = invalidated ? normalizeInvalidationReason(reason) : "";
+    const invalidationMetadata = invalidated
+      ? `, invalidated=${invalidated}${normalizedReason ? `, reason=${normalizedReason}` : ""}`
+      : "";
+    return `${text} <!-- created=${created}, last=${lastReferenced}${projectMetadata}${invalidationMetadata} -->`;
   }
 
   /**
    * Decode entry text, extracting metadata if present.
    * Falls back to today's date for legacy entries without metadata.
    */
-  private decodeEntry(raw: string): { text: string; created: string; lastReferenced: string; project: string | null } {
+  private decodeEntry(raw: string): {
+    text: string;
+    created: string;
+    lastReferenced: string;
+    project: string | null;
+    invalidated: string | null;
+    reason: string | null;
+  } {
     // ELENVA-FORK: `[\s\S]*?` instead of `.*?` + the `s` flag so this file
     // type-checks under ELENVA's ES2017 target (the `s` flag needs ES2018).
-    const match = raw.match(/^([\s\S]*?)\s*<!--\s*created=([^,]+),\s*last=([^,>]+)(?:,\s*project64=([A-Za-z0-9_-]+))?\s*-->\s*$/);
-    if (match) {
+    const parsed = parseEntryMetadata(raw);
+    if (parsed) {
       let project: string | null = null;
-      if (match[4]) {
-        try { project = Buffer.from(match[4], "base64url").toString("utf-8").trim() || null; } catch {}
+      if (parsed.project64) {
+        try { project = Buffer.from(parsed.project64, "base64url").toString("utf-8").trim() || null; } catch {}
       }
-      return { text: match[1].trim(), created: match[2].trim(), lastReferenced: match[3].trim(), project };
+      return {
+        text: parsed.text,
+        created: parsed.created,
+        lastReferenced: parsed.lastReferenced,
+        project,
+        // ELENVA-FORK (R2r2): only a well-formed ISO date counts as invalidation;
+        // anything else falls back to "valid" (compat red line).
+        invalidated: parsed.invalidated && /^\d{4}-\d{2}-\d{2}$/.test(parsed.invalidated) ? parsed.invalidated : null,
+        reason: parsed.invalidated ? parsed.reason : null,
+      };
     }
     // Legacy entry without metadata — use today as default
     const today = new Date().toISOString().split("T")[0];
-    return { text: raw.trim(), created: today, lastReferenced: today, project: null };
+    return { text: raw.trim(), created: today, lastReferenced: today, project: null, invalidated: null, reason: null };
+  }
+
+  /** ELENVA-FORK (R2r2): is this raw entry marked invalid? Legacy entries = valid by default. */
+  private isInvalidated(raw: string): boolean {
+    return this.decodeEntry(raw).invalidated !== null;
+  }
+
+  /** ELENVA-FORK (R2r2): entries the explicit "list invalidated" path shows. */
+  getInvalidatedEntries(target: "memory" | "user" | "failure"): Array<{ text: string; invalidated: string; reason: string | null }> {
+    const out: Array<{ text: string; invalidated: string; reason: string | null }> = [];
+    for (const raw of this.entriesFor(target)) {
+      const decoded = this.decodeEntry(raw);
+      if (decoded.invalidated) out.push({ text: decoded.text, invalidated: decoded.invalidated, reason: decoded.reason });
+    }
+    return out;
   }
 
   /** Strip metadata comment from entry text for display. */
