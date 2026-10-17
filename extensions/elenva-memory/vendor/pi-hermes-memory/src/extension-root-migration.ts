@@ -5,7 +5,8 @@ import path from "node:path";
 import { AtomicLockCoordinator, type AtomicLockLease } from "./store/atomic-lock-coordinator.js";
 import { canonicalStoragePathSync } from "./store/canonical-storage-path.js";
 import { createRequire } from "node:module";
-import { isBunRuntime, loadBetterSqlite3 } from "./store/sqlite-native.js";
+// ELENVA-FORK: node:sqlite loader replaces the upstream better-sqlite3 loader.
+import { isBunRuntime, loadSqliteDatabase } from "./store/sqlite-native.js";
 
 type MigrationDatabase = {
   exec: (sql: string) => void;
@@ -107,7 +108,7 @@ function getDatabaseCtor(): MigrationDatabaseCtor {
   if (!cachedDatabaseCtor) {
     cachedDatabaseCtor = isBunRuntime()
       ? createBunMigrationDatabaseCtor()
-      : (loadBetterSqlite3() as MigrationDatabaseCtor);
+      : (loadSqliteDatabase() as MigrationDatabaseCtor);
   }
   return cachedDatabaseCtor;
 }

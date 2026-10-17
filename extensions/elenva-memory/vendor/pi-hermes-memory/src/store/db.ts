@@ -4,7 +4,8 @@ import { createRequire } from 'node:module';
 import { SCHEMA_SQL } from './schema.js';
 import { AtomicLockCoordinator } from './atomic-lock-coordinator.js';
 import { canonicalStoragePathSync } from './canonical-storage-path.js';
-import { isBunRuntime, loadBetterSqlite3 } from './sqlite-native.js';
+// ELENVA-FORK: node:sqlite loader replaces the upstream better-sqlite3 loader.
+import { isBunRuntime, loadSqliteDatabase } from './sqlite-native.js';
 import { measureLifecycleSync } from '../lifecycle-timing.js';
 import { MDSYNC_METADATA_KEY_PREFIX } from '../constants.js';
 
@@ -152,7 +153,7 @@ function getDatabaseCtor(): DatabaseCtor {
     const require = createRequire(import.meta.url);
     cachedDatabaseCtor = isBunRuntime()
       ? createBunCompatDatabaseCtor(require)
-      : (loadBetterSqlite3({ requireImpl: require }) as DatabaseCtor);
+      : (loadSqliteDatabase() as DatabaseCtor);
   }
   return cachedDatabaseCtor;
 }

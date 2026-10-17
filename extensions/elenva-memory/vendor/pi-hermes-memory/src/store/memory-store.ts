@@ -637,7 +637,9 @@ export class MemoryStore {
    * Falls back to today's date for legacy entries without metadata.
    */
   private decodeEntry(raw: string): { text: string; created: string; lastReferenced: string; project: string | null } {
-    const match = raw.match(/^(.*?)\s*<!--\s*created=([^,]+),\s*last=([^,>]+)(?:,\s*project64=([A-Za-z0-9_-]+))?\s*-->\s*$/s);
+    // ELENVA-FORK: `[\s\S]*?` instead of `.*?` + the `s` flag so this file
+    // type-checks under ELENVA's ES2017 target (the `s` flag needs ES2018).
+    const match = raw.match(/^([\s\S]*?)\s*<!--\s*created=([^,]+),\s*last=([^,>]+)(?:,\s*project64=([A-Za-z0-9_-]+))?\s*-->\s*$/);
     if (match) {
       let project: string | null = null;
       if (match[4]) {

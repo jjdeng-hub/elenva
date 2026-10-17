@@ -1,5 +1,5 @@
 import { keyHint, type ToolRenderResultOptions } from "@earendil-works/pi-coding-agent";
-import stripAnsi from "strip-ansi";
+// ELENVA-FORK: `strip-ansi` is inlined below (no external npm dependency).
 import {
   Text,
   sliceByColumn,
@@ -40,9 +40,26 @@ function textBlocks(content: unknown): string[] {
 }
 
 function sanitizeDisplayText(text: string): string {
-  return stripAnsi(text).replace(/[\p{Cc}\p{Cs}\uFFF9-\uFFFB]/gu, (character) =>
+  return stripAnsi(text).replace(/[\p{Cc}\p{Cs}\uFFF9-\uFFFB]/gu, (character: string) =>
     character === "\n" || character === "\t" ? character : ""
   );
+}
+
+/**
+ * ELENVA-FORK: inlined equivalent of `strip-ansi` v7 (which itself uses
+ * `ansi-regex`). Kept byte-for-byte compatible with that pattern so downstream
+ * rendering is unchanged; only the external dependency is removed.
+ */
+const ANSI_ESCAPE_RE = new RegExp(
+  [
+    "(?:\\u001B\\][\\s\\S]*?(?:\\u0007|\\u001B\\u005C|\\u009C))",
+    "[\\u001B\\u009B][[\\]()#;?]*(?:\\d{1,4}(?:[;:]\\d{0,4})*)?[\\dA-PR-TZcf-nq-uy=><~]",
+  ].join("|"),
+  "g",
+);
+
+function stripAnsi(text: string): string {
+  return text.replace(ANSI_ESCAPE_RE, "");
 }
 
 function firstLine(text: string): string {
