@@ -1023,10 +1023,10 @@ function MemoryQuotaBlock({ files, onGoto }: { files: AgentMemoryFile[]; onGoto:
   return (
     <div
       data-testid="memory-quota"
-      className="grid grid-cols-1 gap-2 rounded-lg border border-line-soft bg-panel-2 p-3 xl:grid-cols-2 min-[2200px]:grid-cols-3"
+      className="grid grid-cols-1 gap-2 rounded-lg border border-line-soft bg-panel-2 p-3 min-[1280px]:grid-cols-2 min-[2200px]:grid-cols-3"
     >
-      {/* xl 双列 / ≥2200 三列：宽屏用列换纵向滚动（<1280 回退单列）；标题行跨满整行，行卡片由 grid 拉伸等高 */}
-      <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-fg xl:col-span-2 min-[2200px]:col-span-3">
+      {/* ≥1280 双列 / ≥2200 三列（同一组任意断点，按数值排序才不被盖掉）：宽屏用列换纵向滚动（<1280 回退单列）；标题行跨满整行，行卡片由 grid 拉伸等高 */}
+      <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-fg min-[1280px]:col-span-2 min-[2200px]:col-span-3">
         <Gauge size={12} className="text-dim" />
         配额 · {rows.length} 个文件
         <span className="ml-auto text-[10px] font-normal text-dim">
@@ -1201,10 +1201,10 @@ function MemorySuggestionsBlock({
   return (
     <div
       data-testid="memory-suggestions"
-      className="grid grid-cols-1 gap-2 rounded-lg border border-line bg-panel-2 p-3 xl:grid-cols-2 min-[2200px]:grid-cols-3"
+      className="grid grid-cols-1 gap-2 rounded-lg border border-line bg-panel-2 p-3 min-[1280px]:grid-cols-2 min-[2200px]:grid-cols-3"
     >
-      {/* xl 双列 / ≥2200 三列：候选卡同网格行等高；按钮行 mt-auto 贴卡底，避免长短句导致操作位置参差 */}
-      <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-fg xl:col-span-2 min-[2200px]:col-span-3">
+      {/* ≥1280 双列 / ≥2200 三列（同一组任意断点，按数值排序才不被盖掉）：候选卡同网格行等高；按钮行 mt-auto 贴卡底，避免长短句导致操作位置参差 */}
+      <div className="flex flex-wrap items-center gap-2 text-[12px] font-medium text-fg min-[1280px]:col-span-2 min-[2200px]:col-span-3">
         <Sparkles size={12} className="text-dim" />
         整理候选 · {suggestions.length} 条
         <span className="ml-auto text-[10px] font-normal text-dim">

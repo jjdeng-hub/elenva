@@ -537,7 +537,10 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
           )}
 
           {!builtinLoading && builtinItems.length > 0 && (
-            <div className="grid grid-cols-1 gap-x-6 xl:grid-cols-2 min-[2200px]:grid-cols-3">
+            /* ≥1280 双列 / ≥2200 三列：两步都用任意断点（min-[…]），
+               Tailwind v4 把任意断点按数值排序，而命名断点（xl:）整块排在它们之后，
+               混用会让 xl:grid-cols-2 盖掉 min-[2200px]:grid-cols-3（实测 2200+ 仍是两列）。 */
+            <div className="grid grid-cols-1 gap-x-6 min-[1280px]:grid-cols-2 min-[2200px]:grid-cols-3">
             {builtinItems.map((item) => (
               <div
                 key={item.path}
