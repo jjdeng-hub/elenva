@@ -601,6 +601,9 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
                   <button
                     onClick={() => toggle(s)}
                     disabled={toggling === s.filePath}
+                    role="switch"
+                    aria-checked={enabled}
+                    aria-label={`${s.name}：允许模型自动调用`}
                     className={cn(
                       "relative h-5 w-9 shrink-0 cursor-pointer rounded-full t-fast",
                       enabled ? "bg-accent" : "bg-line",

@@ -107,12 +107,15 @@ const normalizeSource = (raw: string) =>
     .trim();
 
 /** 布尔开关（与设置页同款交互；本页自持一份，避免跨页耦合） */
-function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+function Toggle({ on, onChange, disabled, label }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string }) {
   return (
     <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
       onClick={() => onChange(!on)}
       disabled={disabled}
-      aria-pressed={on}
       className={cn(
         "relative h-5 w-9 shrink-0 cursor-pointer rounded-full t-fast disabled:opacity-50",
         on ? "bg-accent" : "bg-line",
@@ -863,6 +866,7 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
             <Toggle
               on={mcpWriteApproval}
               disabled={mcpWriteBusy}
+              label="写操作需确认"
               onChange={(next) => void setMcpWriteApprovalSetting(next)}
             />
           </div>
@@ -908,7 +912,7 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
                       {s.description || s.target}
                     </div>
                   </div>
-                  <Toggle on={s.enabled} disabled={mcpBusy !== null} onChange={(next) => void setMcpEnabled(s, next)} />
+                  <Toggle on={s.enabled} disabled={mcpBusy !== null} label={`MCP 服务器：${s.name}`} onChange={(next) => void setMcpEnabled(s, next)} />
                 </div>
               ))}
             </div>

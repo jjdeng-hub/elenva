@@ -40,9 +40,13 @@ const TOOL_SELECT_OPTIONS: { value: ToolPreset | "pi-default"; label: string }[]
   { value: "none", label: "仅对话（禁用内置工具）" },
 ];
 
-function Toggle({ on, onChange, disabled }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
+function Toggle({ on, onChange, disabled, label }: { on: boolean; onChange: (v: boolean) => void; disabled?: boolean; label: string }) {
   return (
     <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label={label}
       onClick={() => onChange(!on)}
       disabled={disabled}
       className={cn(
@@ -194,7 +198,7 @@ function PiSettingsSection() {
             </select>
           </Field>
           <Field label="自动上下文压缩（compaction.enabled）" hint="接近上下文上限时自动压缩历史">
-            <Toggle on={compactionEnabled} onChange={setCompactionEnabled} />
+            <Toggle on={compactionEnabled} onChange={setCompactionEnabled} label="自动上下文压缩（compaction.enabled）" />
           </Field>
           <Field
             label="压缩保留 Token（keepRecentTokens）"
@@ -227,7 +231,7 @@ function PiSettingsSection() {
             />
           </Field>
           <Field label="自动重试（retry.enabled）" hint="瞬时错误（限流/超时）自动重试">
-            <Toggle on={retryEnabled} onChange={setRetryEnabled} />
+            <Toggle on={retryEnabled} onChange={setRetryEnabled} label="自动重试（retry.enabled）" />
           </Field>
           <Field label="最大重试次数（retry.maxRetries）" hint="指数退避：2s → 4s → 8s">
             <input
@@ -325,7 +329,10 @@ function ToolsSection() {
             <span className="text-[11px] text-dim">仅 Windows 可用</span>
             <button
               disabled
+              role="switch"
+              aria-checked={false}
               aria-disabled="true"
+              aria-label="PowerShell 工具（仅 Windows 可用）"
               className="relative h-5 w-9 shrink-0 cursor-not-allowed rounded-full bg-line opacity-50"
             >
               <span className="absolute top-0.5 left-0.5 size-4 rounded-full bg-white shadow-sm" />
@@ -335,6 +342,9 @@ function ToolsSection() {
           <button
             onClick={toggle}
             disabled={saving}
+            role="switch"
+            aria-checked={psEnabled}
+            aria-label="PowerShell 工具"
             className={cn(
               "relative h-5 w-9 shrink-0 cursor-pointer rounded-full t-fast",
               psEnabled ? "bg-accent" : "bg-line",
@@ -923,6 +933,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
           <Toggle
             on={planDefault}
             disabled={saving}
+            label="新会话默认进入计划模式"
             onChange={(next) => {
               setPlanDefault(next);
               void post({ action: "setPlanModeDefault", enabled: next });
@@ -940,6 +951,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
           <Toggle
             on={verificationGuard}
             disabled={saving}
+            label="收尾验证门禁"
             onChange={(next) => {
               setVerificationGuard(next);
               void post({ action: "setVerificationGuard", enabled: next });
