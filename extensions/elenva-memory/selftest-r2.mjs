@@ -35,6 +35,7 @@ const check = (name, condition, extra = "") => {
 const { MemoryStore } = await jiti.import("./vendor/pi-hermes-memory/src/store/memory-store.ts");
 const { loadConfig } = await jiti.import("./vendor/pi-hermes-memory/src/config.ts");
 const constants = await jiti.import("./vendor/pi-hermes-memory/src/constants.ts");
+const storesModule = await jiti.import("./stores.ts");
 const reviewModule = await jiti.import("./vendor/pi-hermes-memory/src/handlers/background-review.ts");
 const {
   DEFAULT_NEAR_FULL_THRESHOLD,
@@ -217,6 +218,57 @@ async function storeWith(dirName, texts, opts = {}) {
   check("review system prompt 含规则", DIRECT_REVIEW_SYSTEM_PROMPT.includes("85%") && /merge\/condense\/remove/.test(DIRECT_REVIEW_SYSTEM_PROMPT));
   check("review prompt 模板含规则", COMBINED_REVIEW_PROMPT.includes("85%") && /merge\/condense\/remove/.test(COMBINED_REVIEW_PROMPT));
   check("巩固 prompt 含「必须收缩」", /MUST shrink/.test(CONSOLIDATION_PROMPT) && /MUST shrink/.test(DIRECT_CONSOLIDATION_SYSTEM_PROMPT));
+}
+
+// ── 4. cap 解耦（enforceCharLimit）+ 口径统一 ───────────────────────────────
+{
+  // (a) policy-only + 默认 enforce=true → 拒绝路径可达且带引导
+  const { store } = await storeWith("po-enforce", seeds(11), { memoryMode: "policy-only" });
+  const res = await store.add("memory", "policy-only 下满额写入。");
+  check("cap 解耦：policy-only + enforce 默认 → 满额被拒", res.success === false && res.overflow === true, res.message);
+  check("cap 解耦：拒绝自带结构化引导", /memory_replace/.test(res.error ?? "") && /需先腾出约 \d+ 字符/.test(res.error ?? ""));
+}
+{
+  // (b) policy-only + enforce=false → 回旧行为（cap 不设防）
+  const { store } = await storeWith("po-old", seeds(11), { memoryMode: "policy-only", enforceCharLimit: false });
+  const res = await store.add("memory", "policy-only 旧行为下满额写入。");
+  const after = store.getUsage("memory");
+  check("cap 解耦：enforce=false → 回旧行为（成功且可超限）", res.success === true && after.percent > 100, `${after.percent}%`);
+  check("cap 解耦：旧行为下仍带近满预警", /水位/.test(res.message ?? ""));
+}
+{
+  // (c) 键缺省（undefined）→ 按默认 true 执行
+  const dir = path.join(tmpRoot, "po-missing");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "MEMORY.md"), seeds(11).join(DELIMITER), "utf8");
+  const store = new MemoryStore({
+    ...loadConfig(),
+    memoryMode: "policy-only",
+    enforceCharLimit: undefined,
+    memoryCharLimit: LIMIT,
+    memoryDir: dir,
+  });
+  await store.loadFromDisk();
+  const res = await store.add("memory", "缺省键下满额写入。");
+  check("cap 解耦：enforceCharLimit 缺省 → 默认执行（硬拒）", res.success === false && res.overflow === true);
+}
+{
+  // (d) 口径统一：无显式配置时，索引侧默认 = vendor 常量
+  const cfg = storesModule.readHermesConfig(agentRoot);
+  check("口径统一：stores 默认 memory = vendor 常量", cfg.memoryCharLimit === constants.DEFAULT_MEMORY_CHAR_LIMIT, `${cfg.memoryCharLimit} vs ${constants.DEFAULT_MEMORY_CHAR_LIMIT}`);
+  check("口径统一：stores 默认 user = vendor 常量", cfg.userCharLimit === constants.DEFAULT_USER_CHAR_LIMIT, `${cfg.userCharLimit} vs ${constants.DEFAULT_USER_CHAR_LIMIT}`);
+  check("口径统一：stores 默认 project = vendor 常量", cfg.projectCharLimit === constants.DEFAULT_PROJECT_CHAR_LIMIT, `${cfg.projectCharLimit} vs ${constants.DEFAULT_PROJECT_CHAR_LIMIT}`);
+
+  // (e) 显式配置时两处零行为变化（vendor 与索引侧读到同一个显式值）
+  const configPath = path.join(agentRoot, "hermes-memory-config.json");
+  fs.writeFileSync(configPath, JSON.stringify({ memoryCharLimit: 4321, userCharLimit: 3210, projectCharLimit: 2100 }), "utf8");
+  const vendorCfg = loadConfig();
+  const indexCfg = storesModule.readHermesConfig(agentRoot);
+  check(
+    "口径统一：显式配置时 vendor 与 stores 同读显式值",
+    vendorCfg.memoryCharLimit === 4321 && indexCfg.memoryCharLimit === 4321 && indexCfg.userCharLimit === 3210 && indexCfg.projectCharLimit === 2100,
+  );
+  fs.rmSync(configPath, { force: true });
 }
 
 // ── 收尾 ─────────────────────────────────────────────────────────────────────
