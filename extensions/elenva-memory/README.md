@@ -2,6 +2,11 @@
 
 给 `pi-hermes-memory` 补上它缺的两块：**常驻索引**（不再全文注入）与**整理**（去重 / 冲突标注 / 容量淘汰）。
 
+> **2026-10-17 收编（记忆 2.0 R1a）**：底座 `pi-hermes-memory`（MIT，0.9.9）的源码已搬进
+> `vendor/pi-hermes-memory/`，本扩展是**唯一入口**，不再依赖 `settings.packages` 里的第三方包，
+> 也不再需要 `better-sqlite3`（改用 Node 内置 `node:sqlite`）。本地改动清单见
+> `vendor/pi-hermes-memory/ELENVA-NOTES.md`。
+
 ## 它解决什么（一次真实摩擦）
 
 `pi-hermes-memory` 默认把 `MEMORY.md` / `USER.md` / 项目记忆**全文**塞进每一轮系统提示词。
@@ -28,8 +33,8 @@
 
 | | 管什么 |
 |---|---|
-| `pi-hermes-memory` | 记忆的读写工具（`memory_add` / `replace` / `remove` / `memory_search`）、存储格式、配额 |
-| `elenva-memory` | 常驻索引注入、`memory_find`（重排 + 来源 + 冲突标注）、访问计数与写入留痕、整理与归档 |
+| 底座（`vendor/pi-hermes-memory`） | 记忆的读写工具（`memory_add` / `replace` / `remove` / `memory_search`、`session_search`、`skill_manage`）、存储格式、配额、SQLite 索引 |
+| `elenva-memory`（本层） | 常驻索引注入、`memory_find`（重排 + 来源 + 冲突标注）、访问计数与写入留痕、整理与归档 |
 
 两者契约是**文件格式**（`\n§\n` 分隔 + 尾部 `<!-- created=…, last=… -->`）：本扩展只读格式、只动
 「条目集合」，从不改条目内部文本与元数据。
@@ -37,9 +42,13 @@
 ## 安装 / 启用 / 回退
 
 ```bash
-node extensions/elenva-memory/install.mjs        # 装扩展 + 合并 hermes 配置（中文纠正、policy-only）
-node extensions/elenva-memory/selftest.mjs       # 纯函数自检（34 条断言）
+node extensions/elenva-memory/install.mjs        # 装扩展（连同 vendor）+ 合并 hermes 配置（中文纠正、policy-only）
+node extensions/elenva-memory/selftest.mjs       # 纯函数自检（44 条断言）
+node extensions/elenva-memory/selftest-v2.mjs    # 收编后骨架自检（26 条：注册面 / 注入 / FTS / 快照 / config）
 ```
+
+从旧版（第三方包）切换：先按 `install.mjs` 末尾打印的「共存 → 替换」步骤从 `settings.packages`
+删掉 `pi-hermes-memory`，再重跑本脚本、重启。共存会让两边同时注册同名工具（双注册）。
 
 `install.mjs` 会改 `~/.pi/agent/hermes-memory-config.json`（备份 `.bak-preinstall`）：
 
