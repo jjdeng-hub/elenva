@@ -835,7 +835,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
               还没有可配置的项目 —— 打开过会话的项目目录会自动出现在这里。
             </p>
           ) : (
-            <div className="mt-2 flex flex-col gap-2">
+            <div className="mt-2 grid grid-cols-1 gap-2 xl:grid-cols-2">
               {policyRows.map((row) => (
                 <div key={row.cwd} className="rounded-lg border border-line bg-panel-2 px-2.5 py-2">
                   <div className="flex items-center gap-2">
@@ -1220,19 +1220,21 @@ export function SettingsPage({
       <div className="page-col-form py-6">
         <PageHeader icon={<SettingsIcon size={16} />} title="设置" subtitle="工具开关、版本信息与其他偏好" />
 
-        {/* 两列按高度均衡分组（而非按旧的「左=Agent 行为 / 右=应用层」硬切）：
-            旧分法左右底边会差出一屏，现按实测高度配平。 */}
+        {/* 两列按实测高度配平（xl 起左右并排）：左栏 5 张（行为/账号/外观/关于/宿主提示词）
+            ≈1806px，右栏 2 张（工具/安全确认）≈1914px，底边差 <150px。
+            「安全确认」单项就 1778px（项目策略行半宽后会换行，双列不再额外降高），
+           所以只能靠搬卡把它与「工具」单放一栏，另一栏用多张小卡填平。 */}
         <div className="flex flex-col gap-5 xl:flex-row xl:items-start">
           <div className="flex min-w-0 flex-1 flex-col gap-5">
             <PiSettingsSection />
             <AccountProfilesSection />
             <AppearanceSection />
             <AboutSection />
+            <HostPromptCard />
           </div>
           <div className="flex min-w-0 flex-1 flex-col gap-5">
             <ToolsSection />
             <GuardrailsSection projects={projects} defaultCwd={defaultCwd} />
-            <HostPromptCard />
           </div>
         </div>
       </div>
