@@ -471,7 +471,7 @@ export function SessionSidebar({
         aria-pressed={isFav}
         data-testid="session-fav"
         className={cn(
-          "flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm t-fast hover:bg-hover",
+          "relative flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm t-fast after:absolute after:-inset-0.5 after:content-[''] hover:bg-hover",
           className,
         )}
       >
@@ -501,7 +501,7 @@ export function SessionSidebar({
             onClick={() => void commitRename(s)}
             title="保存（Enter）"
             aria-label="保存"
-            className="flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-success t-fast hover:bg-hover"
+            className="relative flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-success t-fast after:absolute after:-inset-0.5 after:content-[''] hover:bg-hover"
           >
             <Check size={12} />
           </button>
@@ -569,7 +569,7 @@ export function SessionSidebar({
             title="编辑标签"
             aria-label="编辑标签"
             data-testid="session-tags"
-            className="flex size-5 cursor-pointer items-center justify-center rounded-sm text-dim t-fast hover:bg-hover hover:text-fg"
+            className="relative flex size-5 cursor-pointer items-center justify-center rounded-sm text-dim t-fast after:absolute after:-inset-0.5 after:content-[''] hover:bg-hover hover:text-fg"
           >
             <Hash size={12} />
           </button>
@@ -582,7 +582,7 @@ export function SessionSidebar({
             title="重命名"
             aria-label="重命名"
             data-testid="session-row-rename"
-            className="flex size-5 cursor-pointer items-center justify-center rounded-sm text-dim t-fast hover:bg-hover hover:text-fg"
+            className="relative flex size-5 cursor-pointer items-center justify-center rounded-sm text-dim t-fast after:absolute after:-inset-0.5 after:content-[''] hover:bg-hover hover:text-fg"
           >
             <Pencil size={12} />
           </button>
@@ -594,7 +594,7 @@ export function SessionSidebar({
               }}
               title="删除会话"
               aria-label="删除会话"
-              className="flex size-5 cursor-pointer items-center justify-center rounded-sm text-dim t-fast hover:bg-danger/10 hover:text-accent"
+              className="relative flex size-5 cursor-pointer items-center justify-center rounded-sm text-dim t-fast after:absolute after:-inset-0.5 after:content-[''] hover:bg-danger/10 hover:text-accent"
             >
               <Trash2 size={12} />
             </button>
@@ -775,7 +775,7 @@ export function SessionSidebar({
                 <button
                   onClick={() => onCreateInProject(defaultCwd)}
                   title="新建会话（使用默认目录）"
-                  className="shrink-0 cursor-pointer rounded-sm p-0.5 text-dim opacity-0 transition-opacity hover:text-accent group-hover/hd:opacity-100"
+                  className="relative shrink-0 cursor-pointer rounded-sm p-0.5 text-dim opacity-0 transition-opacity after:absolute after:-inset-1 after:content-[''] hover:text-accent group-hover/hd:opacity-100"
                 >
                   <Plus size={12} />
                 </button>
@@ -817,7 +817,7 @@ export function SessionSidebar({
                         <button
                           onClick={() => onCreateInProject(g.root!)}
                           title={`在「${g.name}」中新建会话`}
-                          className="shrink-0 cursor-pointer rounded-sm p-0.5 text-dim opacity-0 transition-opacity hover:text-accent group-hover/proj:opacity-100"
+                          className="relative shrink-0 cursor-pointer rounded-sm p-0.5 text-dim opacity-0 transition-opacity after:absolute after:-inset-1 after:content-[''] hover:text-accent group-hover/proj:opacity-100"
                         >
                           <Plus size={12} />
                         </button>

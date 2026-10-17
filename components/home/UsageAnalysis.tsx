@@ -149,7 +149,10 @@ export function UsageAnalysis({
 
       {projectRows && (
         <div className="mt-3 shrink-0">
-          <div className="text-[12px] font-medium text-dim">按项目（累计）</div>
+          <div className="text-[12px] font-medium text-dim">
+            按项目（累计）
+            <span className="ml-1 font-normal">% 为成本占比</span>
+          </div>
           <div className="mt-1.5 space-y-0.5">
             {projectRows.top.map((p) => (
               <button
@@ -164,7 +167,7 @@ export function UsageAnalysis({
                 </span>
                 <span className="shrink-0 text-[12px] tabular-nums text-muted">
                   {formatTokens(p.tokens)}
-                  <span className="ml-1 text-dim">{formatCost(p.cost)}</span>
+                  <span className="ml-1 text-dim">· {formatCost(p.cost)}</span>
                 </span>
               </button>
             ))}
@@ -176,7 +179,7 @@ export function UsageAnalysis({
                 </span>
                 <span className="shrink-0 text-[12px] tabular-nums text-muted">
                   {formatTokens(projectRows.rest.tokens)}
-                  <span className="ml-1 text-dim">{formatCost(projectRows.rest.cost)}</span>
+                  <span className="ml-1 text-dim">· {formatCost(projectRows.rest.cost)}</span>
                 </span>
               </div>
             )}

@@ -7,7 +7,7 @@ import type { SkillAdvisorReport } from "@/lib/skill-advisor";
 import { buildSkillAdvisorReport } from "@/lib/skill-advisor";
 import type { SkillUsageReport } from "@/lib/skill-usage";
 import { cn } from "@/components/lib/utils";
-import { PageHeader } from "@/components/ui/bits";
+import { PageHeader, Skeleton } from "@/components/ui/bits";
 import { dialogConfirm, toast } from "@/components/ui/dialog";
 
 type SkillInfo = {
@@ -504,8 +504,19 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
         {/* 已装技能列表 */}
         <Card className="xl:order-1">
           {loading && (
-            <div className="flex items-center gap-2 px-4 py-6 text-[12px] text-dim">
-              <Loader2 size={14} className="animate-spin" /> 加载技能中…
+            <div aria-busy="true" aria-label="加载技能中" className="flex flex-col">
+              {Array.from({ length: 4 }).map((_, i) => (
+                <div key={i} className="border-t border-line-soft px-4 py-3 first:border-t-0">
+                  <div className="flex items-center gap-3">
+                    <Skeleton className="size-3.5 shrink-0 rounded-sm" />
+                    <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                      <Skeleton className="h-3.5 w-1/4" />
+                      <Skeleton className="h-2.5 w-3/5" />
+                    </div>
+                    <Skeleton className="h-5 w-9 shrink-0 rounded-full" />
+                  </div>
+                </div>
+              ))}
             </div>
           )}
           {!loading && skills.length === 0 && (

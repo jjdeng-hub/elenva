@@ -791,6 +791,7 @@ export function AppShell() {
             sessions={filteredHomeSessions}
             runningIds={runningIds}
             unreadIds={unreadIds}
+            projectCount={projectCount}
             onOpenSession={openChatWith}
             onViewAll={openChatView}
             onOpenSystem={() => setView("system")}

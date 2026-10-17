@@ -123,6 +123,7 @@ export function HomeDashboard({
   sessions,
   runningIds,
   unreadIds,
+  projectCount,
   onOpenSession,
   onViewAll,
   onOpenSystem,
@@ -134,6 +135,9 @@ export function HomeDashboard({
   runningIds: Set<string>;
   /** 已完成但未查看的会话（表格里显示绿点） */
   unreadIds?: Set<string>;
+  /** 「项目」口径与侧栏一致：会话涉及的去重目录数（不含 ~/pi-cwd-<date> 历史日期工作区）。
+      由 AppShell 统一计算后传入，避免两处各算一套导致数字对不上。 */
+  projectCount: number;
   onOpenSession: (s: SessionInfo) => void;
   onViewAll: () => void;
   onOpenSystem: () => void;
@@ -340,8 +344,7 @@ export function HomeDashboard({
 
   // 近 7 日每日新会话数（总会话卡 spark 已移除，保留给状态条无用；省略）
   const stats = useMemo(() => {
-    const projects = new Set(sessions.map((s) => s.cwd));
-    return { total: sessions.length, running: runningIds.size, projects: projects.size };
+    return { total: sessions.length, running: runningIds.size };
   }, [sessions, runningIds]);
 
   const tabbed = useMemo(() => {
@@ -400,7 +403,7 @@ export function HomeDashboard({
             <span className={cn(waitCount > 0 ? "font-semibold text-warn" : "text-dim")}>等你处理 {waitCount}</span>
             {/* 今日/累计 token 与成本不在此重复 —— 它们是右栏「今日概览」卡的职责 */}
             <span className="ml-auto text-dim">
-              {stats.total} 会话 · {stats.projects} 项目
+              {stats.total} 会话 · {projectCount} 项目
             </span>
           </div>
 

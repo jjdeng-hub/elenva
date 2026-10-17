@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { dialogConfirm, dialogPrompt, toast } from "@/components/ui/dialog";
 import { relTime } from "@/lib/format";
-import { EmptyState, PageHeader } from "@/components/ui/bits";
+import { EmptyState, PageHeader, Skeleton } from "@/components/ui/bits";
 import { ModelScopeEditor } from "@/components/ModelScopeEditor";
 import { ModelSetupDialog } from "@/components/ModelSetupDialog";
 
@@ -134,8 +134,14 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
         </span>
       </CardHeader>
       {loading ? (
-        <div className="flex items-center gap-2 px-4 py-5 text-[12px] text-dim">
-          <Loader2 size={14} className="animate-spin" /> 加载厂商目录…
+        <div aria-busy="true" aria-label="加载厂商目录" className="px-4 py-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-2 border-t border-line-soft py-2 first:border-t-0 first:pt-0">
+              <Skeleton className="h-3.5 w-24 shrink-0" />
+              <Skeleton className="h-3 w-32 shrink-0" />
+              <Skeleton className="ml-auto h-5 w-16 shrink-0 rounded-sm" />
+            </div>
+          ))}
         </div>
       ) : (
         <>
@@ -352,8 +358,17 @@ function ModelHealthSection() {
       </CardHeader>
 
       {loading && (
-        <div className="flex items-center gap-2 px-4 py-5 text-[12px] text-dim">
-          <Loader2 size={14} className="anim-spin" /> 扫描近 14 天会话…
+        <div aria-busy="true" aria-label="加载模型健康度" className="flex flex-col">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-3 border-t border-line-soft px-4 py-2.5 first:border-t-0">
+              <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <Skeleton className="h-3.5 w-1/3" />
+                <Skeleton className="h-2.5 w-1/2" />
+              </div>
+              <Skeleton className="h-4 w-10 shrink-0" />
+              <Skeleton className="h-5 w-14 shrink-0 rounded-sm" />
+            </div>
+          ))}
         </div>
       )}
 
@@ -603,8 +618,16 @@ export function ModelsPage() {
             )}
           </CardHeader>
           {loading && (
-            <div className="flex items-center gap-2 px-4 py-5 text-[12px] text-dim">
-              <Loader2 size={14} className="animate-spin" /> 加载配置…
+            <div aria-busy="true" aria-label="加载配置" className="flex flex-col">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <div key={i} className="border-t border-line-soft px-4 py-3 first:border-t-0">
+                  <div className="flex items-center gap-2">
+                    <Skeleton className="h-3.5 w-28 shrink-0" />
+                    <Skeleton className="h-3 w-40 shrink-0" />
+                    <Skeleton className="ml-auto h-7 w-24 shrink-0 rounded-md" />
+                  </div>
+                </div>
+              ))}
             </div>
           )}
           {!loading && providerNames.length === 0 && (
