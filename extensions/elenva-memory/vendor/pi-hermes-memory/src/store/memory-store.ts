@@ -21,6 +21,7 @@ import {
   DEFAULT_MEMORY_CHAR_LIMIT,
   DEFAULT_USER_CHAR_LIMIT,
   DEFAULT_OVERFLOW_GRACE_MS,
+  DEFAULT_NEAR_FULL_THRESHOLD,
   DEFAULT_FAILURE_INJECTION_MAX_AGE_DAYS,
   DEFAULT_FAILURE_INJECTION_MAX_ENTRIES,
   MEMORY_FILE,
@@ -30,6 +31,7 @@ import type {
   MemoryConfig,
   MemoryResult,
   MemorySnapshot,
+  MemoryUsage,
   ConsolidationResult,
   MemoryCategory,
   MemoryMutationOperation,
@@ -52,6 +54,20 @@ const CONFLICT_MAX_COUNT = 32;
 const CONFLICT_MAX_BYTES = 64 * 1024 * 1024;
 
 class ExternalMemoryWriteConflict extends Error {}
+
+/** ELENVA-FORK (R2): human-readable file label per write target. */
+const TARGET_FILE_LABEL: Record<"memory" | "user" | "failure", string> = {
+  memory: MEMORY_FILE,
+  user: USER_FILE,
+  failure: "failures.md",
+};
+
+/** Single-line truncation for advisory / guidance candidate previews. */
+function previewText(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  if (flat.length <= max) return flat;
+  return `${flat.slice(0, Math.max(1, max - 1))}…`;
+}
 
 export class MemoryStore {
   private memoryEntries: string[] = [];
@@ -127,6 +143,91 @@ export class MemoryStore {
   private charCount(target: "memory" | "user" | "failure"): number {
     const entries = this.entriesFor(target);
     return entries.length ? entries.join(ENTRY_DELIMITER).length : 0;
+  }
+
+  /**
+   * ELENVA-FORK (R2): water level for one target. Public so the review /
+   * consolidation prompts can hand the model each target's real budget
+   * (chars/limit/percent/entries) instead of only the entry text.
+   */
+  getUsage(target: "memory" | "user" | "failure"): MemoryUsage {
+    const limit = this.charLimit(target);
+    const charCount = this.charCount(target);
+    const percent = limit > 0 ? Math.floor((charCount / limit) * 100) : 0;
+    return { charCount, limit, percent, entryCount: this.entriesFor(target).length };
+  }
+
+  private nearFullThreshold(): number {
+    const configured = this.config.nearFullThreshold;
+    return typeof configured === "number" && Number.isFinite(configured) && configured >= 0
+      ? configured
+      : DEFAULT_NEAR_FULL_THRESHOLD;
+  }
+
+  /**
+   * ELENVA-FORK (R2): near-full advisory appended to a successful write.
+   * Reports every target of this store at or above the threshold, with the
+   * longest entries as concrete merge candidates. Informational only: it
+   * never blocks the write, changes the success semantics, or mutates memory.
+   */
+  private nearFullAdvisory(): string | null {
+    const threshold = this.nearFullThreshold();
+    if (!(threshold > 0)) return null;
+    const lines: string[] = [];
+    for (const target of ["memory", "user", "failure"] as const) {
+      const limit = this.charLimit(target);
+      if (limit <= 0) continue;
+      const current = this.charCount(target);
+      if (current < limit * threshold) continue;
+      const percent = Math.floor((current / limit) * 100);
+      const examples = this.longestEntrySummaries(target, 2)
+        .map((entry) => `「${entry.summary}」（${entry.chars} 字符）`)
+        .join("、");
+      lines.push(
+        `⚠ ${TARGET_FILE_LABEL[target]} 水位 ${percent}%（${current}/${limit}）——建议本次会话内合并/精简；`
+        + (examples ? `示例对象：${examples}` : "目前没有可合并的长条目。"),
+      );
+    }
+    return lines.length > 0 ? lines.join("\n") : null;
+  }
+
+  private longestEntrySummaries(
+    target: "memory" | "user" | "failure",
+    count: number,
+  ): Array<{ summary: string; chars: number }> {
+    return this.entriesFor(target)
+      .map((entry) => this.stripMetadata(entry))
+      .filter((text) => text.length > 0)
+      .sort((left, right) => right.length - left.length)
+      .slice(0, Math.max(0, count))
+      .map((text) => ({ summary: previewText(text, 40), chars: text.length }));
+  }
+
+  /**
+   * ELENVA-FORK (R2): the actionable half of an overflow error — how much to
+   * free, a merge recipe the model can run this turn, and the longest entries
+   * as concrete candidates. Shared by add / replace / atomic-plan blocking.
+   */
+  private overflowGuidance(target: "memory" | "user" | "failure", projectedTotal: number): string[] {
+    const current = this.charCount(target);
+    const limit = this.charLimit(target);
+    const percent = limit > 0 ? Math.floor((current / limit) * 100) : 0;
+    const needed = Math.max(1, projectedTotal - limit);
+    const candidates = this.longestEntrySummaries(target, 3);
+    const [first, second] = candidates;
+    const last = candidates[candidates.length - 1];
+    return [
+      `${TARGET_FILE_LABEL[target]} 水位 ${percent}%（${current}/${limit} 字符），需先腾出约 ${needed} 字符。`,
+      "可执行的合并配方（本回合内完成）：",
+      first && second
+        ? `1) 用 memory_replace 先合并两条最长的：「${first.summary}」（${first.chars} 字符）＋「${second.summary}」（${second.chars} 字符）→ 合成一条后重试；`
+        : "1) 用 memory_replace 合并相近的条目（需要两条合并为一条）后重试；",
+      `2) 或用 memory_remove 淘汰陈旧 / 被推翻的条目${last ? `，例如「${last.summary}」（${last.chars} 字符）` : ""}。`,
+      candidates.length > 0
+        ? `最长候选对象（${candidates.length} 条，按字符数从大到小）：`
+        : "最长候选对象：当前没有条目。",
+      ...candidates.map((candidate) => `- ${candidate.chars} 字符：「${candidate.summary}」`),
+    ];
   }
 
   private memoryOverflowStrategy(): MemoryOverflowStrategy {
@@ -259,7 +360,7 @@ export class MemoryStore {
         return result;
       }
 
-      return this.memoryFullError(target, content.length);
+      return this.memoryFullError(target, content.length, newTotal);
     }
 
     entries.push(encoded);
@@ -288,14 +389,14 @@ export class MemoryStore {
       || retriesLeft <= 0
       || this.memoryOverflowStrategy() !== "auto-consolidate"
       || !this.consolidator
-      || !result.error?.startsWith("Memory at ")
+      || result.overflow !== true
     ) {
       return result;
     }
     if (this.overflowGraceActive(target)) {
       return {
         ...result,
-        error: `${result.error} Automatic consolidation is deferred for ${this.overflowGraceMs()}ms after overflow so you can consolidate '${target}' manually first — retry after the grace window.`,
+        error: `${result.error}\n自动巩固已暂停（宽限 ${this.overflowGraceMs()}ms）：请先用上面的配方手动合并或删除，宽限期过后再重试。`,
       };
     }
 
@@ -311,23 +412,23 @@ export class MemoryStore {
       // failed consolidation it can do nothing about (#144).
       return {
         ...result,
-        error: `${result.error} Another session is consolidating '${target}' right now, so this entry was not saved — retry in a moment.`,
+        error: `${result.error}\n另一个会话正在巩固 '${target}'，本条未保存 —— 稍后重试，或先按上面的配方手动腾空间。`,
       };
     }
     if (!consolidation.consolidated) {
       const reason = consolidation.error || "no reason reported";
-      return { ...result, error: `${result.error} Auto-consolidation attempted but failed: ${reason}` };
+      return { ...result, error: `${result.error}\n自动巩固未完成（${reason}）：请按上面的配方手动腾空间后重试。` };
     }
 
     try {
       await this.loadFromDisk();
     } catch (err) {
-      return { ...result, error: `${result.error} Auto-consolidation succeeded but reloading memory failed: ${String(err).slice(0, 200)}` };
+      return { ...result, error: `${result.error}\n自动巩固成功但重新加载记忆失败：${String(err).slice(0, 200)}` };
     }
 
     const retried = await this.addWithConsolidation(target, content, signal, retriesLeft - 1, addedMessage, project);
-    if (retried.success || !retried.error?.startsWith("Memory at ")) return retried;
-    return { ...retried, error: `${retried.error} Auto-consolidation ran but did not free enough space.` };
+    if (retried.success || retried.overflow !== true) return retried;
+    return { ...retried, error: `${retried.error}\n自动巩固已运行但仍未腾出足够空间 —— 请按上面的配方手动合并或删除后重试。` };
   }
 
   private async fifoEvictAndAdd(
@@ -338,7 +439,7 @@ export class MemoryStore {
     limit: number,
   ): Promise<MemoryResult> {
     if (encoded.length > limit) {
-      return this.memoryFullError(target, contentLength);
+      return this.memoryFullError(target, contentLength, encoded.length);
     }
 
     const remaining = [...entries];
@@ -363,13 +464,24 @@ export class MemoryStore {
     };
   }
 
-  private memoryFullError(target: "memory" | "user" | "failure", contentLength: number): MemoryResult {
+  private memoryFullError(
+    target: "memory" | "user" | "failure",
+    contentLength: number,
+    projectedTotal?: number,
+  ): MemoryResult {
     const current = this.charCount(target);
     const limit = this.charLimit(target);
+    const projected = projectedTotal
+      ?? (current > 0 ? current + ENTRY_DELIMITER.length : 0) + contentLength;
     const entries = this.entriesFor(target).map((raw) => this.decodeEntry(raw).text);
     return {
       success: false,
-      error: `Memory at ${current}/${limit} chars. Adding this entry (${contentLength} chars) would exceed the limit. Replace or remove existing entries first (see the entries list below), then retry this add — all in this turn.`,
+      error: [
+        `内存已满：新增这条（${contentLength} 字符）放不下。`,
+        ...this.overflowGuidance(target, projected),
+        "不会自动截断、也不会自动删除 —— 合并哪些、淘汰哪些由你判断（下方 entries 是原文列表）。",
+      ].join("\n"),
+      overflow: true,
       target,
       usage: `${current}/${limit} chars`,
       entry_count: entries.length,
@@ -449,7 +561,13 @@ export class MemoryStore {
       if (this.capEnforced && plannedTotal > this.charLimit(target)) {
         return {
           success: false,
-          error: `Memory mutation plan would put memory at ${plannedTotal}/${this.charLimit(target)} chars.`,
+          error: [
+            `记忆变更计划放不下：应用后为 ${plannedTotal}/${this.charLimit(target)} 字符。`,
+            ...this.overflowGuidance(target, plannedTotal),
+            "计划未应用（原子性）；不会自动截断或自动删除。",
+          ].join("\n"),
+          overflow: true,
+          target,
         };
       }
       if (options.requireShrink && plannedTotal >= originalTotal) {
@@ -516,7 +634,15 @@ export class MemoryStore {
     if (this.capEnforced && newTotal > this.charLimit(target)) {
       return {
         success: false,
-        error: `Replacement would put memory at ${newTotal}/${this.charLimit(target)} chars. Shorten or remove other entries first.`,
+        error: [
+          `替换放不下：替换后为 ${newTotal}/${this.charLimit(target)} 字符。`,
+          ...this.overflowGuidance(target, newTotal),
+          "不会自动截断、也不会自动删除 —— 请先合并或淘汰再重试。",
+        ].join("\n"),
+        overflow: true,
+        target,
+        usage: `${this.charCount(target)}/${this.charLimit(target)} chars`,
+        entry_count: this.entriesFor(target).length,
       };
     }
 
@@ -721,6 +847,11 @@ export class MemoryStore {
       entry_count: entries.length,
     };
     if (message) resp.message = message;
+    const advisory = this.nearFullAdvisory();
+    if (advisory) {
+      resp.warning = advisory;
+      resp.warnings = [advisory];
+    }
     return resp;
   }
 
@@ -832,18 +963,25 @@ export class MemoryStore {
       if (result.entries) finalized.entries = result.entries;
     }
 
-    if (!this.mutationObserver) return finalized;
+    if (this.mutationObserver) {
+      const warning = await this.mutationObserver(target, [...state.entries]);
+      if (warning && finalized.success) {
+        finalized = { ...finalized, warnings: [...(finalized.warnings ?? []), warning] };
+      }
+    }
 
-    const warning = await this.mutationObserver(target, [...state.entries]);
-    if (!warning || !finalized.success) return finalized;
+    // Surface every warning (near-full advisory + SQLite sync) in the message
+    // so the model sees it in the tool text, not only in the JSON details.
+    if (finalized.success && finalized.warnings && finalized.warnings.length > 0) {
+      const joinedWarnings = finalized.warnings.join(" ");
+      return {
+        ...finalized,
+        warning: finalized.warning ?? finalized.warnings[finalized.warnings.length - 1],
+        message: finalized.message ? `${finalized.message} Warning: ${joinedWarnings}` : joinedWarnings,
+      };
+    }
 
-    const warnings = [...(finalized.warnings ?? []), warning];
-    return {
-      ...finalized,
-      message: finalized.message ? `${finalized.message} Warning: ${warning}` : warning,
-      warning,
-      warnings,
-    };
+    return finalized;
   }
 
   private async runTargetMutation(
