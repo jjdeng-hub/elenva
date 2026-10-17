@@ -7,11 +7,20 @@
  * - 条目格式：`条目文本 <!-- created=YYYY-MM-DD, last=YYYY-MM-DD -->`，条目之间用 `\n§\n` 分隔；
  * - 配置：`<agentRoot>/hermes-memory-config.json`（memoryDir / projectsMemoryDir / 三个配额）。
  *
- * 这里刻意**不 import pi-hermes-memory 的内部模块**（升级即碎），只按文件契约读。
+ * 这里对**数据**只按文件契约读（不 import 内部存储模块）；但配额默认值直接取自 vendor 常量
+ * （R2 口径统一），否则同一文件在索引侧与写侧会得到两个水位。
  */
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+// ELENVA-FORK (R2): 配额默认值的**唯一来源**是 vendor 的常量（与写路径 enforce 同一套数字）；
+// 之前这里自写 4000/2500/3000，导致同一份文件的「水位」在索引侧与写侧对不上。
+// vendor 已随模块收编进仓库（R1），import 常量比复制字面值可靠。
+import {
+  DEFAULT_MEMORY_CHAR_LIMIT,
+  DEFAULT_USER_CHAR_LIMIT,
+  DEFAULT_PROJECT_CHAR_LIMIT,
+} from "./vendor/pi-hermes-memory/src/constants.js";
 
 export const ENTRY_DELIMITER = "\n§\n";
 
@@ -59,9 +68,9 @@ export function readHermesConfig(agentRoot = agentRootDir()): HermesConfig {
   const defaults: HermesConfig = {
     memoryDir: path.join(agentRoot, "pi-hermes-memory"),
     projectsMemoryDir: "projects-memory",
-    memoryCharLimit: 4000,
-    userCharLimit: 2500,
-    projectCharLimit: 3000,
+    memoryCharLimit: DEFAULT_MEMORY_CHAR_LIMIT,
+    userCharLimit: DEFAULT_USER_CHAR_LIMIT,
+    projectCharLimit: DEFAULT_PROJECT_CHAR_LIMIT,
   };
   try {
     const raw = fs.readFileSync(path.join(agentRoot, "hermes-memory-config.json"), "utf8");

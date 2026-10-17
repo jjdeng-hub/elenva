@@ -4,6 +4,13 @@ import { homedir } from "node:os";
 import { isAbsolute, join, normalize, resolve, sep, dirname } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { getPiSettingsPath } from "./pi-user-settings";
+// ELENVA-FORK (R2): 配额默认值与扩展写路径同源（vendor 常量），否则同一个文件在本页
+// 与常驻索引/写路径会显示两个水位。常量模块无运行时依赖（唯一 import 是 type-only）。
+import {
+  DEFAULT_MEMORY_CHAR_LIMIT,
+  DEFAULT_USER_CHAR_LIMIT,
+  DEFAULT_PROJECT_CHAR_LIMIT,
+} from "@/extensions/elenva-memory/vendor/pi-hermes-memory/src/constants";
 
 /**
  * Agent 记忆（pi-hermes-memory 扩展的落盘目录）只读读取。
@@ -254,11 +261,11 @@ export function getHermesMemoryLimits(): HermesMemoryLimits {
   const cfg = readHermesMemoryConfig() as Record<string, unknown>;
   const num = (value: unknown, fallback: number): number =>
     typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
-  const memory = num(cfg.memoryCharLimit, 4000);
+  const memory = num(cfg.memoryCharLimit, DEFAULT_MEMORY_CHAR_LIMIT);
   return {
     memory,
-    user: num(cfg.userCharLimit, 2500),
-    project: num(cfg.projectCharLimit, 3000),
+    user: num(cfg.userCharLimit, DEFAULT_USER_CHAR_LIMIT),
+    project: num(cfg.projectCharLimit, DEFAULT_PROJECT_CHAR_LIMIT),
     failure: memory * 2,
   };
 }

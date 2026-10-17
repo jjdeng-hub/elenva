@@ -22,6 +22,13 @@ export interface MemoryConfig {
   lazyInitialization?: boolean;
   /** Prompt memory mode. Default: policy-only */
   memoryMode: "policy-only" | "legacy-inject";
+  /**
+   * ELENVA-FORK (R2): whether the character caps are enforced on writes.
+   * Decoupled from `memoryMode` so `policy-only` only means "do not inject the
+   * full content" — the quota still applies. `false` restores the old behavior
+   * where policy-only skipped the cap. Default: true
+   */
+  enforceCharLimit?: boolean;
   /** Policy prompt style used when memoryMode is policy-only. Default: full */
   memoryPolicyStyle?: "full" | "compact" | "custom" | "none";
   /** Custom policy prompt text used when memoryPolicyStyle is custom */

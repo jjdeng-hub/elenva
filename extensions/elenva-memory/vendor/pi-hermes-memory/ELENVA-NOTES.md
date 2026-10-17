@@ -98,8 +98,26 @@
 本轮自测：`extensions/elenva-memory/selftest-r2.mjs`（50 断言：水位矩阵 × add/replace/remove、
 引导回路 E2E、复盘输入断言）。
 
-> **现场发现（未改，留待决策）**：ELENVA 现网 config `memoryMode = "policy-only"` 时
-> `capEnforced = false`（`memory-store.ts`），因此 `memory_add` 在现网**不会被硬拒**，`reject` /
-> `auto-consolidate` 路径实际处于休眠；索引层「满额会硬拒写入」的提醒与控制路径存在口径差。
-> R2 的近满预警不依赖 cap，故在现网即生效；若要满额引导真正跑起来，需要把 `capEnforced` 与
-> 注入模式解耦（另开一轮评估，不在本轮改）。
+### R2 收尾：cap 解耦 + 配额口径统一（ELENVA-FORK · 2026-10-17）
+
+12. **`src/types.ts` / `src/config.ts` / `src/store/memory-store.ts` —— `enforceCharLimit`（默认 true）。**
+    原 `capEnforced` = `memoryMode !== "policy-only"`：现网 config 是 `policy-only`，于是写路径
+    **完全没有硬限**，`reject` / `auto-consolidate` / 满额引导实际休眠，索引层「满额会硬拒写入」
+    与控制路径口径不一。现改为 `capEnforced = config.enforceCharLimit !== false`，
+    **policy-only 的语义收窄为「只关注入」**，配额照常执行。`enforceCharLimit: false` 可回旧行为。
+    这是**有意的行为变更**：写路径从本版起真正设防（缺省 true）。
+13. **配额默认值同源（`extensions/elenva-memory/stores.ts`、`lib/agent-memory.ts`）——**
+    索引侧 / 网页记忆页原来自写默认值（memory 4000 / user 2500 / project 3000），与 vendor 的
+    `DEFAULT_*_CHAR_LIMIT`（5000/5000/5000）不一致 → 同一份文件的「水位」在两处对不上。
+    现将默认值统一 import vendor 常量（**唯一来源**）；**显式配置时零行为变化**（两边都读
+    `hermes-memory-config.json` 的显式值）。`lib/agent-memory.ts` import 的 constants 模块只有
+    一个 type-only import，无运行时依赖，Next 打包无负担（`lib/` 早有 import 扩展 TS 的先例）。
+
+补充自测：`selftest-r2.mjs` 第 4 节（policy-only + enforce 默认 → 拒绝可达且带引导；
+`enforce=false` → 旧行为；键缺省 → 执行；两处水位同源 + 显式配置零变化）；
+`tools/memory-quota-selftest.mjs` 默认值同步为 5000 / failures 10000。
+
+> **现场发现（本轮已决策修复）**：ELENVA 现网 config `memoryMode = "policy-only"` 一度使
+> `capEnforced = false`，`memory_add` 不会被硬拒、`reject`/`auto-consolidate` 路径休眠。R2 收尾已把
+> `capEnforced` 与注入模式解耦（见第 12 条）：`policy-only` 只管「不注入全文」，配额默认执行。
+> 近满预警不依赖 cap，两者现在都生效。

@@ -137,7 +137,10 @@ export class MemoryStore {
     return target === "user" ? this.config.userCharLimit : this.config.memoryCharLimit;
   }
   private get capEnforced(): boolean {
-    return this.config.memoryMode !== "policy-only";
+    // ELENVA-FORK (R2): quota enforcement no longer rides on `memoryMode`.
+    // `policy-only` means "do not inject the full content" only; the character
+    // cap still applies unless `enforceCharLimit: false` (old behavior).
+    return this.config.enforceCharLimit !== false;
   }
 
   private charCount(target: "memory" | "user" | "failure"): number {

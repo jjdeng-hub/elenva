@@ -3,7 +3,8 @@
 //
 // 隔离：PI_CODING_AGENT_DIR / PI_HERMES_MEMORY_DIR 都指向 mkdtemp 出来的临时目录，
 // 全用**虚构**数据（不碰真实 ~/.pi/agent，也不读本机 hermes-memory-config.json，
-// 因此配额取默认值：memory 4000 / user 2500 / project 3000 / failures 8000）。
+// 因此配额取默认值：memory 5000 / user 5000 / project 5000 / failures 10000
+// 〔R2 口径统一〕默认值与 vendor 常量同源（DEFAULT_*_CHAR_LIMIT）。
 // lib/*.ts 是纯 TS（无 JSX），jiti 可直载。
 import { createJiti } from "jiti";
 import assert from "node:assert/strict";
@@ -43,7 +44,7 @@ check("① 临时目录隔离生效（不碰真实记忆目录 / 配置）", () 
   assert.equal(memory.getHermesMemoryDir(), resolve(memoryDir));
   assert.ok(memory.getHermesProjectsDir().startsWith(agentDir), "项目记忆目录必须落在临时 agentDir 内");
   // 隔离没生效的话本机 hermes-memory-config.json 会把上限改成别的值
-  assert.equal(memory.getHermesMemoryLimits().memory, 4000, "应为默认上限（隔离配置未生效？）");
+  assert.equal(memory.getHermesMemoryLimits().memory, 5000, "应为默认上限（隔离配置未生效？）");
 });
 
 /* ============================ 固定文件 chars / limit ============================ */
