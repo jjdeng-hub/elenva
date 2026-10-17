@@ -154,12 +154,18 @@ function createSandbox({ model, layer }) {
     if (fs.existsSync(source)) fs.copyFileSync(source, path.join(agentDir, file));
   }
 
-  const settings = readJson(path.join(REAL_AGENT_DIR, "settings.json"));
-  settings.packages = ["npm:pi-hermes-memory"]; // 评估只装载记忆扩展，去掉无关包（更快更干净）
-  fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify(settings, null, 2), "utf8");
-
   // 双层模式：pi-hermes-memory 只留工具与策略提示词（policy-only），常驻内容交给我们的索引层。
   const layered = layer !== "legacy";
+
+  const settings = readJson(path.join(REAL_AGENT_DIR, "settings.json"));
+  // R4 修复：
+  // · layered 模式：底座源码已随扩展收编进仓库的 vendor/，扩展从沙箱 extensions/ 加载；
+  //   此时若仍把 `npm:pi-hermes-memory` 挂在 packages 里，会与沙箱里的扩展**双注册**
+  //   同一批工具（memory_add / memory_status / session_search …）→ packages 置空。
+  // · legacy 模式：就是要跑第三方包的全量注入行为，保留该包。
+  settings.packages = layered ? [] : ["npm:pi-hermes-memory"];
+  fs.writeFileSync(path.join(agentDir, "settings.json"), JSON.stringify(settings, null, 2), "utf8");
+
   fs.writeFileSync(
     path.join(agentDir, "hermes-memory-config.json"),
     JSON.stringify(
@@ -188,13 +194,35 @@ function createSandbox({ model, layer }) {
   return { root, agentDir, storeDir, workDir, model, layered };
 }
 
-/** 把仓库里的 elenva-memory 扩展拷进沙箱（与线上同一份源码）。 */
+/** 递归拷目录（vendor 里有子目录与 .mjs，必须整棵带走）。 */
+function copyTree(source, target) {
+  fs.mkdirSync(target, { recursive: true });
+  for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
+    const from = path.join(source, entry.name);
+    const to = path.join(target, entry.name);
+    if (entry.isDirectory()) copyTree(from, to);
+    else if (entry.isFile()) fs.copyFileSync(from, to);
+  }
+}
+
+/**
+ * 把仓库里的 elenva-memory 扩展拷进沙箱（与线上同一份源码）。
+ *
+ * R4 修复：此前只拷顶层 `*.ts`，`vendor/`（R1a 把 pi-hermes-memory 底座搬进来的那棵）
+ * 没被带上 → 沙箱里扩展加载失败（`Cannot find module './vendor/pi-hermes-memory/src/index.js'`），
+ * memory-eval 自 R1 起跑不起来。现改为与 `extensions/elenva-memory/install.mjs` 同款：
+ * 顶层 `*.ts` + `README.md` + `vendor/`（递归）；不拷 selftest*.mjs / install.mjs / tidy-cli.mjs
+ * （不进 agent 目录，避免递归与噪声）。
+ */
 function installExtensionInto(agentDir) {
   const source = path.join(REPO, "extensions", "elenva-memory");
   const target = path.join(agentDir, "extensions", "elenva-memory");
   fs.mkdirSync(target, { recursive: true });
   for (const name of fs.readdirSync(source)) {
-    if (name.endsWith(".ts")) fs.copyFileSync(path.join(source, name), path.join(target, name));
+    const from = path.join(source, name);
+    const to = path.join(target, name);
+    if (name === "vendor" && fs.statSync(from).isDirectory()) copyTree(from, to);
+    else if (name.endsWith(".ts") || name === "README.md") fs.copyFileSync(from, to);
   }
 }
 
