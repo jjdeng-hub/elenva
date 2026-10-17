@@ -3,7 +3,7 @@
 //
 // 夹具全部是**明显虚构**的数据，只落在临时目录，不碰本机 ~/.pi/agent 的真记忆。
 // 走 jiti 而不是 --experimental-strip-types：与本目录其它自测一致，jiti 能解析 .ts 与 `@/` 别名。
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -65,15 +65,19 @@ writeFileSync(
 
 // 快照差分：老的 recovery 里有「将被去掉」的一条，当前文件里没有
 const removedText = "虚构：这条旧结论下一轮整理时会被去掉。";
-const snapshotMs = Date.now() - 120_000;
+// 快照的 mtime 是账本「去掉」条目的定日期依据（lib 读 statSync().mtimeMs）——
+// 必须对齐注入的 now，不能用真实时钟（否则测试跨午夜必红，2026-10-17 实锤）。
+const snapshotMs = Date.parse("2026-10-16T12:00:00Z") - 120_000;
+const snapshotPath = join(projectsDir, "demo-proj", `.MEMORY.md.recovery-${snapshotMs}-${randomUUID()}`);
 writeFileSync(
-  join(projectsDir, "demo-proj", `.MEMORY.md.recovery-${snapshotMs}-${randomUUID()}`),
+  snapshotPath,
   joinEntries(
     entry("虚构：demo-proj 里禁用原生模块。", "2026-10-03", "2026-10-03"),
     entry("虚构：demo-proj 的构建要带 --webpack。", "2026-10-03", "2026-10-03"),
     entry(removedText, "2026-10-02", "2026-10-02"),
   ),
 );
+utimesSync(snapshotPath, new Date(snapshotMs), new Date(snapshotMs));
 
 // ── 虚构工作记录（当前 + 归档，归档为旧快照的复制）────────────
 const wlCurrent = [
@@ -150,7 +154,7 @@ writeFileSync(
   const day16 = ledger.buckets.find((b) => b.key === "2026-10-16");
   check("④ 10-16 桶：更新 2 条", day16?.counts.touched === 2, `got=${day16?.counts.touched}`);
   check("④ 10-16 桶：工作 1 条", day16?.counts.work === 1);
-  check("④ 10-16 桶：去掉 1 条（当前文件 mtime 归到今天）", day16?.counts.removed === 1, `got=${day16?.counts.removed}`);
+  check("④ 10-16 桶：去掉 1 条（快照 mtime 对齐注入时间）", day16?.counts.removed === 1, `got=${day16?.counts.removed}`);
   check("④ 桶按日期倒序", ledger.buckets[0].key === "2026-10-16");
   check("④ 摘要 from/to", ledger.summary.from === "2026-10-01" && ledger.summary.to === "2026-10-16", `${ledger.summary.from}~${ledger.summary.to}`);
   check("④ notes 有来源说明", Array.isArray(ledger.notes) && ledger.notes.length === 3);
