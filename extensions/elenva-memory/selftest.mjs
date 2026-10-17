@@ -68,6 +68,14 @@ check("识别出 1 组重复", tidy.duplicates.length === 1, `(${tidy.duplicates
 check("识别出 1 组冲突", tidy.conflicts.length === 1, `(${tidy.conflicts.length})`);
 check("冲突未被合并（条目数不变）", mkStore(dupEntries).stores[0].entries.length === 4);
 check("报告含在「重复」「冲突」段落", /重复/.test(tidyMod.renderTidyReport(tidy)) && /冲突/.test(tidyMod.renderTidyReport(tidy)));
+// 周整理提案（节律只读任务用）：固定四段 + 只读声明
+const weekly = tidyMod.renderWeeklyProposal(mkStore(dupEntries), tidy, emptyState);
+check(
+  "周整理提案含固定四段",
+  ["【一、水位】", "【二、失效条目", "【三、近重复", "【四、本周建议】"].every((s) => weekly.includes(s)),
+);
+check("周整理提案声明只读、未改文件", weekly.includes("未修改任何记忆文件"));
+check("周整理提案把重复/冲突列进第三段", weekly.includes("近重复") && weekly.includes("冲突"));
 
 // ── 5. 访问计数（ch3 L221 的访问频率信号）──────────────────────────────────
 stateMod.resetStateCache();

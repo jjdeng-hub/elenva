@@ -3,6 +3,7 @@
  *
  *   node extensions/elenva-memory/tidy-cli.mjs              # 只报告（默认）
  *   node extensions/elenva-memory/tidy-cli.mjs --apply      # 执行：重复/淘汰条目归档（不删除）
+ *   node extensions/elenva-memory/tidy-cli.mjs --weekly     # 只读「周整理提案」（四段式，供人过目）
  *   node extensions/elenva-memory/tidy-cli.mjs --cwd <dir>  # 指定项目目录（决定项目记忆读哪一份）
  *
  * 会话里对应的命令是 `/memory-tidy`（同一个实现）。
@@ -19,7 +20,9 @@ const tidyMod = await jiti.import(path.join(HERE, "tidy.ts"));
 const stateMod = await jiti.import(path.join(HERE, "state.ts"));
 
 const args = process.argv.slice(2);
-const apply = args.includes("--apply");
+const weekly = args.includes("--weekly");
+// --weekly 是只读周整理提案：与 --apply 互斥，显式跑 --weekly 时忽略 --apply
+const apply = !weekly && args.includes("--apply");
 const cwdIndex = args.indexOf("--cwd");
 const cwd = cwdIndex >= 0 ? args[cwdIndex + 1] : process.cwd();
 
@@ -35,7 +38,7 @@ for (const store of set.stores) {
 
 const result = tidyMod.runTidy(set, state, { apply });
 console.log("");
-console.log(tidyMod.renderTidyReport(result));
+console.log(weekly ? tidyMod.renderWeeklyProposal(set, result, state) : tidyMod.renderTidyReport(result));
 
 if (apply) {
   state.tidy = {

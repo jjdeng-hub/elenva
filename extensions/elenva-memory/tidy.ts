@@ -339,3 +339,82 @@ function head(text: string, max = 42): string {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
 }
+
+/**
+ * 「周整理提案」——节律每周只读任务的产出（不写任何文件，供人过目后手动执行）。
+ *
+ * 与 renderTidyReport 的区别：那份是**整理动作报告**（重复/冲突/建议 + apply 结果）；
+ * 这份面向“本周该清什么”的四段式巡检：水位（含上次整理对照）、可清出的失效条目、
+ * 近重复/冲突候选、一句建议。分节固定，便于逐周对比。
+ */
+export function renderWeeklyProposal(stores: StoreSet, tidy: TidyResult, state: ElenvaMemoryState): string {
+  const lines: string[] = [];
+  const now = new Date();
+  lines.push(`记忆周整理提案（${now.toLocaleString("zh-CN")}）`);
+
+  // 一、水位（含上次整理对照，给“趋势”一个可读的锚点）
+  lines.push("", "【一、水位】");
+  let totalChars = 0;
+  let totalLimit = 0;
+  for (const store of stores.stores) {
+    totalChars += store.rawChars;
+    totalLimit += store.limit;
+    const pct = store.limit > 0 ? Math.round((store.rawChars / store.limit) * 100) : 0;
+    const flag = pct >= 85 ? " ⚠ 接近上限（≥85%，写入会开始提醒）" : "";
+    lines.push(`- ${store.scope}: ${store.rawChars} / ${store.limit} 字符（${pct}%，${store.entries.length} 条）${flag}`);
+  }
+  if (totalLimit > 0) {
+    lines.push(`- 合计: ${totalChars} / ${totalLimit} 字符（${Math.round((totalChars / totalLimit) * 100)}%）`);
+  }
+  if (stores.projectName === null) {
+    lines.push("- （当前目录未识别为项目，未纳入项目记忆；如需看项目水位请把任务 cwd 指到仓库根）");
+  }
+  if (state.tidy?.lastRunAt) {
+    lines.push(`- 上次整理：${state.tidy.lastRunAt}（${state.tidy.lastSummary ?? "无摘要"}）—— 与本次对比即走势`);
+  } else {
+    lines.push("- 上次整理：无记录（本次为首次周整理）");
+  }
+
+  // 二、失效条目（可清出的）
+  const invalidated = stores.stores.flatMap((store) =>
+    store.entries.filter((e) => e.invalidated).map((entry) => ({ store, entry })),
+  );
+  const reclaim = stores.stores.reduce(
+    (sum, store) => sum + (serializeEntries(store.entries.filter((e) => e.invalidated)).length || 0),
+    0,
+  );
+  lines.push("", `【二、失效条目（可清出）】共 ${invalidated.length} 条，预计可释放约 ${reclaim} 字符`);
+  if (invalidated.length === 0) {
+    lines.push("- 无（没有已标失效的条目）");
+  } else {
+    for (const { store, entry } of invalidated) {
+      lines.push(`- [${store.scope}] ${head(entry.text, 50)}（失效于 ${entry.invalidated}${entry.reason ? `：${entry.reason}` : ""}）`);
+    }
+    lines.push("- 清出方式：确认无需恢复后，用归档（tidy --apply 的归档建议）或逐条删除；失效本身可逆（memory_status restore）。");
+  }
+
+  // 三、近重复 / 冲突候选
+  lines.push("", "【三、近重复 / 冲突候选】");
+  if (tidy.duplicates.length === 0 && tidy.conflicts.length === 0) {
+    lines.push("- 无（相似度 ≥0.85 的近重复与同题冲突均为 0）");
+  }
+  for (const group of tidy.duplicates) {
+    lines.push(`- 近重复 [${group.scope}]：保留「${head(group.kept.text)}」；归档 ${group.dropped.length} 条（如「${head(group.dropped[0]?.text ?? "")}」）`);
+  }
+  for (const conflict of tidy.conflicts) {
+    lines.push(`- 冲突：「${head(conflict.a, 30)}」↔「${head(conflict.b, 30)}」（相似度 ${conflict.sim}）：${conflict.reason}`);
+  }
+
+  // 四、本周建议（确定性，不调模型）
+  lines.push("", "【四、本周建议】");
+  const advice: string[] = [];
+  const overRatio = stores.stores.filter((s) => s.limit > 0 && s.rawChars / s.limit >= 0.85);
+  if (invalidated.length > 0) advice.push(`先清出 ${invalidated.length} 条失效条目（约释放 ${reclaim} 字符，不需动有效内容）`);
+  if (tidy.duplicates.length > 0) advice.push(`合并 ${tidy.duplicates.length} 组近重复`);
+  if (overRatio.length > 0) advice.push(`${overRatio.map((s) => s.scope).join("/")} 已接近上限，建议本周合并或迁出长条目（程序性内容写 skill）`);
+  if (advice.length === 0) lines.push("水位健康、无近重复与失效积压 —— 本周无需整理动作。");
+  else lines.push(`${advice.join("；")}。`);
+
+  lines.push("", "（只读提案：未修改任何记忆文件；确认后再手动执行 /memory-tidy --apply 或逐条处理。）");
+  return lines.join("\n");
+}
