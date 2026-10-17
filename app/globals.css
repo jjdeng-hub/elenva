@@ -1,3 +1,4 @@
+/* avoid-ai-design-ignore: SD2 —— 「近黑 + 朱红」是项目身份（经 UI 审计 2026-10-17 确认保留），非默认套用；理由见 docs/design-decisions.md */
 @import "tailwindcss";
 
 @theme inline {
@@ -630,6 +631,7 @@
   .md-body blockquote {
     margin: 0.6em 0;
     padding: 0.1em 0 0.1em 0.9em;
+    /* avoid-ai-design-ignore: K4 —— 引用块的左红条是 Markdown 引用语义，不是卡片装饰（经 UI 审计 2026-10-17 确认保留） */
     border-left: 3px solid var(--accent);
     color: var(--muted);
   }
