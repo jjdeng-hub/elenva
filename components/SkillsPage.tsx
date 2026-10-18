@@ -687,6 +687,11 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
                 <span className="chip">{advisor.overview.active} 活跃</span>
                 <span className="chip">近7天 {advisor.overview.calls7} 次</span>
                 <span className="chip">近30天 {advisor.overview.calls30} 次</span>
+                {usage?.sources && (
+                  <span className="chip" title="命令 = /skill: 展开；读取 = 模型主动 read 技能文件">
+                    命令 {usage.sources.command} · 读取 {usage.sources.read}
+                  </span>
+                )}
                 {advisor.overview.idle > 0 && (
                   <span className="chip chip-warn">吃灰 {advisor.overview.idle}</span>
                 )}
@@ -705,11 +710,11 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
           </div>
           {!usage ? (
             <div className="flex items-center gap-2 px-4 py-6 text-[12px] text-dim">
-              <Loader2 size={14} className="animate-spin" /> 扫描会话统计技能调用…
+              <Loader2 size={14} className="animate-spin" /> 扫描会话统计技能调用与读取…
             </div>
           ) : usage.total === 0 ? (
             <div className="px-4 py-6 text-[12px] text-dim">
-              会话里还没有技能调用记录——技能被调用一次后这里就会出现读数与建议。
+              会话里还没有技能使用记录——技能被 /skill: 调起或 read 载入一次后，这里就会出现读数与建议。
             </div>
           ) : (
             advisor && (
@@ -721,18 +726,23 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
                     <div className="py-2 text-[12px] text-dim">还没有调用记录</div>
                   ) : (
                     <div className="flex flex-col">
-                      {advisor.hot.map((item, i) => (
-                        <div key={item.name} className="flex items-center gap-2 border-t border-line-soft py-1.5 first:border-t-0">
-                          <span className="w-4 shrink-0 text-right font-mono text-[11px] text-dim">{i + 1}</span>
-                          <span className="min-w-0 flex-1 truncate text-[12px] text-fg" title={item.name}>{item.name}</span>
-                          {item.count7 > 0 && (
-                            <span className="chip shrink-0">近7天 {item.count7}</span>
-                          )}
-                          <span className="shrink-0 text-[11px] text-dim">
-                            {item.count} 次 · {shortDate(item.lastUsedAt)}
-                          </span>
-                        </div>
-                      ))}
+                      {advisor.hot.map((item, i) => {
+                        const per = usage.skillSources?.[item.name];
+                        const readOnly = per !== undefined && per.command === 0 && per.read > 0;
+                        return (
+                          <div key={item.name} className="flex items-center gap-2 border-t border-line-soft py-1.5 first:border-t-0">
+                            <span className="w-4 shrink-0 text-right font-mono text-[11px] text-dim">{i + 1}</span>
+                            <span className="min-w-0 flex-1 truncate text-[12px] text-fg" title={item.name}>{item.name}</span>
+                            {readOnly && <span className="chip shrink-0" title="所有用量都来自 read 载入，没有 /skill: 命令调用">读入</span>}
+                            {item.count7 > 0 && (
+                              <span className="chip shrink-0">近7天 {item.count7}</span>
+                            )}
+                            <span className="shrink-0 text-[11px] text-dim">
+                              {item.count} 次 · {shortDate(item.lastUsedAt)}
+                            </span>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
