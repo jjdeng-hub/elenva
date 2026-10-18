@@ -55,6 +55,15 @@ function writeSession(name, lines) {
   writeFileSync(join(sessionsDir, name), body, "utf8");
 }
 
+/**
+ * 合法的技能块（内核 parseSkillBlock 的正则要求 `>\n正文\n</skill>`；
+ * 落盘时内容是转义形态，这里直接给未转义的文本）。
+ * 注：2026-10-18 上一轮把命令路径改成真正解析后，旧夹具里 `<skill …>x</skill>`
+ * 这类**不合法**的块就不再被计入了 —— 本夹具已按合法形态重建。
+ */
+const skillBlock = (name, location) => `<skill name="${name}" location="${location}">\n正文\n</skill>`;
+const globalSkillPath = (name) => `${agentDir}/skills/${name}/SKILL.md`;
+
 // ───────────────────────────────────────────────
 // 场景 A：窗口聚合（同次扫描出 7/30 天统计，老字段一个不丢）
 // ───────────────────────────────────────────────
@@ -66,18 +75,18 @@ writeSession("2026-10-16T00-00-00-000Z_fixture-a.jsonl", [
   { type: "session", id: "fixture-a", cwd: "/fixture", timestamp: iso(in7) },
   {
     type: "message", id: "a1", timestamp: iso(in7),
-    message: { role: "user", content: [{ type: "text", text: `<skill name="alpha-helper" location="${agentDir}/skills/alpha-helper/">x</skill>` }] },
+    message: { role: "user", content: [{ type: "text", text: skillBlock("alpha-helper", globalSkillPath("alpha-helper")) }] },
   },
   {
     type: "message", id: "a2", timestamp: iso(in30_not7),
-    message: { role: "user", content: [{ type: "text", text: `<skill name="alpha-helper" location="${agentDir}/skills/alpha-helper/">x</skill>\n<skill name="beta-scanner" location="${agentDir}/skills/beta-scanner/">y</skill>` }] },
+    message: { role: "user", content: [{ type: "text", text: `${skillBlock("alpha-helper", globalSkillPath("alpha-helper"))}\n\n${skillBlock("beta-scanner", globalSkillPath("beta-scanner"))}` }] },
   },
   {
     type: "message", id: "a3", timestamp: iso(out30),
-    message: { role: "user", content: [{ type: "text", text: `<skill name="gamma-agent" location="${agentDir}/skills/gamma-agent/">z</skill>` }] },
+    message: { role: "user", content: [{ type: "text", text: skillBlock("gamma-agent", globalSkillPath("gamma-agent")) }] },
   },
   // 助手行混入同名 skill 块也不该被计数（只扫用户消息行）
-  { type: "message", id: "a4", timestamp: iso(in7), message: { role: "assistant", content: [{ type: "text", text: `<skill name="alpha-helper" location="x">fake</skill>` }] } },
+  { type: "message", id: "a4", timestamp: iso(in7), message: { role: "assistant", content: [{ type: "text", text: skillBlock("alpha-helper", "x") }] } },
 ]);
 
 const a = aggregateSkillUsage();
@@ -110,19 +119,19 @@ writeSession("2026-10-16T01-00-00-000Z_fixture-b.jsonl", [
   { type: "session", id: "fixture-b", cwd: "/fixture", timestamp: iso(now) },
   {
     type: "message", id: "b1", timestamp: iso(now - 7 * DAY + 60_000),
-    message: { role: "user", content: [{ type: "text", text: `<skill name="delta-reviewer" location="x">` }] },
+    message: { role: "user", content: [{ type: "text", text: skillBlock("delta-reviewer", globalSkillPath("delta-reviewer")) }] },
   },
   {
     type: "message", id: "b2", timestamp: iso(now - 7 * DAY - 60_000),
-    message: { role: "user", content: [{ type: "text", text: `<skill name="epsilon-migrate" location="x">` }] },
+    message: { role: "user", content: [{ type: "text", text: skillBlock("epsilon-migrate", globalSkillPath("epsilon-migrate")) }] },
   },
   {
     type: "message", id: "b3", timestamp: iso(now - 30 * DAY + 60_000),
-    message: { role: "user", content: [{ type: "text", text: `<skill name="epsilon-migrate" location="x">` }] },
+    message: { role: "user", content: [{ type: "text", text: skillBlock("epsilon-migrate", globalSkillPath("epsilon-migrate")) }] },
   },
   {
     type: "message", id: "b4", timestamp: iso(now - 30 * DAY - 60_000),
-    message: { role: "user", content: [{ type: "text", text: `<skill name="zeta-plot" location="x">` }] },
+    message: { role: "user", content: [{ type: "text", text: skillBlock("zeta-plot", globalSkillPath("zeta-plot")) }] },
   },
 ]);
 const mod2 = await jiti2.import("../lib/skill-usage.ts");
@@ -146,10 +155,13 @@ const noTsDir = join(agentDir, "sessions", "--fixture-nots--");
 mkdirSync(noTsDir, { recursive: true });
 const oldMs = now - 3 * DAY;
 const noTsFile = join(noTsDir, "2026-10-16T02-00-00-000Z_fixture-nots.jsonl");
+// 老式消息行：无外层 timestamp —— 只能靠 mtime 近似（用 JSON.stringify 写成合法块）
 writeFileSync(noTsFile, [
-  { type: "session", id: "fixture-nots", cwd: "/fixture", timestamp: iso(oldMs) },
-  // 老式消息行：无外层 timestamp —— 只能靠 mtime 近似
-  `{"type":"message","message":{"role":"user","content":[{"type":"text","text":"<skill name=\\"eta-docs\\" location=\\"x\\">"}]}}`,
+  JSON.stringify({ type: "session", id: "fixture-nots", cwd: "/fixture", timestamp: iso(oldMs) }),
+  JSON.stringify({
+    type: "message",
+    message: { role: "user", content: [{ type: "text", text: skillBlock("eta-docs", globalSkillPath("eta-docs")) }] },
+  }),
 ].join("\n") + "\n", "utf8");
 utimesSync(noTsFile, oldMs, oldMs);
 const mod3 = await jiti3.import("../lib/skill-usage.ts");
@@ -226,6 +238,26 @@ check("场景D · 高频榜不上历史已归档技能", () => {
   eq(report.hot.map((h) => h.name), ["alpha-helper"]);
 });
 
+check("场景D · 高频榜优先用 usage.entries，带 scope/project/key（项目技能可上榜）", () => {
+  // 归因层（模块 4 尾巴轮）：有 entries 时不再从已安装技能里取，而是直接用与 total
+  // 同口径的读数条目 —— 项目技能（不在安装枚举里）因此可见；键/域带 additive 字段
+  const report = buildSkillAdvisorReport(
+    { entries: [entry("alpha-helper", "active", 1)] },
+    {
+      total: 5,
+      recent: { at: iso(now), days7: {}, days30: {}, total7: 0, total30: 0 },
+      entries: [
+        { key: "global:alpha-helper", name: "alpha-helper", scope: "global", count: 1, command: 1, read: 0, count7: 0, count30: 1, lastUsedAt: iso(now) },
+        { key: "project:proj-x:proj-skill", name: "proj-skill", scope: "project", project: "proj-x", count: 4, command: 0, read: 4, count7: 0, count30: 4, lastUsedAt: iso(now) },
+      ],
+    },
+  );
+  eq(report.hot.map((h) => h.key), ["project:proj-x:proj-skill", "global:alpha-helper"]);
+  eq(report.hot[0].scope, "project", "项目技能带 scope=project");
+  eq(report.hot[0].project, "proj-x", "项目技能带项目标识");
+  eq(report.hot[1].scope, "global");
+});
+
 check("场景D · 空数据：全零且不抛", () => {
   const report = buildSkillAdvisorReport({ entries: [] }, usageMock({ at: iso(now), days7: {}, days30: {}, total7: 0, total30: 0 }));
   eq(report.overview, { totalSkills: 0, active: 0, stale: 0, unused: 0, idle: 0, totalCalls: 0, calls7: 0, calls30: 0 });
@@ -267,6 +299,12 @@ check("场景E · /api/skill-usage 契约「只增不改」", () => {
   const route = readFileSync(new URL("../app/api/skill-usage/route.ts", import.meta.url), "utf8");
   if (!route.includes("aggregateSkillUsage()")) throw new Error("route 未直接返回聚合结果");
   if (route.includes("recent:") || route.includes("delete ")) throw new Error("route 不应字段级改写响应");
+});
+check("场景E · 归因新增字段 additive（entries 在类型与顾问层都接上）", () => {
+  const usageSource = readFileSync(new URL("../lib/skill-usage.ts", import.meta.url), "utf8");
+  if (!usageSource.includes("entries: SkillUsageEntry[]")) throw new Error("SkillUsageReport 缺 additive 字段 entries");
+  const advisorSource = readFileSync(new URL("../lib/skill-advisor.ts", import.meta.url), "utf8");
+  if (!advisorSource.includes("usage.entries")) throw new Error("顾问层未消费 entries（项目技能上不了榜）");
 });
 
 console.log(fail === 0 ? "\nALL PASS" : `\n${fail} FAILED`);

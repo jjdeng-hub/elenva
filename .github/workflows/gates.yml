@@ -54,8 +54,10 @@ jobs:
           node extensions/elenva-todo/selftest.mjs
           node extensions/elenva-worklog/selftest.mjs
           node extensions/elenva-compact/selftest.mjs
-      - name: 技能用量口径回归（R1 解析加固 / R2 覆盖 read 路径）
-        run: node tools/skill-usage-selftest.mjs
+      - name: 技能用量口径回归（R1 解析加固 / R2 覆盖 read 路径 / 归因）
+        run: |
+          node tools/skill-usage-selftest.mjs
+          node tools/skill-advisor-selftest.mjs
       - name: 子代理模板与只读语义自检
         run: node tools/subagent-templates-selftest.mjs
       - name: 生产构建

@@ -1,4 +1,4 @@
-// 技能用量口径自测（模块 4 修复轮 · R1 解析加固 + R2 覆盖 read 路径）。
+// 技能用量口径自测（模块 4 修复轮 · R1 解析加固 + R2 覆盖 read 路径 + 尾巴轮 归因）。
 //
 // R1 断言（修前会被误计，修后必须为 0）：
 //   · 用户在正文里**引用/讨论** skill 块（不在文本起始）→ 不计
@@ -9,6 +9,11 @@
 //   · 同会话被 write/edit/skill_manage/skill_draft 改写的技能，其读取不计（维护否决）
 //   · 同会话既 /skill: 又 read → 只算命令一次，不双计
 //   · bash / grep 文本里出现的 SKILL.md 字符串 → 不计
+// 归因断言（尾巴轮，additive 字段 entries）：
+//   · Σentries.count = total、Σcommand/read = sources —— 读数与榜单同口径
+//   · 全局 / 项目（projects-memory/<项目>）/ 项目内 .pi/skills 分别归到 global / project / workspace
+//   · 同名不同域（global:collide / project:proj-a:collide / project:proj-b:collide）不混
+//   · 旧的按名归并口径（skills / skillSources）保持不变
 //
 // 运行：node tools/skill-usage-selftest.mjs
 //
@@ -118,6 +123,19 @@ writeSession("r2", "pm", [userText("项目技能"), assistant([readCall(pmSkill(
 // 读普通文件不算技能使用
 writeSession("r2", "plain", [userText("看个文件"), assistant([readCall("/fixtures/agent/skills/README.md")])]);
 
+/* ── 归因用例（模块 4 尾巴轮）───────────────────────────────── */
+// 用**真实 agentDir** 造路径，才能命中 global 判定；projects-memory 的判定只看路径形态，
+// 与 agentDir 前缀无关（用虚构项目名 proj-a / proj-b，绝无真实数据）。
+const realGlobal = (name) => join(agentDir, "skills", name, "SKILL.md");
+const realPm = (project, name) => join(agentDir, "projects-memory", project, "skills", name, "SKILL.md");
+const workspaceSkill = (name) => `/fixtures/ws/.pi/skills/${name}/SKILL.md`;
+
+writeSession("r3", "global", [userText("g"), assistant([readCall(realGlobal("r3-global"))])]);
+writeSession("r3", "global-collide", [userText("gc"), assistant([readCall(realGlobal("collide"))])]);
+writeSession("r3", "pm-a", [userText("a"), assistant([readCall(realPm("proj-a", "collide"))])]);
+writeSession("r3", "pm-b", [userText("b"), assistant([readCall(realPm("proj-b", "collide"))])]);
+writeSession("r3", "workspace", [userText("w"), assistant([readCall(workspaceSkill("r3-workspace"))])]);
+
 resetSkillUsageCacheForTest();
 const report = aggregateSkillUsage();
 const byName = new Map(report.skills.map((entry) => [entry.name, entry.count]));
@@ -169,11 +187,48 @@ check("R2 · 读非技能文件不计", () => {
 });
 
 check("总读数与来源拆分自洽（total = command + read）", () => {
-  const exact = countOf("r1-command") + countOf("r1-trailing") + countOf("r2-dedupe") + countOf("r2-multisession") + countOf("r2-other-read") + countOf("r2-both") + countOf("r2-chain-a") + countOf("r2-chain-b") + countOf("r2-pm");
+  const exact = countOf("r1-command") + countOf("r1-trailing") + countOf("r2-dedupe") + countOf("r2-multisession") + countOf("r2-other-read") + countOf("r2-both") + countOf("r2-chain-a") + countOf("r2-chain-b") + countOf("r2-pm") + countOf("r3-global") + countOf("collide") + countOf("r3-workspace");
   assert(report.total === exact, `期望 total = ${exact}，实际 ${report.total}`);
   assert(report.sources.command + report.sources.read === report.total, `命令 ${report.sources.command} + 读取 ${report.sources.read} ≠ total ${report.total}`);
   assert(report.sources.command === 5, `期望 command = 5，实际 ${report.sources.command}`);
-  assert(report.sources.read === 5, `期望 read = 5，实际 ${report.sources.read}`);
+  assert(report.sources.read === 10, `期望 read = 10，实际 ${report.sources.read}`);
+});
+
+/* ── 归因断言 ──────────────────────────────────────────────── */
+const entryOf = (key) => report.entries.find((entry) => entry.key === key);
+
+check("归因 · entries 与 total / sources 同口径（按域拆分后仍对得上总账）", () => {
+  const sumCount = report.entries.reduce((sum, entry) => sum + entry.count, 0);
+  const sumCommand = report.entries.reduce((sum, entry) => sum + entry.command, 0);
+  const sumRead = report.entries.reduce((sum, entry) => sum + entry.read, 0);
+  assert(sumCount === report.total, `Σcount ${sumCount} ≠ total ${report.total}`);
+  assert(sumCommand === report.sources.command, `Σcommand ${sumCommand} ≠ ${report.sources.command}`);
+  assert(sumRead === report.sources.read, `Σread ${sumRead} ≠ ${report.sources.read}`);
+  assert(report.entries.length >= report.skills.length, "entries 按 (scope,name) 拆分，条数不应少于按名归并的技能数");
+});
+check("归因 · 全局技能归到 global:<名>", () => {
+  const entry = entryOf("global:r3-global");
+  assert(entry && entry.scope === "global" && entry.count === 1 && entry.read === 1, `实际 ${JSON.stringify(entry)}`);
+});
+check("归因 · projects-memory 技能归到 project:<项目>:<名>（带 project 标识）", () => {
+  const entry = entryOf("project:proj-a:collide");
+  assert(entry && entry.scope === "project" && entry.project === "proj-a", `实际 ${JSON.stringify(entry)}`);
+});
+check("归因 · 同名不同域不混：global / proj-a / proj-b 的 collide 各成一条", () => {
+  for (const key of ["global:collide", "project:proj-a:collide", "project:proj-b:collide"]) {
+    const entry = entryOf(key);
+    assert(entry && entry.count === 1, `${key} 应为独立条目 count=1，实际 ${JSON.stringify(entry)}`);
+  }
+  assert(countOf("collide") === 3, `按名归并仍是 3（旧口径兼容），实际 ${countOf("collide")}`);
+});
+check("归因 · 项目内 .pi/skills 归到 workspace", () => {
+  const entry = entryOf("workspace:r3-workspace");
+  assert(entry && entry.scope === "workspace", `实际 ${JSON.stringify(entry)}`);
+});
+check("归因 · 旧字段不被破坏（skills / skillSources / lastUsed 仍是按名归并）", () => {
+  assert(report.skills.some((item) => item.name === "collide" && item.count === 3), `skills 里 collide 应合并为 3，实际 ${JSON.stringify(report.skills.find((s) => s.name === "collide"))}`);
+  assert(report.skillSources.collide?.read === 3, `skillSources.collide.read 应为 3，实际 ${JSON.stringify(report.skillSources.collide)}`);
+  assert(typeof report.lastUsed.collide === "string", "lastUsed.collide 应存在（按名归并）");
 });
 check("近 7 天窗口同时覆盖命令与读取", () => {
   assert(report.recent.total7 === report.total, `期望 total7 = ${report.total}，实际 ${report.recent.total7}`);

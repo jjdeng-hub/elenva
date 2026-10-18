@@ -733,6 +733,14 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
                           <div key={item.name} className="flex items-center gap-2 border-t border-line-soft py-1.5 first:border-t-0">
                             <span className="w-4 shrink-0 text-right font-mono text-[11px] text-dim">{i + 1}</span>
                             <span className="min-w-0 flex-1 truncate text-[12px] text-fg" title={item.name}>{item.name}</span>
+                            {item.scope === "project" && (
+                              <span
+                                className="chip shrink-0"
+                                title={`项目技能${item.project ? `（${item.project}）` : ""}——随 projects-memory 存亡，不参与归档建议`}
+                              >
+                                项目
+                              </span>
+                            )}
                             {readOnly && <span className="chip shrink-0" title="所有用量都来自 read 载入，没有 /skill: 命令调用">读入</span>}
                             {item.count7 > 0 && (
                               <span className="chip shrink-0">近7天 {item.count7}</span>
