@@ -41,6 +41,11 @@ jobs:
         run: node tools/internal-state-selftest.mjs
       - name: 诊断输出与空闲看门狗自检
         run: node tools/diagnostics-selftest.mjs
+      - name: 安全边界回归（只读判定 / 隔离巡检 / 节律执行链）
+        run: |
+          node tools/readonly-classifier-selftest.mjs
+          node tools/gates-isolated-selftest.mjs
+          node tools/scheduler-runs-selftest.mjs
       - name: 扩展自检（任务清单 / 工作记录 / 上下文治理）
         run: |
           node extensions/elenva-todo/selftest.mjs
