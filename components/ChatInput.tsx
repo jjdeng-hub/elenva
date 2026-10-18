@@ -233,11 +233,9 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     const draft = readDraft(draftKey);
     textRef.current = draft.text;
     setText(draft.text);
-    setImages((prev) => {
-      prev.forEach((img) => URL.revokeObjectURL(img.previewUrl));
-      imagesRef.current = draft.images;
-      return draft.images;
-    });
+    imagesRef.current.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+    imagesRef.current = draft.images;
+    setImages(draft.images);
   }, [draftKey]);
 
   // 写入草稿：显式走更新函数，避免挂载时空值 effect 覆盖已存草稿
@@ -252,7 +250,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     (files: File[] | FileList) => {
       const list = Array.from(files).filter((f) => f.type.startsWith("image/"));
       if (list.length === 0) return;
-      const room = MAX_ATTACHED_IMAGES - images.length;
+      const room = MAX_ATTACHED_IMAGES - imagesRef.current.length;
       if (room <= 0) {
         onNotice?.(`一条消息最多附带 ${MAX_ATTACHED_IMAGES} 张图片`);
         return;
@@ -265,35 +263,38 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
           onNotice?.(`有 ${rejected} 张图片未添加（仅支持图片，且单张不超过 10MB）`);
         }
         if (ok.length > 0) {
-          setImages((prev) => {
-            const next = [...prev, ...ok];
-            imagesRef.current = next;
-            persistDraft(textRef.current, next);
-            return next;
-          });
+          // 从 ref 取基准、副作用放到更新函数外：Updater 必须是纯的（StrictMode 双调 / 
+          // 卸载时被丢弃都会让写在里面的持久化时而发生、时而不发生）。
+          const next = [...imagesRef.current, ...ok].slice(0, MAX_ATTACHED_IMAGES);
+          imagesRef.current = next;
+          setImages(next);
+          persistDraft(textRef.current, next);
         }
       });
     },
-    [images.length, onNotice, persistDraft],
+    [onNotice, persistDraft],
   );
 
   const removeImage = (index: number) => {
-    setImages((prev) => {
-      URL.revokeObjectURL(prev[index].previewUrl);
-      const next = prev.filter((_, i) => i !== index);
-      imagesRef.current = next;
-      persistDraft(textRef.current, next);
-      return next;
-    });
+    const prev = imagesRef.current;
+    const target = prev[index];
+    if (!target) return;
+    URL.revokeObjectURL(target.previewUrl);
+    const next = prev.filter((_, i) => i !== index);
+    imagesRef.current = next;
+    setImages(next);
+    persistDraft(textRef.current, next);
   };
 
+  /* 清空附件必须**同步**落盘：发送后组件可能因页面切换而卸载，
+     若把 persistDraft 放进 setImages 的 updater 里，卸载会让这次「删草稿」被丢弃，
+     残留的图片草稿随后被 rekey 到新会话 id，再被草稿恢复读回来 ——
+     表现就是「发出去的图片又回到输入框」。 */
   const clearImages = useCallback(() => {
-    setImages((prev) => {
-      prev.forEach((img) => URL.revokeObjectURL(img.previewUrl));
-      imagesRef.current = [];
-      persistDraft(textRef.current, []);
-      return [];
-    });
+    imagesRef.current.forEach((img) => URL.revokeObjectURL(img.previewUrl));
+    imagesRef.current = [];
+    setImages([]);
+    persistDraft(textRef.current, []);
   }, [persistDraft]);
 
   /* 用 ref 跟踪最新附件与文本：卸载 cleanup 若直接闭包引用，会永远看到挂载时的空数组 */
