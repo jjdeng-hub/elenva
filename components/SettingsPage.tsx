@@ -615,6 +615,8 @@ function GuardrailsSection({ projects, defaultCwd }: {
   const [allowByProject, setAllowByProject] = useState<Record<string, string[]>>({});
   /** 项目级档位覆盖；值为空对象表示该项目「全继承」 */
   const [policyByProject, setPolicyByProject] = useState<Record<string, ProjectPolicy>>({});
+  /** 项目策略列表默认收起：大多数项目都是「全继承」，铺开一屏卡片只是占地方 */
+  const [policyOpen, setPolicyOpen] = useState(false);
   /** 全局回落档：界面上只作为「继承（…）」的显示值，改它要动代码（见 GuardrailSettings 注释） */
   const [fallback, setFallback] = useState<"reject" | "queue">("reject");
   const [mcpGlobal, setMcpGlobal] = useState(true);
@@ -771,6 +773,9 @@ function GuardrailsSection({ projects, defaultCwd }: {
     return rows;
   }, [projects, policyByProject]);
 
+  /** 有覆盖的项目数：收起时用它提示「里面有东西」 */
+  const policyOverrideCount = policyRows.filter((row) => Object.keys(row.policy).length > 0).length;
+
   /** 写项目策略：patch 里的 null 表示该键回到继承；patch 为 null 整条清除 */
   const saveProjectPolicy = async (cwd: string, patch: Record<string, unknown> | null) => {
     const data = await post({ action: "setProjectPolicy", cwd, policy: patch });
@@ -834,18 +839,34 @@ function GuardrailsSection({ projects, defaultCwd }: {
             三个键**各自独立继承** ——「继承」的语义是「这个键跟随全局」，不是「等于默认档」；
             所以「继承」的文案里必须带上当前全局值，否则用户看不出自己在继承什么。 */}
         <div className="mt-4 border-t border-line-soft pt-3">
-          <div className="text-[13px] font-medium text-fg">项目策略</div>
-          <p className="mt-0.5 text-[12px] leading-relaxed text-dim">
-            按项目给不同的审批档位：个人小项目可以放全权，重要目录收严。没选过的键跟随全局
-            ——当前全局：{MODE_LABELS[mode ?? "risky"]} · 无人时{FALLBACK_LABELS[fallback]} · MCP 写确认{mcpGlobal ? "开" : "关"}。
-            免确认规则不受影响。
-          </p>
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-medium text-fg">项目策略</div>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-dim">
+                按项目给不同的审批档位：个人小项目可以放全权，重要目录收严。没选过的键跟随全局
+                ——当前全局：{MODE_LABELS[mode ?? "risky"]} · 无人时{FALLBACK_LABELS[fallback]} · MCP 写确认{mcpGlobal ? "开" : "关"}。
+                免确认规则不受影响。
+              </p>
+            </div>
+            {policyRows.length > 0 && (
+              <button
+                onClick={() => setPolicyOpen((v) => !v)}
+                aria-expanded={policyOpen}
+                className="btn btn-sm btn-ghost shrink-0"
+              >
+                {policyOpen ? "收起" : `展开 ${policyRows.length} 个项目`}
+                {!policyOpen && policyOverrideCount > 0 && (
+                  <span className="text-accent">· {policyOverrideCount} 个已单独设</span>
+                )}
+              </button>
+            )}
+          </div>
 
           {policyRows.length === 0 ? (
             <p className="mt-2 text-[11px] text-dim">
               还没有可配置的项目 —— 打开过会话的项目目录会自动出现在这里。
             </p>
-          ) : (
+          ) : policyOpen ? (
             <div className="mt-2 grid grid-cols-1 gap-2 xl:grid-cols-2">
               {policyRows.map((row) => (
                 <div key={row.cwd} className="rounded-lg border border-line bg-panel-2 px-2.5 py-2">
@@ -923,7 +944,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
 
         <div className="mt-4 flex items-center gap-3">
