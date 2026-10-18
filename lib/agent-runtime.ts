@@ -20,6 +20,7 @@ import { computeSessionStats } from "./session-stats";
 import { aggregateUsage } from "./usage-aggregate";
 import { approachingBudgets, budgetBucket, checkBudgets, formatApproachNote, formatBudgetNote, parseBudgets } from "./budget-guard";
 import { readGuardrailSettings } from "./guardrail-settings";
+import { diagError, diagTrace } from "./diagnostics";
 import { hasActiveSessionLivenessProvider } from "./session-liveness";
 import type { AgentSession, SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
@@ -2218,6 +2219,16 @@ export async function startAgentSession(
   );
   const chatOnly = selectedToolNames?.length === 0 && !subagentLoadsResources;
   const finishStartingSession = trackStartingSession(sessionCwd);
+  /** 启动耗时——「连不上」时第一个要回答的问题就是「卡在哪一步、卡了多久」 */
+  const startedAt = Date.now();
+  diagTrace("session-start", "开始启动会话", {
+    sessionId,
+    sessionFile: sessionFile || "(新会话)",
+    cwd: sessionCwd,
+    toolNames: selectedToolNames,
+    chatOnly,
+    subagentResources: Boolean(subagentResources),
+  });
   const starting = (async () => {
     // Some extensions access the SDK's global theme even outside the terminal UI.
     if (!chatOnly) initTheme();
@@ -2360,10 +2371,33 @@ export async function startAgentSession(
     registerAgentWrapper(wrapper);
 
     return { session: wrapper, realSessionId };
-  })().finally(() => {
-    locks.delete(sessionId);
-    finishStartingSession();
-  });
+  })()
+    .then((result) => {
+      diagTrace("session-start", "会话启动完成", {
+        sessionId,
+        realSessionId: result.realSessionId,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return result;
+    })
+    .catch((error: unknown) => {
+      /* 启动失败此前在服务端**没有任何记录**——只把消息回给浏览器，日志里是空的，
+         排查「连不上」时无处可看。这里补上：哪一步失败、什么错、当时的参数。
+         只记日志后原样抛出，不改变调用方看到的行为。 */
+      diagError("session-start", "会话启动失败", {
+        sessionId,
+        sessionFile: sessionFile || "(新会话)",
+        cwd: sessionCwd,
+        elapsedMs: Date.now() - startedAt,
+        toolNames: selectedToolNames,
+        chatOnly,
+      }, error);
+      throw error;
+    })
+    .finally(() => {
+      locks.delete(sessionId);
+      finishStartingSession();
+    });
 
   locks.set(sessionId, starting);
   return starting;

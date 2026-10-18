@@ -21,7 +21,10 @@ import { normalizeBuiltinSelection } from "@/lib/tool-selection-ui";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 import { mergeSessionStats, type SessionFileStats } from "@/lib/session-stats";
 import { userMessageKey } from "@/lib/prompt-recovery";
-import { AgentEventConnection } from "@/lib/agent-event-connection";
+import { AgentEventConnection, type AgentEventConnectionStatusInfo } from "@/lib/agent-event-connection";
+import { assessLiveness, formatNoEventNotice, formatStalledNotice } from "@/lib/agent-liveness";
+import { phaseToLabel, type AgentPhase } from "@/lib/agent-phase";
+import { describeError } from "@/lib/diagnostics";
 import { getToolExecutionProgress } from "@/lib/tool-execution-progress";
 import { mergeBuiltinSlashCommands } from "@/lib/slash-commands";
 import {
@@ -113,11 +116,7 @@ type NoticeAction =
   | { type: "mark_oldest_exiting" }
   | { type: "remove"; id: string };
 
-export type AgentPhase =
-  | { kind: "waiting_model" }
-  | { kind: "running_command" }
-  | { kind: "running_tools"; tools: { id: string; name: string; progress?: string }[] }
-  | null;
+export type { AgentPhase };
 
 export interface CompactResultInfo {
   reason: "manual" | "threshold" | "overflow" | "auto" | string;
@@ -172,6 +171,8 @@ const AGENT_STATE_RECONCILE_MS = 15_000;
 const BASH_STATE_RECONCILE_MS = 1_000;
 const EVENT_STREAM_READY_TIMEOUT_MS = 60_000;
 const EVENT_STREAM_RECONNECT_DELAY_MS = 1_000;
+/** 空闲看门狗的巡检间隔（只做判定与提示，不介入连接） */
+const LIVENESS_CHECK_INTERVAL_MS = 5_000;
 // Retry temporary model-list failures without requiring a page refresh.
 const MODELS_RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
 const MAX_NOTICES = 5;
@@ -330,6 +331,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const [compactError, setCompactError] = useState<string | null>(null);
   const [compactResult, setCompactResult] = useState<CompactResultInfo | null>(null);
   const [agentPhase, setAgentPhase] = useState<AgentPhase>(null);
+  /** 事件流连接状态（重连中 / 已恢复）；用于区分「卡在等待」与「连接断了」 */
+  const [connectionStatus, setConnectionStatus] = useState<AgentEventConnectionStatusInfo | null>(null);
   const [promptAnchorActive, setPromptAnchorActive] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommandInfo[]>([]);
   /** loadSession 需要触发它，而它定义在后面 —— 用 ref 打破 useCallback 的循环引用 */
@@ -374,6 +377,15 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
   const newSessionModelOverrideRef = useRef<SelectedModel | null>(null);
   const thinkingLevelOverrideRef = useRef<Exclude<ThinkingLevelOption, "auto"> | null>(null);
   const promptRunIdRef = useRef(0);
+  /** 空闲看门狗：本次提交的开始时刻、最近一次内核事件时刻（null = 一个都没收到） */
+  const promptStartedAtRef = useRef<number | null>(null);
+  const lastAgentEventAtRef = useRef<number | null>(null);
+  /** 看门狗已经提示过的级别，避免同一状态每 5s 刷一次 */
+  const livenessNotifiedRef = useRef<"none" | "idle" | "stalled">("none");
+  /** 当前阶段镜像：定时器里读，不把 agentPhase 塞进 useEffect 依赖 */
+  const agentPhaseRef = useRef<AgentPhase>(null);
+  /** 事件流连接状态镜像（报错文案要用到「重连过几次」） */
+  const connectionStatusRef = useRef<AgentEventConnectionStatusInfo | null>(null);
   const optimisticUserMessageKeyRef = useRef<string | null>(null);
   const modelSwitchPendingRef = useRef(false);
   const draftKeyAliasesRef = useRef(new Map<string, string>());
@@ -399,6 +411,12 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       reconnectDelayMs: EVENT_STREAM_RECONNECT_DELAY_MS,
       onUnexpectedError: (error) => {
         console.error("Failed to maintain the agent event stream:", error);
+      },
+      /* 断流/重连在界面上原本完全静默（只会一直转圈，分不出「在等待」还是「已断开」）。
+         这里只上报状态，重连逻辑一行未改。 */
+      onStatus: (info) => {
+        connectionStatusRef.current = info;
+        setConnectionStatus(info);
       },
     });
   }
@@ -917,6 +935,10 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     setAgentRunning(false);
     setAgentPhase(null);
     setRetryInfo(null);
+    // 本轮结束：清掉看门狗的计时，下一次提交重新起算
+    promptStartedAtRef.current = null;
+    lastAgentEventAtRef.current = null;
+    livenessNotifiedRef.current = "none";
     dispatch({ type: "end" });
     return wasRunning;
   }, []);
@@ -1132,7 +1154,74 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     agentRunningRef.current = agentRunning;
   }, [agentRunning]);
 
+  useEffect(() => {
+    agentPhaseRef.current = agentPhase;
+  }, [agentPhase]);
+
+  /* ---------- 断流 / 重连状态 → 用户可见 ----------
+     依据《深入理解 AI Agent》ch5 L195：全部自动手段用尽后才暴露错误，
+     并附上已经尝试过的恢复动作。重连期间只报「已断开、正在重试」；
+     startup_error 不在这里报（它由发送失败路径统一展示，避免弹两次）。 */
+  useEffect(() => {
+    if (!connectionStatus) return;
+    if (connectionStatus.phase === "retrying") {
+      // 1s 一次的重连不能每次都弹：只报前两次与每 10 次，给出「已重试几次」的量级
+      const { attempt } = connectionStatus;
+      if (attempt > 2 && attempt % 10 !== 0) return;
+      addNotice({
+        type: "warning",
+        message: `事件流已断开，正在重连（第 ${attempt} 次）· ${connectionStatus.reason}`,
+      });
+      return;
+    }
+    if (connectionStatus.phase === "reconnected") {
+      addNotice({ type: "success", message: connectionStatus.reason });
+    }
+  }, [connectionStatus, addNotice]);
+
+  /* ---------- 空闲看门狗（只报不杀） ----------
+     ch5 L189：流式连接最危险的失败不是断开，而是静默卡死（连接在、数据停）。
+     这里只把现场摆出来——阶段、已等待多久、连接状态——不杀流、不重试，
+     挂起的流依旧交给既有的重连 / 停止按钮。 */
+  useEffect(() => {
+    if (!agentRunning) return;
+    const tick = () => {
+      const startedAt = promptStartedAtRef.current;
+      if (startedAt === null) return;
+      const assessment = assessLiveness({
+        startedAt,
+        lastEventAt: lastAgentEventAtRef.current,
+        now: Date.now(),
+      });
+      if (assessment.state === "fresh") return;
+      // 同一级别只提示一次；已升级到 stalled 就不再回头
+      if (livenessNotifiedRef.current === assessment.state) return;
+      if (livenessNotifiedRef.current === "stalled") return;
+      livenessNotifiedRef.current = assessment.state;
+
+      const phaseLabel = phaseToLabel(agentPhaseRef.current, true) || "处理中";
+      const conn = connectionStatusRef.current;
+      const connectionLabel = conn
+        ? conn.phase === "retrying"
+          ? `重连中（第 ${conn.attempt} 次）`
+          : conn.phase === "reconnected"
+            ? `已恢复（第 ${conn.attempt} 次尝试）`
+            : "连接失败"
+        : "已连接";
+      addNotice({
+        type: "warning",
+        message: assessment.sawAnyEvent
+          ? formatStalledNotice({ assessment, phaseLabel, connectionLabel })
+          : formatNoEventNotice({ assessment, phaseLabel, connectionLabel }),
+      });
+    };
+    const timer = setInterval(tick, LIVENESS_CHECK_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [agentRunning, addNotice]);
+
   const handleAgentEvent = useCallback((event: AgentEvent) => {
+    // 活性信号：任何一条内核事件都算「还活着」（ch5 L189）
+    lastAgentEventAtRef.current = Date.now();
     switch (event.type) {
       case "connected": {
         dispatch({ type: "end" });
@@ -1404,7 +1493,11 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
     promptRunIdRef.current = promptRunId;
     agentRunningRef.current = true;
     setAgentRunning(true);
-    setAgentPhase(isSlashCommandPrompt ? { kind: "running_command" } : { kind: "waiting_model" });
+    // 「已收到输入」：先报正在建立与内核的连接，连上并受理后再推进到等待模型
+    setAgentPhase({ kind: "connecting" });
+    promptStartedAtRef.current = Date.now();
+    lastAgentEventAtRef.current = null;
+    livenessNotifiedRef.current = "none";
     dispatch({ type: "start" });
     pendingScrollToUserRef.current = true;
     setPromptAnchorActive(true);
@@ -1429,6 +1522,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         }
         await ensureEventsConnected(sid);
         promptRequestStarted = true;
+        // 事件流已就绪——阶段从「连接中」推进到「等待模型 / 执行命令」
+        setAgentPhase(isSlashCommandPrompt ? { kind: "running_command" } : { kind: "waiting_model" });
         await sendAgentCommand(sid, {
           type: "prompt",
           message,
@@ -1439,6 +1534,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         sentSessionId = session.id;
         await ensureEventsConnected(session.id);
         promptRequestStarted = true;
+        setAgentPhase(isSlashCommandPrompt ? { kind: "running_command" } : { kind: "waiting_model" });
         await sendAgentCommand(session.id, {
           type: "prompt",
           message,
@@ -1467,7 +1563,19 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           ? prev
           : [...prev.slice(0, optimisticIndex), ...prev.slice(optimisticIndex + 1)];
       });
-      addNotice({ type: "error", message: e instanceof Error ? e.message : String(e) });
+      /* 失败提示必须能定位：卡在哪一步 + 具体原因（错误类型 / 服务端 code / HTTP 状态码）
+         + 当时的关键状态（事件流重连了几次）。以前这里只有 error.message 一行。 */
+      const failedStep = !promptRequestStarted
+        ? "建立事件流 / 启动会话"
+        : "把消息提交给内核";
+      const conn = connectionStatusRef.current;
+      const connNote = conn && conn.attempt > 1
+        ? ` · 事件流此前重连 ${conn.attempt} 次（最近：${conn.reason}）`
+        : "";
+      addNotice({
+        type: "error",
+        message: `发送失败（${failedStep}）：${describeError(e)}${connNote}`,
+      });
       restoreSubmission(message, images, composerDraftKey);
       optimisticUserMessageKeyRef.current = null;
       // Rejection only describes this submission. Another tab or an event we

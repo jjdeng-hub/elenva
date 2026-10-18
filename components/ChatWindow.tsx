@@ -2,7 +2,7 @@
 
 import { ArrowDown, Bot, ChevronRight, GitBranch, Loader2, MessageSquare, MessagesSquare, Search, Wrench } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AgentPhase } from "@/hooks/useAgentSession";
+import { phaseToLabel, type AgentPhase } from "@/lib/agent-phase";
 import { cn } from "@/components/lib/utils";
 import { AssistantMessageView, MessageView, useMemoResults, StreamingIndicator } from "@/components/MessageView";
 import { ChatSkeleton, EmptyState } from "@/components/ui/bits";
@@ -704,21 +704,6 @@ function ScrollTailHelper({
     if (!bottomAnchor.current || !containerRef.current) return;
   }, [bottomAnchor, containerRef]);
   return null;
-}
-
-function phaseToLabel(phase: AgentPhase, running: boolean): string {
-  /* 守卫：phase 与 running 不一致时不能只信 phase。
-     之前只要有 waiting_model 就无条件渲染，一旦出现「phase 残留 + 已经不在运行」
-     就会永久卡着一行「等待模型…」，而此时输入框是发送态（没有停止按钮）——
-     用户看到的是一个既没在跑、又不能中断的死状态。 */
-  if (phase?.kind === "waiting_model") return running ? "等待模型…" : "";
-  if (phase?.kind === "running_command") return "执行命令…";
-  if (phase?.kind === "running_tools") {
-    const active = phase.tools[phase.tools.length - 1];
-    return active ? `工具执行中 · ${active.name}${active.progress ? ` · ${active.progress}` : ""}` : "工具执行中…";
-  }
-  if (running) return "思考中…";
-  return "";
 }
 
 function EmptyChatState({ title }: { title: string }) {

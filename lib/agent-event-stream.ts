@@ -3,6 +3,7 @@ import {
   toClientAgentEvent,
   type AgentEventLike,
 } from "./agent-event-wire";
+import { describeError, diagError, diagTrace } from "./diagnostics";
 
 export interface AgentEventStreamSession {
   readonly isStreaming: boolean;
@@ -26,6 +27,8 @@ export function createAgentEventStream(
   sessionPromise: Promise<AgentEventStreamSession>,
 ): ReadableStream<Uint8Array> {
   let cancelStream: (closeController: boolean) => void = () => {};
+  /** 打开时刻——启动失败时用来报出「等了多久才失败」 */
+  const openedAt = Date.now();
 
   return new ReadableStream<Uint8Array>({
     start(controller) {
@@ -69,6 +72,11 @@ export function createAgentEventStream(
         try {
           const session = await sessionPromise;
           if (closed) return;
+          diagTrace("event-stream", "会话就绪，事件流开始推送", {
+            sessionId,
+            waitMs: Date.now() - openedAt,
+            isStreaming: session.isStreaming,
+          });
 
           const bufferedEvents: AgentEventLike[] = [];
           let snapshotPublished = false;
@@ -100,9 +108,19 @@ export function createAgentEventStream(
           snapshotPublished = true;
         } catch (error) {
           if (closed) return;
+          /* 「连不上」最常见的形态之一：SSE 已开，但会话根本起不来。
+             以前这条只发给浏览器，服务端零记录——出问题时日志里是空的。 */
+          diagError("event-stream", "事件流启动失败（会话未能就绪）", {
+            sessionId,
+            waitMs: Date.now() - openedAt,
+          }, error);
           encode({
             type: "startup_error",
+            stage: "session_start",
+            sessionId,
+            waitMs: Date.now() - openedAt,
             errorMessage: `Failed to start agent: ${errorMessage(error)}`,
+            errorDetail: describeError(error),
           });
           cleanup(true);
         }

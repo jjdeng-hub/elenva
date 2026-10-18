@@ -64,6 +64,7 @@ tools/*.mjs
 !tools/mcp-annotations-selftest.mjs
 !tools/mcp-probe-selftest.mjs
 !tools/identity-selftest.mjs
+!tools/diagnostics-selftest.mjs
 tools/*.log
 tools/rev/
 # 临时截图：可能拍到记忆全文等私有内容

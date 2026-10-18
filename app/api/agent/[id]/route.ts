@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
 import { startAgentSession, getAgentSession, setAgentSessionTools } from "@/lib/agent-runtime";
+import { diagError, diagTrace } from "@/lib/diagnostics";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -10,6 +11,8 @@ export async function POST(
   const { id } = await params;
   let commandType: string | undefined;
   let promptAccepted = false;
+  /** 命令进入处理到返回的耗时——卡住时先看这一项 */
+  const receivedAt = Date.now();
 
   try {
     const body = await req.json() as { type: string; [key: string]: unknown };
@@ -57,11 +60,25 @@ export async function POST(
     });
     const result = await session.send(body);
     promptAccepted = body.type === "prompt";
+    diagTrace("agent-command", "冷启动会话后命令已分发", {
+      sessionId: id,
+      commandType,
+      elapsedMs: Date.now() - receivedAt,
+    });
 
     return NextResponse.json({ success: true, data: result });
   } catch (error) {
+    /* 命令失败（含 prompt 派发失败）此前只回 JSON、服务端不落日志，
+       「发了消息没反应」在日志里查不到任何线索。补上：哪条命令、到哪一步、什么错。 */
+    diagError("agent-command", "命令处理失败", {
+      sessionId: id,
+      commandType: commandType ?? "(解析请求体失败)",
+      promptAccepted,
+      elapsedMs: Date.now() - receivedAt,
+    }, error);
     return NextResponse.json({
       error: error instanceof Error ? error.message : String(error),
+      stage: commandType === "prompt" ? "prompt_dispatch" : "command",
       ...(commandType === "prompt" && !promptAccepted
         ? { code: "prompt_rejected", accepted: false }
         : {}),
