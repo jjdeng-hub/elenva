@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, parseSkillBlock } from "@earendil-works/pi-coding-agent";
 
 /**
  * 技能调用统计 —— 离线扫描全部会话文件。
@@ -8,6 +8,13 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
  * pi 内核在用户消息里以 <skill name="..." location="..."> 块记录技能调用
  * （parseSkillBlock 解析的正是这个格式），因此对 JSONL 的用户消息行做
  * 计数即可得到调用排行，无需内核钩子。
+ *
+ * 2026-10-18（模块 4 R1）：从「字面 includes + 正则计数」改为**真正解析 JSON 行**
+ * + 内核 parseSkillBlock 定位。旧写法有两处误计：
+ *   · 用户在消息里**引用/讨论** skill 块（不在文本起始）也被计入；
+ *   · 非 JSON 的损坏行只要含有字面 `"role":"user"` 就参与计数。
+ * 现在：行 JSON 解析失败直接跳过；且 skill 块必须位于该消息**文本起始**
+ * （parseSkillBlock 的正则就是 `^<skill …>`），位置不对即为引用，不是调用。
  */
 
 export interface SkillUsageReport {
@@ -35,15 +42,6 @@ export interface SkillUsageWindows {
   total30: number;
 }
 
-/**
- * skill 块的落盘双形态：pi 把块拼进用户消息后整体 JSON 序列化写盘，块内引号是**转义**的
- * （`<skill name="x\" location="…\">`，见内核 dist/core/agent-session.js 的 skillBlock 拼装）——
- * 只认未转义引号的老正则对真实会话目录扫出 total=0（2026-10-16 实测，本轮修复的点）；
- * 未转义形态向后兼容早期手工夹具。要求 location= 紧邻跟随，把对话里引用源码的伪调用
- * 误报压到低（toolResult 行 role 不同，本就不在扫描范围）。
- */
-const SKILL_RE = /<skill name=(?:"|\\")([^"\\]+?)(?:"|\\") location=(?:"|\\")/g;
-
 function collectJsonlFiles(dir: string, out: string[]): void {
   let names: string[];
   try {
@@ -69,16 +67,50 @@ export function resetSkillUsageCacheForTest(): void {
   cache = null;
 }
 
-/** 消息行外层对象带 timestamp（pi 会话格式）：`{"type":"message","timestamp":"…"…}` */
-const TIMESTAMP_RE = /"timestamp"\s*:\s*"([^"]+)"/;
-/** 行上拿不到 timestamp 时的口径：退化用会话文件 mtime（近似，宁可粗一点也不丢事件） */
-function lineTimestampMs(line: string, fallbackMs: number): number {
-  const m = TIMESTAMP_RE.exec(line);
-  if (m) {
-    const at = Date.parse(m[1]);
+/** 消息行外层对象带 timestamp（pi 会话格式）：{"type":"message","timestamp":"…",…} */
+function timestampMs(value: unknown, fallbackMs: number): number {
+  if (typeof value === "string") {
+    const at = Date.parse(value);
     if (Number.isFinite(at)) return at;
   }
   return fallbackMs;
+}
+
+/** 用户消息的文本块：content 可能是裸字符串，也可能是 [{type:"text",text}] */
+function textBlocks(content: unknown): string[] {
+  if (typeof content === "string") return [content];
+  if (!Array.isArray(content)) return [];
+  const out: string[] = [];
+  for (const block of content) {
+    if (
+      block !== null &&
+      typeof block === "object" &&
+      (block as { type?: unknown }).type === "text" &&
+      typeof (block as { text?: unknown }).text === "string"
+    ) {
+      out.push((block as { text: string }).text);
+    }
+  }
+  return out;
+}
+
+/**
+ * 取出文本**起始**处的 skill 块名（可链式：一个消息里连着多个 /skill: 调用）。
+ * 用内核自己的 parseSkillBlock —— 它的正则以 `^<skill name="…" location="…">` 开头，
+ * 天然满足「位置不对即引用」的判据，也避免我们与内核格式漂移。
+ * 尾部空白先行去掉：parseSkillBlock 的 `$` 只认输入末尾，消息末尾多一个换行不该让它失配。
+ */
+function leadingSkillNames(text: string): string[] {
+  const names: string[] = [];
+  let cursor = text.replace(/\s+$/, "");
+  for (;;) {
+    const block = parseSkillBlock(cursor);
+    if (!block) break;
+    names.push(block.name);
+    if (!block.userMessage) break;
+    cursor = block.userMessage;
+  }
+  return names;
 }
 
 export function aggregateSkillUsage(): SkillUsageReport {
@@ -107,22 +139,25 @@ export function aggregateSkillUsage(): SkillUsageReport {
       continue;
     }
     for (const line of text.split("\n")) {
-      // 只扫用户消息行——skill 块只出现在用户消息里，避免误匹配
-      if (!line.includes('"role":"user"') && !line.includes('"role": "user"')) continue;
-      for (const match of line.matchAll(SKILL_RE)) {
-        const name = match[1];
-        const atMs = lineTimestampMs(line, modified);
-        counts.set(name, (counts.get(name) ?? 0) + 1);
-        total += 1;
-        if (atMs >= nowMs - WEEK_MS) {
-          days7.set(name, (days7.get(name) ?? 0) + 1);
-          total7 += 1;
+      const entry = parseLine(line);
+      if (!entry) continue;
+      const message = entry.message as { role?: unknown; content?: unknown } | undefined;
+      if (!message || typeof message !== "object" || message.role !== "user") continue;
+      const atMs = timestampMs(entry.timestamp, modified);
+      for (const textBlock of textBlocks(message.content)) {
+        for (const name of leadingSkillNames(textBlock)) {
+          counts.set(name, (counts.get(name) ?? 0) + 1);
+          total += 1;
+          if (atMs >= nowMs - WEEK_MS) {
+            days7.set(name, (days7.get(name) ?? 0) + 1);
+            total7 += 1;
+          }
+          if (atMs >= nowMs - MONTH_MS) {
+            days30.set(name, (days30.get(name) ?? 0) + 1);
+            total30 += 1;
+          }
+          if (modified > (lastUsedAt.get(name) ?? 0)) lastUsedAt.set(name, modified);
         }
-        if (atMs >= nowMs - MONTH_MS) {
-          days30.set(name, (days30.get(name) ?? 0) + 1);
-          total30 += 1;
-        }
-        if (modified > (lastUsedAt.get(name) ?? 0)) lastUsedAt.set(name, modified);
       }
     }
   }
@@ -145,4 +180,16 @@ export function aggregateSkillUsage(): SkillUsageReport {
   };
   cache = { at: Date.now(), value };
   return value;
+}
+
+/** 解析一行会话 JSONL；损坏行（非 JSON）返回 null —— 不再靠字面匹配放行 */
+function parseLine(line: string): { timestamp?: unknown; message?: unknown } | null {
+  if (!line.trim()) return null;
+  try {
+    const parsed: unknown = JSON.parse(line);
+    if (parsed === null || typeof parsed !== "object") return null;
+    return parsed as { timestamp?: unknown; message?: unknown };
+  } catch {
+    return null;
+  }
 }
