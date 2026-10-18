@@ -61,6 +61,10 @@ tools/*.mjs
 !tools/skill-advisor-selftest.mjs
 !tools/model-notes-selftest.mjs
 !tools/tool-risk-bash-selftest.mjs
+!tools/readonly-classifier-selftest.mjs
+!tools/gates-isolated.mjs
+!tools/gates-isolated-selftest.mjs
+!tools/scheduler-runs-selftest.mjs
 !tools/mcp-annotations-selftest.mjs
 !tools/mcp-probe-selftest.mjs
 !tools/identity-selftest.mjs

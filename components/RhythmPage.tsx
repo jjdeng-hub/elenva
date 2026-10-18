@@ -47,6 +47,15 @@ type RunEntry = {
   result: RunResult;
   note?: string;
   durationMs?: number;
+  /** 执行链证据（additive）：工具错误 / 被拦截 / 检查动作，见 lib/schedules.ts */
+  evidence?: {
+    toolErrors: number;
+    blocked: number;
+    checksRan: number;
+    checksFailed: number;
+    lastCheckOk: boolean | null;
+    sample?: string[];
+  };
 };
 
 type ScheduleDto = {
@@ -74,11 +83,27 @@ type ScheduleDto = {
 type UsageSession = { tokens: { total: number }; cost: number; model?: string };
 
 const RESULT_META: Record<RunResult, { label: string; cls: string }> = {
-  ok: { label: "成功", cls: "chip-success" },
+  // `ok` 只表示**会话正常跑完**，不等于任务验收通过（模块 3 安全修复 C）。
+  // 所以标签是「执行结束」而不是「成功」；是否真通过看执行链证据。
+  ok: { label: "执行结束", cls: "" },
   failed: { label: "失败", cls: "chip-danger" },
   skipped: { label: "跳过", cls: "" },
   timeout: { label: "超时", cls: "chip-warn" },
 };
+
+/**
+ * 执行链证据的人话：只描述**观测到的事实**，不下「成功 / 通过」的结论。
+ * 会话正常结束 ≠ 任务验收通过：工具报错、被护栏拦下、压根没跑检查都可能「正常结束」。
+ */
+function evidenceNote(run: RunEntry | undefined): string | null {
+  const evidence = run?.evidence;
+  if (!evidence) return null;
+  const parts: string[] = [];
+  parts.push(evidence.checksRan > 0 ? `检查 ${evidence.checksRan} 次（失败 ${evidence.checksFailed} 次）` : "未跑检查");
+  if (evidence.toolErrors > 0) parts.push(`工具错误 ${evidence.toolErrors} 次`);
+  if (evidence.blocked > 0) parts.push(`被拦截 ${evidence.blocked} 次`);
+  return parts.join(" · ");
+}
 
 // ============================================================================
 // 小工具
@@ -772,7 +797,11 @@ function TaskCard({
             <span className="truncate" title={task.cwd}>
               {basename(task.cwd) || task.cwd}
             </span>
-            {task.lastRun?.note && <span className="truncate text-dim">· {task.lastRun.note}</span>}
+            {(task.lastRun?.note || evidenceNote(task.lastRun)) && (
+              <span className="truncate text-dim">
+                · {[task.lastRun?.note, evidenceNote(task.lastRun)].filter(Boolean).join(" · ")}
+              </span>
+            )}
           </div>
         </div>
 
@@ -839,7 +868,11 @@ function RunHistory({
                     {formatDuration(run.durationMs)}
                   </span>
                 )}
-                {run.note && <span className="min-w-0 flex-1 truncate text-dim">{run.note}</span>}
+                {(run.note || evidenceNote(run)) && (
+                  <span className="min-w-0 flex-1 truncate text-dim">
+                    {[run.note, evidenceNote(run)].filter(Boolean).join(" · ")}
+                  </span>
+                )}
                 {u && (
                   <span className="tabular-nums text-dim">
                     {formatTokens(u.tokens.total)} tok · {formatCost(u.cost)}

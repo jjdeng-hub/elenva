@@ -1,6 +1,12 @@
 import { resolve } from "node:path";
 import { normalizeSlashes } from "./allowed-roots";
+import { isReadOnlyShellCommand } from "./readonly-command";
 import { isEditToolName, isWriteToolName, parseMcpToolName } from "./tool-names";
+
+// 计划模式 / 节律 readonly 档共用的只读 shell 判据已经搬到 `./readonly-command`
+// （结构化白名单 + 保证范围说明）。这里 re-export，既有导入点（host-guardrails-
+// extension）保持不变。
+export { isReadOnlyShellCommand } from "./readonly-command";
 
 /**
  * 工具调用的风险分级。
@@ -68,6 +74,29 @@ const SAFE: ToolRisk = { level: "safe", reason: "", ruleKey: "", ruleLabel: "" }
 const READ_ONLY_TOOLS = new Set([
   "read", "grep", "find", "ls", "glob", "web_search", "web_fetch", "todo_write", "skill_draft",
 ]);
+
+/**
+ * 需要看参数才能定性的只读工具（扩展 / MCP 之外的记忆类工具）。
+ *
+ * 背景（模块 3 · 安全修复）：扩展工具原先一律落到 `classifyToolCall` 的默认分支
+ * （guarded），于是 `memory_find` / `memory_search` / `memory_status(list)` 这些
+ * **纯查询**在「写入」档被要求确认、在计划模式与 readonly 档被直接拦下 —— 勘察类
+ * 任务反而没法查记忆。这里按参数明确放行读形式，写动作（invalidate / restore /
+ * add / replace / remove）仍走默认的 guarded，不扩大任何写权限。
+ */
+function isReadOnlyMemoryToolCall(toolName: string, input?: Record<string, unknown>): boolean {
+  if (toolName === "memory_find" || toolName === "memory_search" || toolName === "session_search") return true;
+  if (toolName === "memory_status") return input?.action === "list";
+  return false;
+}
+
+/**
+ * 这次工具调用是否只读（审批与计划模式/readonly 档共用的**唯一**口径）。
+ * 只读 = 不打扰用户、也不被只读档 / 计划模式拦下。
+ */
+export function isReadOnlyToolCall(toolName: string, input?: Record<string, unknown>): boolean {
+  return READ_ONLY_TOOLS.has(toolName) || isReadOnlyMemoryToolCall(toolName, input);
+}
 
 interface BashRule {
   /** 命中的命令片段（对拆分后的每个片段单独测试） */
@@ -238,7 +267,8 @@ export function classifyToolCall(
   input: Record<string, unknown> | undefined,
   ctx: ToolRiskContext,
 ): ToolRisk {
-  if (READ_ONLY_TOOLS.has(toolName)) return SAFE;
+  // 只读工具（含按参数放行的记忆查询）在任何档位都不打扰用户
+  if (isReadOnlyToolCall(toolName, input)) return SAFE;
   if (toolName === "bash" || toolName === "powershell") {
     const command = typeof input?.command === "string" ? input.command : "";
     if (!command.trim()) return SAFE;
@@ -320,81 +350,15 @@ export function isRuleAllowed(risk: ToolRisk, rules: readonly string[]): boolean
   return rules.includes(risk.ruleKey);
 }
 
-/** 计划模式下禁止的写入/执行类工具（只允许只读勘察） */
-export function isPlanModeBlocked(toolName: string): boolean {
-  if (READ_ONLY_TOOLS.has(toolName)) return false;
+/**
+ * 计划模式下禁止的写入/执行类工具（只允许只读勘察）。
+ *
+ * 与审批判定共用 `isReadOnlyToolCall`：`memory_find` / `memory_search` /
+ * `memory_status(action:"list")` 这类按参数可定的读操作，在计划模式与节律
+ * readonly 档里同样放行（调用方要传 input 才能生效）。
+ */
+export function isPlanModeBlocked(toolName: string, input?: Record<string, unknown>): boolean {
+  if (isReadOnlyToolCall(toolName, input)) return false;
   if (toolName === "present_plan" || toolName === "todo_write") return false;
   return true;
-}
-
-/** 计划模式下放行的只读 git 子命令 */
-const READ_ONLY_GIT_SUBCOMMANDS = new Set([
-  "status", "log", "diff", "show", "branch", "remote", "rev-parse", "describe",
-  "shortlog", "blame", "ls-files", "cat-file", "whatchanged", "grep", "show-ref",
-  "tag", "stash", "worktree", "rev-list", "name-rev",
-]);
-
-/** 计划模式下放行的诊断类命令（不改动文件系统） */
-const READ_ONLY_COMMANDS = new Set([
-  "ls", "dir", "cat", "type", "head", "tail", "wc", "rg", "grep", "find", "fd",
-  "pwd", "echo", "printf", "which", "where", "whereis", "env", "printenv", "date",
-  "whoami", "hostname", "sort", "uniq", "cut", "tr", "jq", "yq", "awk", "sed",
-  "tree", "file", "stat", "du", "df", "basename", "dirname", "realpath", "test",
-  "pytest", "jest", "vitest", "mocha", "tsc", "eslint", "ruff", "mypy",
-]);
-
-/** 计划模式下放行的测试类命令前缀 */
-const READ_ONLY_COMMAND_PREFIXES = [
-  /^npm\s+(test|run\s+test|ls|view|outdated|ping)\b/i,
-  /^pnpm\s+(test|ls|view|outdated|why)\b/i,
-  /^yarn\s+(test|info|why)\b/i,
-  /^bun\s+test\b/i,
-  /^go\s+(test|vet|list|env)\b/i,
-  /^cargo\s+(test|check|tree|metadata)\b/i,
-  /^dotnet\s+(test|build\s+--no-restore)\b/i,
-  /^make\s+\S*test\S*\b/i,
-  /^python3?\s+-c\s+/i,
-  /^node\s+(-e|-p|--version)\b/i,
-];
-
-function isReadOnlyShellSegment(rawSegment: string): boolean {
-  let segment = rawSegment.trim();
-  if (!segment) return true;
-  // 去掉前置的变量赋值（FOO=bar cmd）
-  segment = segment.replace(/^([A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, "");
-  const tokens = segment.split(/\s+/);
-  const command = tokens[0]?.replace(/^[('"\s]+/, "").toLowerCase() ?? "";
-  if (!command) return true;
-  if (command === "cd") {
-    // `cd x` 只是切目录，后半段由外层拆分处理
-    return true;
-  }
-  if (command === "git") {
-    const sub = tokens[1]?.toLowerCase() ?? "";
-    if (!READ_ONLY_GIT_SUBCOMMANDS.has(sub)) return false;
-    // git config 只有读形式才算只读
-    if (sub === "config") return tokens.includes("--get") || tokens.includes("--list") || tokens.includes("-l");
-    return true;
-  }
-  if (command === "stash") return true;
-  if (READ_ONLY_COMMANDS.has(command)) {
-    // sed 只允许显式不落盘的形式（sed -n），否则可能是 sed -i
-    if (command === "sed") return tokens[1]?.startsWith("-n") === true || tokens[1] === "-n";
-    return true;
-  }
-  return READ_ONLY_COMMAND_PREFIXES.some((prefix) => prefix.test(segment));
-}
-
-/**
- * 计划模式下是否可以把这条 shell 命令当作只读勘察放行。
- * 保守优先：带重定向、带 -i、命令不认识，一律不放行。
- */
-export function isReadOnlyShellCommand(command: string): boolean {
-  const trimmed = command.trim();
-  if (!trimmed) return false;
-  // 输出重定向 / 追加重定向 / here-doc
-  if (/[^0-9&]>|>>|<<|\bsed\b[^|;&]*-i\b/i.test(trimmed)) return false;
-  const segments = splitShellSegments(trimmed);
-  if (segments.length === 0) return false;
-  return segments.every(isReadOnlyShellSegment);
 }
