@@ -138,6 +138,10 @@ function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+// 说明：本文件的字段解析一律用 `stringValue(...) ?? 回退`，因此 frontmatter 里写
+// `null`（YAML 的 null）与「没写」等价——都回退到默认值，而不是「清空」。
+// 这与 lib/subagent-templates.ts 的 toProfile（`??` 同理）是**同一口径**，勿把 `null`
+// 当作清空手段；要显式清空请用能表达它的值（如 tools 的 `[]` / `none`）。
 function booleanValue(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }

@@ -31,7 +31,7 @@
 
 import type { AgentMessage as SDKAgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage as SDKAssistantMessage, ImageContent as SDKImageContent, ToolCall as SDKToolCall } from "@earendil-works/pi-ai";
-import { CURRENT_SESSION_VERSION } from "@earendil-works/pi-coding-agent";
+import { CURRENT_SESSION_VERSION, parseSkillBlock } from "@earendil-works/pi-coding-agent";
 
 import type { AgentMessage, AssistantContentBlock, ImageContent } from "../lib/types";
 
@@ -104,4 +104,42 @@ const _imageShape: _imageShapeMatchesSDK = true;
  */
 const _sdkToolCallKeys: Array<keyof SDKToolCall> = ["id", "name", "arguments", "type"];
 
-void [_sessionFormat, _extraRolesKnown, _extraBlocksKnown, _imageShape, _sdkToolCallKeys];
+/* ─────────────── ⑥ 技能块解析（parseSkillBlock）───────────────
+ * `lib/skill-usage.ts` 用内核的 `parseSkillBlock` 把用户消息里的 `<skill …>` 块
+ * 还原成结构化字段。它的**正则**（`^<skill name="…" location="…">…`）就是我们
+ * 「位置不对 = 引用不是调用」的判据来源，属于隐式内核依赖 —— 内核一旦改了块格式
+ * 或返回字段，用量统计会静默错算。这里把「存在 + 字段类型 + 可返回 null」写死。
+ *
+ * 注意：tsc 只能守**类型形态**。运行期行为（正文 / userMessage 的取值、
+ * 非起始位置与缺字段文本确实返回 falsy）由 `tools/pi-surface-runtime-check.mjs`
+ * 在真实内核上断言（已进 CI，与本节同属「升级门」）。
+ */
+type SkillBlockReturn = ReturnType<typeof parseSkillBlock>;
+/** 返回值必须包含 `null`（「文本里没有技能块」靠它表达） */
+const _skillBlockMayBeNull: SkillBlockReturn = null;
+/** 标准形态解析出的四个字段：前三个必须是非可选 string，userMessage 可缺省 */
+const _skillBlockShape: NonNullable<SkillBlockReturn> = {
+  name: "demo",
+  location: "/tmp/demo/SKILL.md",
+  content: "body",
+  userMessage: undefined,
+};
+const _skillBlockFields: [string, string, string, string | undefined] = [
+  _skillBlockShape.name,
+  _skillBlockShape.location,
+  _skillBlockShape.content,
+  _skillBlockShape.userMessage,
+];
+
+/* ─────────────── ⑦ MCP 运行时形态（拦住内核内部布局漂移）───────────────
+ * `lib/mcp-probe.ts` 走**非公开面**：`getPackageDir()` + `dist/extensions/mcp/runtime.js`
+ * 动态 import，依赖 `McpServerConnection` / `createDefaultTransport` / `McpOAuthCredentialStore`
+ * 三个导出。这个路径不在 exports map 里，tsc **看不见**（mcp-probe 自己声明了 `McpRuntimeModule`
+ * 兜底），所以只能运行期断言 —— 在 `tools/pi-surface-runtime-check.mjs`（已进 CI）：
+ * 按同样路径动态 import，缺任一导出即红，报「内核形态漂移 → 请按 docs/pi-upgrade.md 复核」。
+ *
+ * 本段有意不做类型断言（做不了，不是漏做）；升级内核时跑那支运行期门即可。
+ */
+const _mcpRuntimeGate = "tools/pi-surface-runtime-check.mjs";
+
+void [_sessionFormat, _extraRolesKnown, _extraBlocksKnown, _imageShape, _sdkToolCallKeys, _skillBlockMayBeNull, _skillBlockFields, _mcpRuntimeGate];

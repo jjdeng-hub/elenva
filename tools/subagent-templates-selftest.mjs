@@ -149,6 +149,39 @@ check("toProfile：tools 被覆盖时整组替换；显式 undefined 视为未�
   assert.equal(fallback.displayName, t.displayName);
 });
 
+// S4：`null` 与 `undefined` 语义锁定。toProfile 用 `??` 判覆盖 → 两者都表示「未覆盖、
+// 继承模板」，而**不是**「清空」。断言打在真实 toProfile 产物的字段上，防止以后有人
+// 把 `??` 改成 `in`／`hasOwnProperty`（那会把 null 变成清空）而无人察觉。
+check("toProfile：null 与 undefined 同义——均落回模板继承（不是清空）", () => {
+  const t = getSubagentTemplate("verifier");
+  const withNull = toProfile(t, {
+    name: null, displayName: null, description: null, systemPrompt: null, tools: null,
+    loadSkills: null, loadExtensions: null, inheritContext: null, runInBackground: null,
+    enabled: null, model: null, thinking: null, maxTurns: null,
+  });
+  assert.equal(withNull.name, t.id, "name=null 应继承模板 id");
+  assert.equal(withNull.displayName, t.displayName);
+  assert.equal(withNull.description, t.description);
+  assert.equal(withNull.systemPrompt, t.systemPrompt);
+  assert.deepEqual(withNull.tools, t.tools, "tools=null 应继承模板工具集");
+  assert.equal(withNull.loadSkills, t.loadSkills);
+  assert.equal(withNull.loadExtensions, t.loadExtensions);
+  assert.equal(withNull.inheritContext, t.inheritContext);
+  assert.equal(withNull.runInBackground, t.runInBackground);
+  assert.equal(withNull.enabled, t.enabled);
+  assert.equal(withNull.model, undefined);
+  assert.equal(withNull.thinking, undefined);
+  assert.equal(withNull.maxTurns, t.maxTurns);
+
+  const withUndefined = toProfile(t, { displayName: undefined, tools: undefined, maxTurns: undefined });
+  assert.equal(withUndefined.displayName, t.displayName);
+  assert.deepEqual(withUndefined.tools, t.tools);
+  assert.equal(withUndefined.maxTurns, t.maxTurns);
+
+  // 「显式清空」必须另有表达：tools 的 [] 才是真清空（null 做不到）
+  assert.deepEqual(toProfile(t, { tools: [] }).tools, [], "tools=[] 才是显式清空");
+});
+
 check("toProfile：name 去空白；空串回落到模板 id", () => {
   const t = getSubagentTemplate("auditor");
   assert.equal(toProfile(t, { name: "  my-agent  " }).name, "my-agent");

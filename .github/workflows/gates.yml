@@ -25,8 +25,10 @@ jobs:
         run: npm ci
       - name: 类型门（tsc）
         run: node ./node_modules/typescript/bin/tsc --noEmit
-      - name: 用法面探针
+      - name: 用法面探针（类型）
         run: node ./node_modules/typescript/bin/tsc -p tools/tsconfig.json
+      - name: 内核形态运行期门（技能块解析 / MCP 运行时导出）
+        run: node tools/pi-surface-runtime-check.mjs
       - name: 样式收敛（应 0 改动）
         run: |
           python3 tools/style-converge.py
@@ -54,6 +56,8 @@ jobs:
           node extensions/elenva-compact/selftest.mjs
       - name: 技能用量口径回归（R1 解析加固 / R2 覆盖 read 路径）
         run: node tools/skill-usage-selftest.mjs
+      - name: 子代理模板与只读语义自检
+        run: node tools/subagent-templates-selftest.mjs
       - name: 生产构建
         run: npm run build
       - name: 模型路由回归（无 cwd 不得 403）
