@@ -13,6 +13,7 @@ import type {
   PrepareNextTurnContext,
 } from "@earendil-works/pi-agent-core";
 import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
+import type { BeforeToolCallHookLike } from "./subagent-readonly-guard";
 
 // Mirrors the SDK's `ExtensionMode` union. We can't import it — the package root
 // doesn't re-export `ExtensionMode` (unlike `InputSource`, imported above).
@@ -171,6 +172,12 @@ export interface AgentSessionLike {
       context: PrepareNextTurnContext,
       signal?: AbortSignal,
     ) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
+    /**
+     * 工具调用前钩子。内核 `_installAgentToolHooks`（`dist/core/agent-session.js:309`）
+     * 已把它挂到扩展 `tool_call` 派发上；只读子代理护栏在此**包一层**而不是覆盖
+     * （见 `lib/subagent-readonly-guard.ts`）。契约同 SDK 的 `ToolCallEventResult`。
+     */
+    beforeToolCall?: BeforeToolCallHookLike;
   };
   readonly extensionRunner: ExtensionRunnerLike;
   readonly promptTemplates: readonly PromptTemplateLike[];

@@ -63,6 +63,7 @@ tools/*.mjs
 !tools/model-notes-selftest.mjs
 !tools/tool-risk-bash-selftest.mjs
 !tools/readonly-classifier-selftest.mjs
+!tools/subagent-readonly-guard-selftest.mjs
 !tools/gates-isolated.mjs
 !tools/gates-isolated-selftest.mjs
 !tools/scheduler-runs-selftest.mjs
