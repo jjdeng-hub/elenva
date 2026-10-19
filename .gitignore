@@ -62,6 +62,7 @@ tools/*.mjs
 !tools/skill-usage-selftest.mjs
 !tools/model-notes-selftest.mjs
 !tools/tool-risk-bash-selftest.mjs
+!tools/host-guard-parity-selftest.mjs
 !tools/pi-surface-runtime-check.mjs
 !tools/readonly-classifier-selftest.mjs
 !tools/subagent-readonly-guard-selftest.mjs
