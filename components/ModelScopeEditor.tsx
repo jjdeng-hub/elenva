@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { toast } from "@/components/ui/dialog";
 import { useModelNotes } from "@/hooks/useModelNotes";
+import { failingModelNote, useModelHealth } from "@/hooks/useModelHealth";
 
 /** 与 lib/model-notes.ts 的 MAX_NOTE_LENGTH 一致（客户端不能运行时导入该文件——下半有 node:fs）。 */
 const NOTE_MAX = 200;
@@ -80,6 +81,8 @@ export function ModelScopeEditor() {
 
   /* 模型备注：每模型一条自由文本（擅长什么 / 贵不贵），行内展示 + 小铅笔内联编辑。 */
   const { notes, save: saveNote } = useModelNotes();
+  /* 健康度：模型库里也要能看见「这个模型近期有故障」，而不是勾了才发现（模块 6 修复轮 C）。 */
+  const { health } = useModelHealth();
   const [editingRef, setEditingRef] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -319,7 +322,7 @@ export function ModelScopeEditor() {
               <div className="flex items-center gap-2 py-1">
                 <span className="label-micro uppercase text-dim">{provider}</span>
                 <span className="text-[11px] text-dim">
-                  {list.filter((m) => selectedRefs.has(refOf(m))).length}/{list.length}
+                  {list.filter((m) => selectedRefs.has(refOf(m))).length}/{list.length} 可选
                 </span>
                 <button
                   onClick={() => {
@@ -341,6 +344,7 @@ export function ModelScopeEditor() {
                 const on = selectedRefs.has(ref);
                 const isDefault = ref === defaultRef;
                 const note = notes[ref]?.note;
+                const failing = health[ref]?.status === "failing";
                 const editing = editingRef === ref;
                 return (
                   <div key={ref} className="group rounded-md t-fast hover:bg-hover">
@@ -369,6 +373,11 @@ export function ModelScopeEditor() {
                             </span>
                           )}
                         </span>
+                        {failing && (
+                          <span className="chip chip-danger shrink-0" title={`近期有故障：${failingModelNote(health[ref])}`}>
+                            有故障
+                          </span>
+                        )}
                         {isDefault && <span className="chip chip-accent shrink-0">默认</span>}
                         <span className="shrink-0 font-mono text-[11px] text-dim">{m.id}</span>
                       </button>

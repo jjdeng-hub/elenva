@@ -2,9 +2,10 @@
 
 import { Check, ChevronDown, Cpu, Loader2, RefreshCw, Star, Zap } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "@/components/ui/dialog";
+import { dialogConfirm, toast } from "@/components/ui/dialog";
 import { cn } from "@/components/lib/utils";
 import { useModelNotes } from "@/hooks/useModelNotes";
+import { failingModelNote, useModelHealth } from "@/hooks/useModelHealth";
 import type { ThinkingLevelOption } from "@/hooks/useAgentSession";
 
 type ModelEntry = { id: string; name: string; provider: string };
@@ -56,6 +57,8 @@ export function ModelPicker({
   const ref = useRef<HTMLDivElement | null>(null);
   // 备注只在菜单真打开时才拉：这个组件在聊天页常驻，不开菜单不必多一个请求。
   const { notes } = useModelNotes({ enabled: open });
+  // 健康度同理懒加载：坏模型（status=failing）在选择器里要看得见，而不是静默可选。
+  const { health } = useModelHealth({ enabled: open });
 
   const loadDefaults = useCallback(() => {
     fetch("/api/pi-settings", { cache: "no-store" })
@@ -167,6 +170,7 @@ export function ModelPicker({
                   const key = `${m.provider}/${m.id}`;
                   const active = key === currentKey;
                   const note = notes[key]?.note;
+                  const failing = health[key]?.status === "failing";
                   return (
                     <button
                       key={key}
@@ -188,6 +192,14 @@ export function ModelPicker({
                           </span>
                         )}
                       </span>
+                      {failing && (
+                        <span
+                          className="chip chip-danger shrink-0"
+                          title={`近期有故障：${failingModelNote(health[key])}`}
+                        >
+                          有故障
+                        </span>
+                      )}
                       {active && <Check size={14} className="shrink-0" />}
                     </button>
                   );
@@ -209,6 +221,18 @@ export function ModelPicker({
               ) : (
                 <button
                   onClick={async () => {
+                    /* 把有故障的模型设为启动默认要过一道确认：健康面板的数据就在这，
+                       不能让「这个模型坏了」与「我要用这个」之间零联动。 */
+                    const summary = health[`${displayModel.provider}/${displayModel.modelId}`];
+                    if (summary?.status === "failing") {
+                      const ok = await dialogConfirm({
+                        title: "这个模型近期有故障",
+                        message: `把「${displayModel.modelId}」设为启动默认后，所有新会话都会用它。\n${failingModelNote(summary)}\n\n确定继续吗？`,
+                        confirmText: "仍要设为默认",
+                        danger: true,
+                      });
+                      if (!ok) return;
+                    }
                     setSavingDefault(true);
                     try {
                       const body: Defaults = {
@@ -219,7 +243,7 @@ export function ModelPicker({
                       const res = await fetch("/api/pi-settings", {
                         method: "PUT",
                         headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify(body),
+                        body: JSON.stringify({ ...body, ...(summary?.status === "failing" ? { confirmUnhealthy: true } : {}) }),
                       });
                       const d = (await res.json()) as { error?: string };
                       if (!res.ok) throw new Error(d.error || "保存失败");

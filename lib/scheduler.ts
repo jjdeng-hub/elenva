@@ -230,7 +230,12 @@ async function startTriggeredRun(task: ScheduleTask, options: TriggerOptions): P
 
   let session: AgentSessionWrapper;
   let realSessionId: string;
-  const launchOptions = { ...(task.model ? { initialModel: task.model } : {}) };
+  /* 节律任务是服务端无人值守自动起的会话：`task.model` 只是「这次跑用哪个模型」，
+     不是用户的选型动作。关掉持久化，避免静默改掉全局启动默认。 */
+  const launchOptions = {
+    ...(task.model ? { initialModel: task.model } : {}),
+    persistStartupPreferences: false,
+  };
   try {
     if (sessionLauncherForTest) {
       ({ session, realSessionId } = await sessionLauncherForTest(task.cwd, launchOptions));

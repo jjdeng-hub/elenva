@@ -97,6 +97,10 @@ function PiSettingsSection() {
   const [maxRetries, setMaxRetries] = useState(3);
   const [cacheWarming, setCacheWarming] = useState<"off" | "streaming" | "idle">("streaming");
   const [toolSelect, setToolSelect] = useState<ToolPreset | "pi-default">("pi-default");
+  /* 启动默认模型（defaultProvider/defaultModel）：只读展示 + 「重置为自动选择」入口。
+     改选走聊天里的模型选择器 / 模型页；这里只管清掉被粘住的默认。 */
+  const [startupDefault, setStartupDefault] = useState<{ provider?: string; model?: string }>({});
+  const [resettingDefault, setResettingDefault] = useState(false);
 
   useEffect(() => {
     fetch("/api/pi-settings", { cache: "no-store" })
@@ -114,6 +118,10 @@ function PiSettingsSection() {
         setRetryEnabled(d.settings.retry?.enabled ?? true);
         setMaxRetries(d.settings.retry?.maxRetries ?? 3);
         setCacheWarming(d.settings.cacheWarming ?? "streaming");
+        setStartupDefault({
+          provider: d.settings.defaultProvider,
+          model: d.settings.defaultModel,
+        });
         if (d.settings.defaultTools) {
           const names = [...d.settings.defaultTools].sort().join(",");
           const match = TOOL_PRESET_VALUES.find((p) => getToolNamesForPreset(p).sort().join(",") === names);
@@ -123,6 +131,27 @@ function PiSettingsSection() {
       .catch(() => toast("读取 Pi 设置失败"))
       .finally(() => setLoading(false));
   }, []);
+
+  /** 重置为自动选择：删掉 defaultProvider/defaultModel/defaultThinkingLevel 三个键，
+   *  新会话回到「按 enabledModels / 可用性自动挑」——此前只有手工改 settings.json 一条路。 */
+  const resetStartupDefault = async () => {
+    setResettingDefault(true);
+    try {
+      const res = await fetch("/api/pi-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ defaultProvider: null, defaultModel: null, defaultThinkingLevel: null }),
+      });
+      const d = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(d.error || `重置失败（HTTP ${res.status}）`);
+      setStartupDefault({});
+      toast("已重置为自动选择，新会话生效");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setResettingDefault(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -178,6 +207,30 @@ function PiSettingsSection() {
         </div>
       ) : (
         <div className="divide-y divide-line-soft">
+          <Field
+            label="启动默认模型"
+            hint="写入 settings.json 的 defaultProvider/defaultModel，所有新会话的落选；聊天里选模型会更新它。重置后按已启用模型自动挑。"
+          >
+            <div className="flex items-center gap-2">
+              <span className="truncate font-mono text-[12px] text-dim">
+                {startupDefault.provider && startupDefault.model
+                  ? `${startupDefault.provider}/${startupDefault.model}`
+                  : "自动选择"}
+              </span>
+              {(startupDefault.provider || startupDefault.model) && (
+                <button
+                  onClick={() => void resetStartupDefault()}
+                  disabled={resettingDefault}
+                  data-testid="reset-startup-default"
+                  title="删除 defaultProvider/defaultModel/defaultThinkingLevel，新会话回到自动选择"
+                  className="btn btn-sm btn-ghost shrink-0"
+                >
+                  {resettingDefault ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                  重置为自动选择
+                </button>
+              )}
+            </div>
+          </Field>
           <Field label="插话送达模式（steeringMode）" hint="all：当前回合工具结束后一次送达全部；one-at-a-time：每回合一条">
             <select
               value={form.steeringMode}

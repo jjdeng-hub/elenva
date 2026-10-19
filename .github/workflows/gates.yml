@@ -68,6 +68,8 @@ jobs:
           node tools/skill-advisor-selftest.mjs
       - name: 子代理模板与只读语义自检
         run: node tools/subagent-templates-selftest.mjs
+      - name: 启动默认写入护栏（三条路径 / 写前备份 / 坏默认拦截 / 重置）
+        run: node tools/model-default-persist-selftest.mjs
       - name: 生产构建
         run: npm run build
       - name: 模型路由回归（无 cwd 不得 403）

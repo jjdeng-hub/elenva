@@ -169,7 +169,11 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
                       <span className="shrink-0 text-[12px] font-medium text-fg">{p.label}</span>
                       {/* 厂商 id 是要核对的内容（对错一字之差就接不上），抬到 12px */}
                       <span className="truncate font-mono text-[12px] text-dim">{p.id}</span>
-                      <span className="chip shrink-0">{p.modelCount} 模型</span>
+                      {/* 这个数是**内置目录**里的模型数，与模型库组头的「N/M 可选」是两个不同集合
+                          （可选集含 models.json / 目录外的模型），写清口径避免当成同一个数出错。 */}
+                      <span className="chip shrink-0" title="pi 内置目录中该厂商的模型数；模型库组头的「N/M 可选」是包含自定义 Provider 的可选集">
+                        内置 {p.modelCount} 模型
+                      </span>
                     </button>
                     {(p.auth || p.envSet) && (
                       <span className={cn("chip shrink-0", badgeCls(p))}>
@@ -318,15 +322,35 @@ function ModelHealthSection() {
     load();
   }, [load]);
 
-  /** 走既有默认模型设置链（/api/pi-settings → settings.json 的 defaultProvider/defaultModel） */
+  /** 走既有默认模型设置链（/api/pi-settings → settings.json 的 defaultProvider/defaultModel）
+   *  服务端对 `status=failing` 的模型回 409（不静默接受）；这里弹一次确认后再带
+   *  `confirmUnhealthy: true` 重试——「这个模型坏了」与「我要设为默认」之间要有反应。 */
   const setDefault = async (row: ModelHealthRow) => {
     setSavingKey(row.key);
     try {
-      const res = await fetch("/api/pi-settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ defaultProvider: row.provider, defaultModel: row.model }),
-      });
+      const put = (confirmUnhealthy: boolean) =>
+        fetch("/api/pi-settings", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            defaultProvider: row.provider,
+            defaultModel: row.model,
+            ...(confirmUnhealthy ? { confirmUnhealthy: true } : {}),
+          }),
+        });
+      let res = await put(false);
+      if (res.status === 409) {
+        const d = (await res.json().catch(() => ({}))) as { error?: string; code?: string };
+        if (d.code !== "unhealthy_model") throw new Error(d.error || `保存失败（HTTP ${res.status}）`);
+        const ok = await dialogConfirm({
+          title: "这个模型近期有故障",
+          message: `把「${row.model}」设为启动默认后，所有新会话都会用它。\n${d.error ?? ""}\n\n确定继续吗？`,
+          confirmText: "仍要设为默认",
+          danger: true,
+        });
+        if (!ok) return;
+        res = await put(true);
+      }
       const d = (await res.json()) as {
         error?: string;
         settings?: { defaultProvider?: string; defaultModel?: string };
