@@ -60,6 +60,8 @@ jobs:
           node extensions/elenva-todo/selftest.mjs
           node extensions/elenva-worklog/selftest.mjs
           node extensions/elenva-compact/selftest.mjs
+      - name: 扩展完整性巡检（静态依赖：vendor 等在否）
+        run: node tools/extension-integrity-selftest.mjs
       - name: 技能用量口径回归（R1 解析加固 / R2 覆盖 read 路径 / 归因）
         run: |
           node tools/skill-usage-selftest.mjs

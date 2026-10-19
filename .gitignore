@@ -61,6 +61,8 @@ tools/*.mjs
 !tools/skill-advisor-selftest.mjs
 !tools/skill-usage-selftest.mjs
 !tools/model-notes-selftest.mjs
+!tools/extension-integrity-check.mjs
+!tools/extension-integrity-selftest.mjs
 !tools/tool-risk-bash-selftest.mjs
 !tools/host-guard-parity-selftest.mjs
 !tools/pi-surface-runtime-check.mjs
