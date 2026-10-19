@@ -1,13 +1,13 @@
 "use client";
 
-import { Check, Cpu, Download, KeyRound, Loader2, RefreshCw, Save, ShieldCheck, Star, X } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Cpu, Download, KeyRound, Loader2, RefreshCw, Save, ShieldCheck, Star, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { dialogConfirm, dialogPrompt, toast } from "@/components/ui/dialog";
 import { relTime } from "@/lib/format";
 import { EmptyState, PageHeader, Skeleton } from "@/components/ui/bits";
-import { ModelScopeEditor } from "@/components/ModelScopeEditor";
+import { ModelScopeEditor, type ModelScopeSummary } from "@/components/ModelScopeEditor";
 import { ModelSetupDialog } from "@/components/ModelSetupDialog";
 
 type ProviderConfig = { baseUrl?: string; apiKey?: string; [k: string]: unknown };
@@ -117,10 +117,14 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
     const rank = (p: ProviderAuthStatus) => (p.auth ? 0 : p.envSet ? 1 : 2);
     return rank(a) - rank(b) || a.label.localeCompare(b.label);
   });
-  const filtered = query.trim()
-    ? sorted.filter((p) => `${p.id} ${p.label}`.toLowerCase().includes(query.trim().toLowerCase()))
-    : sorted;
   const configuredCount = providers.filter((p) => p.auth || p.envSet).length;
+  const unconfiguredCount = providers.length - configuredCount;
+  /** 常态只列已配置的厂商：42 个里通常只有 2 个有凭据，剩下 40 行是噪声。
+   *  与 VS Code 扩展视图同构 —— 默认显示「已安装」，搜索才出全部。 */
+  const searching = query.trim().length > 0;
+  const visible = searching
+    ? sorted.filter((p) => `${p.id} ${p.label}`.toLowerCase().includes(query.trim().toLowerCase()))
+    : sorted.filter((p) => p.auth || p.envSet);
 
   const badgeCls = (p: ProviderAuthStatus) =>
     p.auth ? "chip-success" : p.envSet ? "chip-accent" : "";
@@ -153,11 +157,18 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
               className="h-8 w-full rounded-md border border-line bg-panel-2 px-2.5 text-[12px] text-fg outline-none focus:border-accent/50"
             />
           </div>
-          <div className="max-h-[26rem] overflow-y-auto px-4 py-3">
-            {filtered.map((p) => {
+          {/* 常态不设 max-h：只有 2 个厂商配了凭据时，卡片就该只有 2 行高。
+              旧的固定 max-h-[26rem] 叠在双列 grid 的拉伸上，才会出现「内容少了卡片不收缩」。
+              只有搜索态才给上限，避免一次命中 30 个厂商把卡片撑成一屏。 */}
+          <div className={cn("px-4 py-3", searching && "max-h-[26rem] overflow-y-auto")}>
+            {visible.map((p) => {
               const open = expanded === p.id;
               return (
-                <div key={p.id} className="border-t border-line-soft py-2 first:border-t-0 first:pt-0">
+                <div
+                  key={p.id}
+                  data-testid="provider-row"
+                  className="border-t border-line-soft py-2 first:border-t-0 first:pt-0"
+                >
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => {
@@ -250,8 +261,22 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
                 </div>
               );
             })}
-            {filtered.length === 0 && <div className="py-3 text-[12px] text-dim">没有匹配的厂商</div>}
+            {visible.length === 0 && (
+              <div className="py-3 text-[12px] text-dim">
+                {searching
+                  ? "没有匹配的厂商"
+                  : "还没有配置任何厂商 —— 在上方搜索厂商名添加，或点右上「接入模型」。"}
+              </div>
+            )}
           </div>
+          {!searching && unconfiguredCount > 0 && (
+            <div
+              data-testid="provider-collapsed-note"
+              className="border-t border-line-soft px-4 py-2 text-[11px] text-dim"
+            >
+              其余 {unconfiguredCount} 个未配置厂商已收起 —— 在上方搜索厂商名即可添加。
+            </div>
+          )}
         </>
       )}
     </Card>
@@ -292,9 +317,20 @@ function formatSuccessRate(rate: number): string {
   return pct >= 99.95 ? "100%" : `${pct.toFixed(1)}%`;
 }
 
-function ModelHealthSection() {
+function ModelHealthSection({
+  failingCount,
+  onDefaultChanged,
+}: {
+  /** 状态条算好的「库内有故障的模型数」；这里只负责展示，不再自算一份（匹配口径见 lib/model-health-match.ts） */
+  failingCount: number;
+  /** 「设为默认」成功后回传 `provider/model`，让模型库行上的「默认」标记跟着走 */
+  onDefaultChanged?: (ref: string) => void;
+}) {
   const [report, setReport] = useState<ModelHealthReport | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+  /** 常态折叠：健康数据已经下沉到模型行，这里退成一行摘要，点开才拉完整明细 */
+  const [expanded, setExpanded] = useState(false);
   const [defaults, setDefaults] = useState<{ defaultProvider?: string; defaultModel?: string }>({});
   const [savingKey, setSavingKey] = useState<string | null>(null);
 
@@ -315,12 +351,14 @@ function ModelHealthSection() {
       setReport(null);
     } finally {
       setLoading(false);
+      setLoaded(true);
     }
   }, []);
 
+  /* 折叠时不请求：完整明细只在展开的那一刻拉（服务端 60s 缓存，反复展开不重复扫盘） */
   useEffect(() => {
-    load();
-  }, [load]);
+    if (expanded && !loaded && !loading) void load();
+  }, [expanded, loaded, loading, load]);
 
   /** 走既有默认模型设置链（/api/pi-settings → settings.json 的 defaultProvider/defaultModel）
    *  服务端对 `status=failing` 的模型回 409（不静默接受）；这里弹一次确认后再带
@@ -357,6 +395,7 @@ function ModelHealthSection() {
       };
       if (!res.ok) throw new Error(d.error || `保存失败（HTTP ${res.status}）`);
       setDefaults(d.settings ?? { defaultProvider: row.provider, defaultModel: row.model });
+      onDefaultChanged?.(`${row.provider}/${row.model}`);
       toast(`已将 ${row.model} 设为启动默认，新会话生效`);
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e));
@@ -366,21 +405,43 @@ function ModelHealthSection() {
   };
 
   const models = report?.models ?? [];
-  const failingCount = models.filter((m) => m.status === "failing").length;
 
   return (
-    <Card testId="model-health" className="mt-5">
+    <Card testId="model-health">
       <CardHeader>
         <CardTitle>健康 · 近 14 天</CardTitle>
         <span className="text-[11px] text-dim">
           来源：本机会话记录（~/.pi/agent/sessions） · 60 秒缓存
           {failingCount > 0 ? ` · ${failingCount} 个模型有故障` : ""}
         </span>
-        <button onClick={() => void load()} disabled={loading} className="btn btn-sm btn-ghost ml-auto">
-          {loading ? <Loader2 size={12} className="anim-spin" /> : <RefreshCw size={12} />} 刷新
-        </button>
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
+          {expanded && (
+            <button onClick={() => void load()} disabled={loading} className="btn btn-sm btn-ghost">
+              {loading ? <Loader2 size={12} className="anim-spin" /> : <RefreshCw size={12} />} 刷新
+            </button>
+          )}
+          <button
+            onClick={() => setExpanded((v) => !v)}
+            data-testid="model-health-toggle"
+            aria-expanded={expanded}
+            className="btn btn-sm btn-ghost"
+          >
+            {expanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+            {expanded ? "收起明细" : "展开明细"}
+          </button>
+        </div>
       </CardHeader>
 
+      {/* 健康数据的常住处是**模型行右侧那颗故障标**，这里只留一行说明；
+          完整明细（含「设为默认」）点开才看，它才不再霸占半屏。 */}
+      {!expanded && (
+        <div className="px-4 py-2.5 text-[12px] leading-relaxed text-dim">
+          故障已标在对应模型行 · 展开看完整明细（成功率 / 失败次数 / 最近错误）
+        </div>
+      )}
+
+      {expanded && (
+        <div data-testid="model-health-detail">
       {loading && (
         <div aria-busy="true" aria-label="加载模型健康度" className="flex flex-col">
           {Array.from({ length: 4 }).map((_, i) => (
@@ -453,7 +514,87 @@ function ModelHealthSection() {
         同一轮自动重试会在记录里各计一次（被重试接管的失败已单独标注）；用户主动中断不计入。
         未列延迟：会话记录里没有可归因到 provider 的耗时字段，宁缺勿假。
       </div>
+        </div>
+      )}
     </Card>
+  );
+}
+
+/* ---------------- 顶部状态条（变体 C 新增）：先回答「跑的是什么 / 选了多少 / 坏没坏」 ---------------- */
+
+/** 首帧占位：真值由模型库汇报上来（只此一处取数，见 ModelScopeSummary 的注释） */
+const EMPTY_SCOPE_SUMMARY: ModelScopeSummary = {
+  loading: true,
+  error: null,
+  total: 0,
+  selected: 0,
+  scoped: false,
+  failing: 0,
+  defaultRef: null,
+};
+
+function ModelStatusBar({
+  summary,
+  failingOnly,
+  onToggleFailingOnly,
+}: {
+  summary: ModelScopeSummary;
+  failingOnly: boolean;
+  onToggleFailingOnly: () => void;
+}) {
+  const pending = summary.loading && summary.total === 0;
+  /* 只显示模型名（provider 在故障标 / 展开面板里可见），状态条要的是一眼可读 */
+  const defaultId = summary.defaultRef ? summary.defaultRef.slice(summary.defaultRef.indexOf("/") + 1) : "";
+  return (
+    <section
+      data-testid="model-status-bar"
+      className="rounded-card border border-line bg-panel px-4 py-3"
+    >
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-muted">
+        <span className="flex min-w-0 items-baseline gap-1.5">
+          <span className="shrink-0 text-dim">默认</span>
+          {defaultId ? (
+            <span className="truncate font-mono text-[12px] text-fg" title={summary.defaultRef ?? defaultId}>
+              {defaultId}
+            </span>
+          ) : (
+            <span className="text-dim">{pending ? "读取中…" : "自动选择"}</span>
+          )}
+        </span>
+        <span className="flex items-baseline gap-1.5">
+          <span className="text-dim">已选模型</span>
+          {pending ? (
+            <span className="text-dim">读取中…</span>
+          ) : (
+            <span className="tabular-nums text-fg">
+              {summary.selected}
+              <span className="text-dim"> / {summary.total}</span>
+            </span>
+          )}
+        </span>
+        {summary.failing > 0 ? (
+          <span className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggleFailingOnly}
+              aria-pressed={failingOnly}
+              data-testid="status-failing-toggle"
+              title={failingOnly ? "再点一次回到全部模型" : "只看有故障的模型（库内匹配得上的）"}
+              className={cn(
+                "chip chip-danger cursor-pointer t-fast hover:bg-danger/15",
+                failingOnly && "border-danger/60",
+              )}
+            >
+              有故障 {summary.failing} 个{failingOnly ? " · 只看这些" : ""}
+            </button>
+            <span className="text-[11px] text-dim">已标在对应模型行</span>
+          </span>
+        ) : (
+          !pending && <span className="text-[12px] text-dim">近 14 天没有故障模型</span>
+        )}
+        {summary.error && <span className="text-[12px] text-danger">模型库加载失败：{summary.error}</span>}
+      </div>
+    </section>
   );
 }
 
@@ -464,6 +605,15 @@ export function ModelsPage() {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  /* 模型库汇报上来的选型侧摘要（状态条用；不再向 /api/models 要第二遍） */
+  const [library, setLibrary] = useState<ModelScopeSummary>(EMPTY_SCOPE_SUMMARY);
+  /* 状态条「有故障 N 个」点开：模型库只看有故障的行 */
+  const [failingOnly, setFailingOnly] = useState(false);
+  /* 两张高级卡常态折成一行（变体 C：高级用法不该与日常操作同级） */
+  const [customOpen, setCustomOpen] = useState(false);
+  const [catalogOpen, setCatalogOpen] = useState(false);
+  /* 健康面板里改过启动默认时，同步模型库行上的「默认」标记 */
+  const [defaultRefOverride, setDefaultRefOverride] = useState<string | null>(null);
 
   // catalog 搜索
   const [catQuery, setCatQuery] = useState("");
@@ -610,6 +760,15 @@ export function ModelsPage() {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="page-col py-6">
+        {/* 状态条（变体 C 新增）：先回答「跑的是什么 / 选了多少 / 坏没坏」，再往下才是可操作项 */}
+        <div className="mb-5">
+          <ModelStatusBar
+            summary={library}
+            failingOnly={failingOnly}
+            onToggleFailingOnly={() => setFailingOnly((v) => !v)}
+          />
+        </div>
+
         <PageHeader
           icon={<Cpu size={16} />}
           title="模型"
@@ -621,26 +780,48 @@ export function ModelsPage() {
           }
         />
 
-        {/* 四张卡按行对齐（grid 同行等高）。
-            原先是「左列 2 张 + 右列 2 张」各自成栈：两张高级小卡叠在右列，
-            一列 1000px+、一列 200px，底部差出成片空白；行对齐后右列不再短一截。 */}
-        <div className="grid gap-5 xl:grid-cols-2">
+        {/* 纵向单列：凭据在上 → 模型库在下 → 故障标回到模型行（变体 C）。
+            原先的双列 grid 让 ProviderAuthSection 被同行拉伸（524px），也把两张
+            高级小卡叠在右列，一列 1000px+、一列 200px、底部差出成片空白。
+            grid-cols-1 是显式留痕：布局口径要能被 getComputedStyle 断言（一列 = 全宽）。 */}
+        <div data-testid="models-page-stack" className="grid grid-cols-1 gap-5">
           <ProviderAuthSection onOpenSetup={(id) => { setSetupProvider(id); setSetupOpen(true); }} />
 
-          <ModelScopeEditor />
+          <ModelScopeEditor
+            onlyFailing={failingOnly}
+            onSummary={setLibrary}
+            defaultRefOverride={defaultRefOverride}
+          />
 
-        {/* 已配置 providers（models.json 自定义 Provider，高级用法） */}
-        <Card>
+        {/* 已配置 providers（models.json 自定义 Provider，高级用法）：常态折成一行 */}
+        <Card testId="custom-provider-advanced">
           <CardHeader>
             <CardTitle>自定义 Provider（高级）</CardTitle>
-            <span className="text-[11px] text-dim">写入 models.json，用于中转站 / 自建网关；开箱即用的厂商直接在上方「厂商与密钥」输入 Key 即可</span>
-            <span className="ml-auto shrink-0 text-[11px] text-dim">{providerNames.length} 个</span>
-            {savedMsg && (
-              <span className={cn("ml-auto text-[12px]", savedMsg === "已保存" ? "text-success" : "text-danger")}>
-                {savedMsg}
-              </span>
-            )}
+            <span className="text-[11px] text-dim">写入 models.json，用于中转站 / 自建网关</span>
+            <div className="ml-auto flex shrink-0 items-center gap-2">
+              <span className="text-[11px] text-dim">{providerNames.length} 个</span>
+              {savedMsg && (
+                <span className={cn("text-[12px]", savedMsg === "已保存" ? "text-success" : "text-danger")}>
+                  {savedMsg}
+                </span>
+              )}
+              <button
+                onClick={() => setCustomOpen((v) => !v)}
+                data-testid="custom-provider-toggle"
+                aria-expanded={customOpen}
+                className="btn btn-sm btn-ghost"
+              >
+                {customOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                {customOpen ? "收起" : "展开"}
+              </button>
+            </div>
           </CardHeader>
+          {!customOpen ? (
+            <div data-testid="custom-provider-collapsed" className="px-4 py-2.5 text-[12px] leading-relaxed text-dim">
+              高级用法，需要时展开 —— 开箱即用的厂商直接在上方「厂商与密钥」贴 Key 即可。
+            </div>
+          ) : (
+            <>
           {loading && (
             <div aria-busy="true" aria-label="加载配置" className="flex flex-col">
               {Array.from({ length: 3 }).map((_, i) => (
@@ -784,11 +965,31 @@ export function ModelsPage() {
               </div>
             );
           })}
+            </>
+          )}
         </Card>
 
-        {/* 从目录添加（自定义 Provider 的高级用法） */}
-        <Card className="p-4">
-          <div className="mb-2 text-[12px] font-semibold text-fg">从模型目录添加（models.dev · 高级）</div>
+        {/* 从目录添加（自定义 Provider 的高级用法）：同样折成一行 */}
+        <Card testId="catalog-advanced">
+          <CardHeader>
+            <CardTitle>从模型目录添加（高级）</CardTitle>
+            <span className="text-[11px] text-dim">models.dev 目录 · 目录外的厂商 / 模型</span>
+            <button
+              onClick={() => setCatalogOpen((v) => !v)}
+              data-testid="catalog-toggle"
+              aria-expanded={catalogOpen}
+              className="btn btn-sm btn-ghost ml-auto"
+            >
+              {catalogOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+              {catalogOpen ? "收起" : "展开"}
+            </button>
+          </CardHeader>
+          {!catalogOpen ? (
+            <div data-testid="catalog-collapsed" className="px-4 py-2.5 text-[12px] text-dim">
+              高级用法，需要时展开。
+            </div>
+          ) : (
+          <div className="p-4">
           <div className="flex gap-2">
             <input
               value={catQuery}
@@ -824,10 +1025,17 @@ export function ModelsPage() {
               ))}
             </div>
           )}
-          </Card>
-        </div>
+            </div>
+          )}
+        </Card>
 
-        <ModelHealthSection />
+          {/* 健康明细：数据本体已下沉到模型行（见 ModelScopeEditor 的故障标），
+              这里只剩一行摘要 + 可展开的完整面板 */}
+          <ModelHealthSection
+            failingCount={library.failing}
+            onDefaultChanged={(ref) => setDefaultRefOverride(ref)}
+          />
+        </div>
       </div>
 
       <ModelSetupDialog

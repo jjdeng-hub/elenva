@@ -6,6 +6,7 @@ import { dialogConfirm, toast } from "@/components/ui/dialog";
 import { cn } from "@/components/lib/utils";
 import { useModelNotes } from "@/hooks/useModelNotes";
 import { failingModelNote, useModelHealth } from "@/hooks/useModelHealth";
+import { lookupModelHealth } from "@/lib/model-health-match";
 import type { ThinkingLevelOption } from "@/hooks/useAgentSession";
 
 type ModelEntry = { id: string; name: string; provider: string };
@@ -170,7 +171,9 @@ export function ModelPicker({
                   const key = `${m.provider}/${m.id}`;
                   const active = key === currentKey;
                   const note = notes[key]?.note;
-                  const failing = health[key]?.status === "failing";
+                  /* 匹配走同一层：健康侧 id 与注册表 id 不同源，直接下标取会静默漏标（lib/model-health-match.ts） */
+                  const summary = lookupModelHealth(health, m.provider, m.id);
+                  const failing = summary?.status === "failing";
                   return (
                     <button
                       key={key}
@@ -195,7 +198,7 @@ export function ModelPicker({
                       {failing && (
                         <span
                           className="chip chip-danger shrink-0"
-                          title={`近期有故障：${failingModelNote(health[key])}`}
+                          title={`近期有故障：${failingModelNote(summary)}`}
                         >
                           有故障
                         </span>
@@ -223,7 +226,7 @@ export function ModelPicker({
                   onClick={async () => {
                     /* 把有故障的模型设为启动默认要过一道确认：健康面板的数据就在这，
                        不能让「这个模型坏了」与「我要用这个」之间零联动。 */
-                    const summary = health[`${displayModel.provider}/${displayModel.modelId}`];
+                    const summary = lookupModelHealth(health, displayModel.provider, displayModel.modelId);
                     if (summary?.status === "failing") {
                       const ok = await dialogConfirm({
                         title: "这个模型近期有故障",
