@@ -131,6 +131,11 @@ const BASH_RULES: BashRule[] = [
   bashRule(/^rm\b[^|;&]*\s-[a-z]*[rf]/i, "destructive", "递归或强制删除文件", "bash:rm-force", "rm 强制/递归删除"),
   bashRule(/\b(del|erase)\s+(\/[a-z]\s+)*\/[fs]/i, "destructive", "强制删除文件", "bash:rm-force", "rm 强制/递归删除"),
   bashRule(/\brmdir\s+(\/[a-z]\s+)*\/s/i, "destructive", "递归删除目录", "bash:rm-force", "rm 强制/递归删除"),
+  // PowerShell 的删除等价物（`Remove-Item`；`ri` 是官方别名，`rm` 在 PowerShell 里也是别名）。
+  // 单独列一条是因为 `-Recurse` / `-Force` 是 PowerShell 的开关名，POSIX 的 `-[a-z]*[rf]`
+  // 只在单字母标志串上命中；`Remove-Item` 连命令名都和 `rm` 不同。级别与 ruleKey 同 POSIX 侧
+  // `bash:rm-force`（`-Recurse` 或 `-Force` 任一命中即 destructive，对齐 `rm -r` / `rm -f`）。
+  bashRule(/^(?:remove-item|ri|rm)\b[^|;&]*\s-(?:recurse|force)\b/i, "destructive", "递归或强制删除文件（PowerShell）", "bash:rm-force", "rm 强制/递归删除"),
   bashRule(/\bgit\s+reset\s+--hard\b/i, "destructive", "丢弃工作区与暂存区的全部未提交改动", "bash:git-reset-hard", "git reset --hard"),
   bashRule(/\bgit\s+clean\b[^|;&]*\s-[a-z]*[fdx]/i, "destructive", "删除未跟踪文件/目录", "bash:git-clean", "git clean 清理未跟踪文件"),
   bashRule(/\bgit\s+(checkout|restore)\s+(--\s+)?\.[\s|;&]*$/i, "destructive", "用 HEAD 覆盖工作区全部改动", "bash:git-restore-all", "git checkout/restore 整目录"),
@@ -197,14 +202,41 @@ function toRisk(rule: BashRule): ToolRisk {
   };
 }
 
+/**
+ * PowerShell 宿主包装的内层脚本。
+ *
+ * `powershell -Command '<脚本>'` / `pwsh -c '<脚本>'` 里真正的动作在内层：整段以
+ * `powershell` 打头，而规则用 `^remove-item` 锚在片段开头，于是漏判。这里把内层脚本
+ * 取出来，作为**独立片段**参与同一条规则表判定（不额外引入第二套规则）。
+ *
+ * 只在片段以 `powershell` / `pwsh` 打头时解包 —— `echo "powershell -Command '…'"`
+ * 这类字符串参数里出现包装不得被误判。只剥一层成对引号（与命令行真实传参一致）。
+ */
+function unwrapPowerShellCommand(segment: string): string | null {
+  const match = segment.match(/^(?:powershell|pwsh)(?:\.exe)?\b[^|;&]*?\s-(?:command|c)\b\s*([\s\S]+)$/i);
+  if (!match) return null;
+  let payload = match[1].trim();
+  const quote = payload[0];
+  if ((quote === "'" || quote === '"') && payload.length >= 2 && payload.endsWith(quote)) {
+    payload = payload.slice(1, -1).trim();
+  }
+  return payload.length > 0 ? payload : null;
+}
+
 function classifyBash(command: string): ToolRisk {
   // ① 整串补充规则：需要看穿管道的规则（curl … | sh）在这里判，与 CLI 侧一致
   for (const rule of RAW_COMMAND_RULES) {
     if (rule.test.test(command)) return toRisk(rule);
   }
   const segments = splitShellSegments(command);
-  let best: ToolRisk = SAFE;
+  // PowerShell 宿主包装展开成独立片段（见 unwrapPowerShellCommand）
+  const scanned = [...segments];
   for (const segment of segments) {
+    const inner = unwrapPowerShellCommand(segment);
+    if (inner) scanned.push(...splitShellSegments(inner));
+  }
+  let best: ToolRisk = SAFE;
+  for (const segment of scanned) {
     for (const rule of BASH_RULES) {
       if (!rule.test.test(segment)) continue;
       const candidate = toRisk(rule);

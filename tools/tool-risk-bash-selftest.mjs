@@ -92,6 +92,52 @@ check("普通只读命令仍 safe", () => {
   assert(risk.level === "safe", JSON.stringify(risk));
 });
 
+// ── ④ PowerShell 危险删除：命令名 / 别名 + 参数顺序任意 + 大小写 + 包装 ────────
+// 旧实现只认 POSIX `rm`，`Remove-Item -Recurse -Force` / `ri` / `powershell -Command '…'`
+// 全部漏判（M5 过审报告 R1，两侧共同盲区）。级别与 ruleKey 同 POSIX 侧。
+const POWERSHELL_DELETE_HITS = [
+  "Remove-Item -Recurse -Force C:\\x",
+  "Remove-Item C:\\x -Recurse -Force",
+  "Remove-Item -Force C:\\x",
+  "Remove-Item -Recurse C:\\x",
+  "remove-item -recurse C:\\x",
+  "REMOVE-ITEM -FORCE C:\\x",
+  "Remove-Item -Recurse:$true -Force C:\\x",
+  "ri -Recurse -Force C:\\x",
+  "rm -Recurse -Force C:\\x",
+  "cd C:\\tmp && Remove-Item -Recurse -Force C:\\x",
+  "powershell -Command 'Remove-Item -Recurse -Force C:\\x'",
+  "powershell.exe -NoProfile -Command \"Remove-Item -Force C:\\x\"",
+  'pwsh -c "Remove-Item -Recurse C:\\x"',
+  "powershell -Command Remove-Item -Recurse -Force C:\\x",
+];
+for (const command of POWERSHELL_DELETE_HITS) {
+  check(`PowerShell 删除命中：${command}`, () => {
+    const risk = riskOf(command);
+    assert(risk.ruleKey === "bash:rm-force", `ruleKey=${risk.ruleKey} level=${risk.level}`);
+    assert(risk.level === "destructive", `应是 destructive，实际 ${risk.level}`);
+    assert(needsApproval(risk, "risky"), "risky 档位必须弹卡");
+  });
+}
+
+const POWERSHELL_FALSE_POSITIVES = [
+  "Remove-Item C:\\x",                 // 单文件删除：与 `rm file.txt` 同口径，不判 destructive
+  "Remove-Item -WhatIf C:\\x",
+  "Get-ChildItem -Recurse C:\\x",
+  "Test-Path C:\\x",
+  "Select-String -Pattern foo C:\\x",
+  'echo "Remove-Item -Recurse -Force C:\\x"',
+  "grep Remove-Item notes.txt",
+  "powershell -Command 'Get-ChildItem -Recurse'",
+  'echo "powershell -Command \'Remove-Item -Recurse -Force C:\\x\'"',
+];
+for (const command of POWERSHELL_FALSE_POSITIVES) {
+  check(`PowerShell 不误伤：${command}`, () => {
+    const risk = riskOf(command);
+    assert(risk.level === "safe", `不应判危险：${JSON.stringify(risk)}`);
+  });
+}
+
 rmSync(root, { recursive: true, force: true });
 console.log(fail === 0 ? "\n全部通过" : `\n${fail} 项失败`);
 process.exit(fail === 0 ? 0 : 1);
