@@ -118,6 +118,9 @@ export function getPendingApprovalsPath(): string {
 /**
  * 读审批队列 JSONL：文件缺失 = []；损坏行跳过；最多取尾部最近 QUEUE_TAIL_LIMIT 条，
  * 返回新 → 旧；每条补 `kind: "queued"` 作为来源标记。不抛。
+ *
+ * 窗口口径：**先过滤出合法条目，再取最后 N 条**（M5 过审报告 R2）。按原始行截取会让坏行
+ * 占一个名额（25 条合法 + 1 条坏行 → 只显示 19 条），而坏行对读端本就不可见。
  */
 export function readQueuedApprovals(): QueuedApproval[] {
   let raw: string;
@@ -127,12 +130,12 @@ export function readQueuedApprovals(): QueuedApproval[] {
     return [];
   }
   const lines = raw.split("\n").filter((line) => line.trim().length > 0);
-  const out: QueuedApproval[] = [];
-  for (const line of lines.slice(-QUEUE_TAIL_LIMIT)) {
+  const valid: QueuedApproval[] = [];
+  for (const line of lines) {
     try {
       const parsed = JSON.parse(line) as Record<string, unknown>;
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
-      out.push({
+      valid.push({
         kind: "queued",
         sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : undefined,
         at: typeof parsed.at === "string" ? parsed.at : undefined,
@@ -146,5 +149,5 @@ export function readQueuedApprovals(): QueuedApproval[] {
       /* 损坏行跳过 */
     }
   }
-  return out.reverse();
+  return valid.slice(-QUEUE_TAIL_LIMIT).reverse();
 }

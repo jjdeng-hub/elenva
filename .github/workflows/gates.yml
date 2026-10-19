@@ -43,12 +43,13 @@ jobs:
         run: node tools/internal-state-selftest.mjs
       - name: 诊断输出与空闲看门狗自检
         run: node tools/diagnostics-selftest.mjs
-      - name: 安全边界回归（只读判定 / 隔离巡检 / 节律执行链 / 只读子代理护栏）
+      - name: 安全边界回归（只读判定 / 隔离巡检 / 节律执行链 / 只读子代理护栏 / 审批队列）
         run: |
           node tools/readonly-classifier-selftest.mjs
           node tools/gates-isolated-selftest.mjs
           node tools/scheduler-runs-selftest.mjs
           node tools/subagent-readonly-guard-selftest.mjs
+          node tools/pending-approvals-selftest.mjs
       - name: 宿主层护栏与双实现判级一致（web ↔ CLI/飞书）
         run: |
           node tools/tool-risk-bash-selftest.mjs

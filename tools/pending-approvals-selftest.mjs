@@ -169,6 +169,18 @@ check("cap：只取尾部最近 QUEUE_TAIL_LIMIT 条（首条为最新）", () =
   eq(items[items.length - 1].sessionId, `s${total - QUEUE_TAIL_LIMIT + 1}`, "末条落在窗口起点");
 });
 
+check("尾窗先过滤再截取：坏行不占名额（25 合法 + 1 坏行 → 20 条）", () => {
+  const valid = Array.from({ length: 25 }, (_, i) =>
+    JSON.stringify({ toolName: "bash", reason: `r${i + 1}`, sessionId: `t${i + 1}`, at: `2026-10-15T00:${String(i).padStart(2, "0")}:00.000Z` }),
+  );
+  // 坏行放在**最尾**：旧实现按原始行切尾窗时它正好占掉一个名额（只可见 19 条）
+  writeQueue([...valid, "{ 坏掉的 json"]);
+  const items = readQueuedApprovals();
+  eq(items.length, QUEUE_TAIL_LIMIT, "坏行不得占名额");
+  eq(items[0].sessionId, "t25", "首条是最新合法条目");
+  eq(items[items.length - 1].sessionId, "t6", "末条 = 第 25-20+1 条合法条目");
+});
+
 check("字段缺省：没有的字段为 undefined，不伪造", () => {
   writeQueue([JSON.stringify({ at: "2026-10-15T00:00:00.000Z" })]);
   const items = readQueuedApprovals();
