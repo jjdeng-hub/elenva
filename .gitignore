@@ -66,6 +66,7 @@ tools/*.mjs
 !tools/extension-integrity-selftest.mjs
 !tools/tool-risk-bash-selftest.mjs
 !tools/host-guard-parity-selftest.mjs
+!tools/m7-fix-cli-identity-e2e.mjs
 !tools/pi-surface-runtime-check.mjs
 !tools/readonly-classifier-selftest.mjs
 !tools/subagent-readonly-guard-selftest.mjs

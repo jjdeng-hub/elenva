@@ -14,7 +14,8 @@ const VERDICT: Record<GrowthReport["headline"]["verdict"], { label: string; clas
   blunter: { label: "变钝", className: "chip-danger" },
   flat: { label: "持平", className: "chip-mono" },
   new: { label: "首周", className: "chip-mono" },
-  empty: { label: "数据不足", className: "chip-mono" },
+  empty: { label: "无数据", className: "chip-mono" },
+  insufficient: { label: "样本不足", className: "chip-mono" },
 };
 
 const pctText = (rate: number) => `${(rate * 100).toFixed(1)}%`;
@@ -28,7 +29,7 @@ function WeekBars({ weeks }: { weeks: GrowthWeek[] }) {
         <div
           key={w.weekStart}
           className="flex min-w-0 flex-1 flex-col items-center gap-1.5"
-          title={`${w.label} 起那一周：${w.sessions} 个任务 / ${w.turns} 轮 / 失败率 ${pctText(w.failureRate)}`}
+          title={`${w.label} 起那一周${w.isCurrent ? "（未完整）" : ""}：${w.sessions} 个任务 / ${w.turns} 轮 / 失败率 ${pctText(w.failureRate)}`}
         >
           <span className={cn("text-[11px] tabular-nums", w.turns > 0 ? "text-muted" : "text-dim/60")}>{w.turns}</span>
           <div className="flex h-24 w-full items-end">
@@ -214,7 +215,9 @@ export function GrowthPage() {
               )}
               <div className="border-t border-line-soft px-4 py-2 text-[11px] leading-relaxed text-dim">
                 口径：轮次 = 用户消息数；失败 = 该轮出现 provider error（用户主动中断 aborted 不计）；任务 = 会话；
-                项目 = 会话 cwd（取末段展示，worktree 不归并）。本周为当前**未完成**的一周，与上周直接对比会偏低或偏高。
+                项目 = 会话 cwd（取末段展示，worktree 不归并）。本周为当前**未完整**的一周，
+                周环比**按已过同等时段对齐上周同期**（对齐到「上周一 00:00 → 上周一 + 本周已过时长」），
+                不再直接与完整上周比；任一侧轮数 &lt; {data.comparison.minTurns} 时不给趋势结论（标「样本不足」）。
                 工具调用 = assistant 的 toolCall 块。未做「任务类型」分类（无可靠标签），用「项目 × 周」粗分组代替。
               </div>
             </Card>

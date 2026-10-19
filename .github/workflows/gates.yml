@@ -55,6 +55,7 @@ jobs:
           node tools/tool-risk-bash-selftest.mjs
           node tools/host-guard-parity-selftest.mjs
           node extensions/elenva-host-guard/selftest.mjs
+          node tools/m7-fix-cli-identity-e2e.mjs
       - name: 扩展自检（任务清单 / 工作记录 / 上下文治理）
         run: |
           node extensions/elenva-todo/selftest.mjs

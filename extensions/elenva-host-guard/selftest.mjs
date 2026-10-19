@@ -155,5 +155,85 @@ check("syncIdentity 目标文件 = APPEND_SYSTEM.md", roundTrip1.path === path.j
 check("syncIdentity 文件落到受管段", fs.readFileSync(roundTrip1.path, "utf8").includes(sync.BEGIN_MARK));
 fs.rmSync(dir, { recursive: true, force: true });
 
+/* ── 6. 身份段同源读取与注入（模块 7 修复轮）──────────────────────────── */
+const identity = await jiti.import("./identity.ts");
+const idTmp = fs.mkdtempSync(path.join(os.tmpdir(), "elenva-host-guard-identity-"));
+const identityPath = path.join(idTmp, "elenva-identity.json");
+check("身份文件缺失 → readIdentityText 返回 null（交给种子兜底）", identity.readIdentityText(idTmp) === null);
+fs.writeFileSync(identityPath, "not json", "utf8");
+check("身份文件损坏 → 返回 null（不猜、不抛）", identity.readIdentityText(idTmp) === null);
+const IDENTITY_SENTINEL = "【CLI身份哨兵-同源】";
+fs.writeFileSync(
+  identityPath,
+  JSON.stringify({
+    version: 1,
+    updatedAt: "2026-10-19T00:00:00.000Z",
+    sections: [
+      { id: "a", title: "标题不注入", body: `你是同源测试身份。${IDENTITY_SENTINEL}` },
+      { id: "b", title: "空段", body: "   " },
+      { id: "c", title: "第二段", body: "第二段正文。" },
+    ],
+  }),
+  "utf8",
+);
+const identityText = identity.readIdentityText(idTmp);
+check("身份文件有效 → 拼出含哨兵的正文", typeof identityText === "string" && identityText.includes(IDENTITY_SENTINEL));
+check(
+  "标题不注入、空段跳过",
+  !identityText.includes("标题不注入") && !identityText.includes("空段") && identityText.includes("第二段正文"),
+);
+check("标题固定为 ## 你是谁", identityText.startsWith("## 你是谁\n\n"));
+
+const libIdentity = await jiti.import("../../lib/identity.ts");
+const libText = libIdentity.buildIdentityText(libIdentity.readIdentity(idTmp).document.sections);
+check("与 lib/identity.ts 的 buildIdentityText 逐字一致（同源口径）", identityText === libText);
+
+const seedPrompt = `基座提示\n\n${sync.BEGIN_MARK}\n旧种子身份\n${sync.END_MARK}\n尾部用户内容\n`;
+const injected = identity.injectIdentitySection(seedPrompt, identityText);
+check("注入：替换受管段内内容", injected.includes(IDENTITY_SENTINEL) && !injected.includes("旧种子身份"));
+check("注入：段前后逐字节保留", injected.startsWith(`基座提示\n\n${sync.BEGIN_MARK}`) && injected.endsWith("尾部用户内容\n"));
+check("注入：二次注入幂等", identity.injectIdentitySection(injected, identityText) === injected);
+const appendedIdentity = identity.injectIdentitySection("只有基座提示\n", identityText);
+check("无受管段 → 追加（不覆盖原内容）", appendedIdentity.startsWith("只有基座提示") && appendedIdentity.includes(IDENTITY_SENTINEL));
+fs.rmSync(idTmp, { recursive: true, force: true });
+
+/* ── 7. 钩子接线（模拟 CLI 宿主装配）───────────────────────────── */
+const hookTmp = fs.mkdtempSync(path.join(os.tmpdir(), "elenva-host-guard-hook-"));
+fs.writeFileSync(
+  path.join(hookTmp, "elenva-identity.json"),
+  JSON.stringify({ version: 1, sections: [{ id: "a", title: "", body: "钩子身份【HOOK-SENTINEL】" }] }),
+  "utf8",
+);
+const boot = typeof index === "function" ? index : index.default;
+function bootWithEnv(env) {
+  const before = { ...process.env };
+  // 本自检可能跑在 Web 宿主下（ELENVA_WEB_HOST=1 会被继承）——先清掉，再按用例注入
+  delete process.env.ELENVA_WEB_HOST;
+  delete process.env.ELENVA_HOST_GUARD_DISABLE;
+  process.env.PI_CODING_AGENT_DIR = hookTmp;
+  Object.assign(process.env, env);
+  const handlers = new Map();
+  const pi = {
+    on(event, handler) {
+      const list = handlers.get(event) ?? [];
+      list.push(handler);
+      handlers.set(event, list);
+    },
+  };
+  boot(pi);
+  for (const key of Object.keys(process.env)) delete process.env[key];
+  Object.assign(process.env, before);
+  return handlers;
+}
+const cliHandlers = bootWithEnv({});
+check("CLI 宿主：注册 before_agent_start（身份注入）", (cliHandlers.get("before_agent_start")?.length ?? 0) === 1);
+const seedForHook = `${sync.BEGIN_MARK}\n旧种子\n${sync.END_MARK}`;
+const hookResult = await cliHandlers.get("before_agent_start")[0]({ type: "before_agent_start", prompt: "", systemPrompt: seedForHook });
+check("CLI 宿主：钩子把身份文件内容写进系统提示词", hookResult?.systemPrompt?.includes("HOOK-SENTINEL") === true);
+check("CLI 宿主：钩子不残留旧种子", hookResult?.systemPrompt?.includes("旧种子") === false);
+const webHandlers = bootWithEnv({ ELENVA_WEB_HOST: "1" });
+check("web 宿主：零 handler（差分行为不变）", webHandlers.size === 0);
+fs.rmSync(hookTmp, { recursive: true, force: true });
+
 console.log(`\n${fail === 0 ? "SELFTEST: OK" : "SELFTEST: FAILED"} / ${pass + fail} 项（${pass} 通过 / ${fail} 失败）`);
 process.exit(fail === 0 ? 0 : 1);
