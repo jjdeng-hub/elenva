@@ -73,6 +73,8 @@ jobs:
         run: node tools/model-default-persist-selftest.mjs
       - name: 模型页重构自检（健康 id 匹配 / 状态条与健康下沉接线）
         run: node tools/model-page-selftest.mjs
+      - name: git 能力回归（历史解析 / hash 校验 / 恢复路径 / 撤销边界）
+        run: node tools/git-selftest.mjs
       - name: 生产构建
         run: npm run build
       - name: 模型路由回归（无 cwd 不得 403）
