@@ -84,6 +84,7 @@ function parseHash(): { view: View; sessionId: string | null; newCwd: string | n
 /* ---------------- 主 AppShell ---------------- */
 export function AppShell() {
   const [view, setView] = useState<View>("home");
+  const [homeRefreshVersion, setHomeRefreshVersion] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set());
   /** 会话默认工作区（~/pi-workspace，非项目语义；仅由 /api/default-cwd 初始化，勿他写） */
@@ -173,6 +174,7 @@ export function AppShell() {
         if (finished.length === 0 && !versionChanged) return;
         const list = await refreshSessions();
         if (stopped) return;
+        if (finished.length > 0) setHomeRefreshVersion((version) => version + 1);
         for (const id of finished) {
           // 当前打开的会话由 ChatView 实时感知，不重复通知
           if (id === selectedRef.current?.id) continue;
@@ -798,6 +800,7 @@ export function AppShell() {
             contentResults={contentResults}
             contentSearching={contentSearching}
             contentTruncated={contentTruncated}
+            refreshVersion={homeRefreshVersion}
             defaultCwd={defaultCwd}
           />
         )}

@@ -63,7 +63,7 @@ export function RunningCards({
   if (running.length === 0) return null;
 
   return (
-    <div className="space-y-2 px-4 pb-1 pt-3">
+    <div className="space-y-2 px-4 pb-1 pt-3" data-testid="running-cards">
       {running.map((s) => {
         const u = usage?.sessions[s.id];
         const t = todos[s.id];
@@ -71,6 +71,7 @@ export function RunningCards({
         return (
           <button
             key={s.id}
+            data-testid="running-card"
             onClick={() => onOpenSession(s)}
             className="block w-full rounded-lg border border-accent/25 bg-accent-soft/40 px-3 py-2.5 text-left t-fast hover:border-accent/50 cursor-pointer"
           >

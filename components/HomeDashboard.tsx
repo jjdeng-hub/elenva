@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowRight, CheckCircle2, Cpu, Gauge, KeyRound, Loader2, Play } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, Cpu, Gauge, KeyRound, Loader2, Play, ShieldAlert } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
 import { basename, formatCost, formatTokens, relTime, timeLabel } from "@/lib/format";
@@ -130,6 +130,7 @@ export function HomeDashboard({
   contentResults,
   contentSearching,
   contentTruncated,
+  refreshVersion = 0,
 }: {
   sessions: SessionInfo[];
   runningIds: Set<string>;
@@ -145,8 +146,11 @@ export function HomeDashboard({
   contentResults?: { session: SessionInfo; before: string; match: string; after: string }[];
   contentSearching?: boolean;
   contentTruncated?: boolean;
+  /** 首页重新进入或 Agent 回合结束时递增，用于刷新会话衍生数据。 */
+  refreshVersion?: number;
 }) {
   const [tab, setTab] = useState<TabKey>("all");
+  const [supportInfoOpen, setSupportInfoOpen] = useState(false);
 
   /*
    * 无凭据引导：一个凭据都没配时，工作台上是一片空白，却没有任何地方
@@ -211,7 +215,7 @@ export function HomeDashboard({
     return () => {
       cancelled = true;
     };
-  }, [sessions]);
+  }, [refreshVersion]);
 
   const [meta, setMeta] = useState<Record<string, SessionMeta>>({});
   useEffect(() => {
@@ -225,7 +229,7 @@ export function HomeDashboard({
     return () => {
       cancelled = true;
     };
-  }, [sessions]);
+  }, [refreshVersion]);
 
   // 「等你处理」两源（被中断 / 工具报错 / 等待审批 / 审批队列）+ 「最近完成」+ 「逾期」：
   // 同一个 /api/attention 轮询（5s 节奏，与运行卡一致；不新增第二处轮询）。
@@ -256,14 +260,9 @@ export function HomeDashboard({
       cancelled = true;
       clearInterval(timer);
     };
-  }, [sessions]);
+  }, []);
 
   const runningSessions = useMemo(() => sessions.filter((s) => runningIds.has(s.id)), [sessions, runningIds]);
-  const attentionById = useMemo(() => {
-    const map = new Map<string, AttentionItem>();
-    for (const a of attention) map.set(a.sessionId, a);
-    return map;
-  }, [attention]);
 
   // 逾期待办：会话 → { 天数, 条数, 样例 }。侧账本读不到时为空，不报错。
   const overdueById = useMemo(() => {
@@ -282,6 +281,10 @@ export function HomeDashboard({
   const waitItems = useMemo<WaitItem[]>(() => {
     const byId = new Map<string, WaitItem>();
     const put = (item: WaitItem) => {
+      // 只收会话列表里能找到的 id：审批队列是 append-only 的，孤儿行（测试残留 /
+      // 会话已删）在这里只能渲染成一条点不动的死链。服务端已过滤一遍，这里是
+      // 第二道 —— 列表刷新前也可能短暂对不上。
+      if (!sessionsById.has(item.sessionId)) return;
       const prev = byId.get(item.sessionId);
       if (!prev || WAIT_PRIORITY[item.source] < WAIT_PRIORITY[prev.source]) byId.set(item.sessionId, item);
     };
@@ -300,9 +303,17 @@ export function HomeDashboard({
       put({ sessionId: q.sessionId, source: "approval-queued", detail: q.reason || q.detail || q.toolName || "" });
     }
     return [...byId.values()];
-  }, [pendingApprovals, attention]);
+  }, [pendingApprovals, attention, sessionsById]);
   const waitCount = waitItems.length;
-  const waitById = useMemo(() => new Set(waitItems.map((w) => w.sessionId)), [waitItems]);
+  /**
+   * 会话 → 等待信号。用 Map 而不是 Set：状态列要回答「为什么在等我」，
+   * 只标记「有没有等」的话，运行中的待审批会话仍然只显示成「运行中」。
+   */
+  const waitInfoById = useMemo(() => {
+    const map = new Map<string, WaitItem>();
+    for (const item of waitItems) map.set(item.sessionId, item);
+    return map;
+  }, [waitItems]);
 
   // 运行卡用：会话 → 等待审批的理由短句
   const approvalReasons = useMemo(() => {
@@ -350,12 +361,16 @@ export function HomeDashboard({
   const tabbed = useMemo(() => {
     const sorted = [...sessions].sort((a, b) => (b.modified || "").localeCompare(a.modified || ""));
     if (tab === "running") return sorted.filter((s) => runningIds.has(s.id));
-    if (tab === "attention") return sorted.filter((s) => waitById.has(s.id) && !runningIds.has(s.id));
+    // 「等我」不排除运行中：等待审批的会话通常还在跑，它正是最需要接管的一条。
+    // 此前这里多了 `!runningIds.has(id)`，而角标计数用的是全部等待项 ——
+    // 结果是「等我 1」点进去却是空列表（运行中的审批被滤掉了）。
+    if (tab === "attention") return sorted.filter((s) => waitInfoById.has(s.id));
+    // 「空闲」只看空闲：运行中的会话已由实时卡承载，混进来会让页签说一套、列表显示另一套。
     if (tab === "idle") return sorted.filter((s) => !runningIds.has(s.id));
     // 全部：运行中的会话已由上方「实时卡」承载（带 5s 轮询的最新动态），
     // 这里不再重复成行 —— 同一会话在同一屏出现两次会被当成 bug。
     return sorted.filter((s) => !runningIds.has(s.id));
-  }, [sessions, runningIds, tab, attentionById, waitById]);
+  }, [sessions, runningIds, tab, waitInfoById]);
 
   const tabCount = (key: TabKey) => {
     if (key === "all") return sessions.length;
@@ -363,6 +378,13 @@ export function HomeDashboard({
     if (key === "attention") return waitCount;
     return sessions.length - runningIds.size;
   };
+
+  /** 表格空态：每个页签说自己的话，不用一句「暂无会话」包打天下 */
+  const emptyLabel =
+    tab === "attention" ? "没有等你处理的会话"
+      : tab === "idle" ? "没有空闲会话"
+        : tab === "running" ? "没有运行中的会话"
+          : "暂无会话，点击右上角「新建会话」开始";
 
   // 模型用量排行（token 降序，取前 5）
   const topModels = useMemo(() => {
@@ -372,6 +394,14 @@ export function HomeDashboard({
       .sort((a, b) => b.tokens - a.tokens)
       .slice(0, 5);
   }, [usage]);
+  const systemIssues = snap
+    ? [snap.gates, snap.backup, snap.version, snap.disk, snap.mem]
+        .filter((item) => item.tone === "warn").length
+    : null;
+  const supportSummary = [
+    topModels[0] ? `主力 ${shortModel(topModels[0].model)}` : null,
+    systemIssues === null ? null : systemIssues > 0 ? `本机异常 ${systemIssues}` : "本机正常",
+  ].filter(Boolean).join(" · ");
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -428,16 +458,19 @@ export function HomeDashboard({
             <div className="mt-1 flex flex-col">
               {waitItems.slice(0, 3).map((w) => {
                 const sess = sessionsById.get(w.sessionId);
+                // 上面已按会话存在性过滤；这里再兜一次，将来数据源变化时
+                // 也不会重新出现「点了没反应的 id 片段」。
+                if (!sess) return null;
                 const danger = w.source === "approval-live";
                 return (
                   <button
                     key={w.sessionId}
-                    onClick={() => sess && onOpenSession(sess)}
+                    onClick={() => onOpenSession(sess)}
                     className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-left t-fast hover:bg-hover"
                   >
                     <span className={cn("size-1.5 shrink-0 rounded-full anim-pulse-dot", danger ? "bg-danger" : "bg-warn")} />
                     <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg">
-                      {sess ? displayTitle(sess) : w.sessionId.slice(0, 8)}
+                      {displayTitle(sess)}
                     </span>
                     <span
                       className={cn(
@@ -550,7 +583,7 @@ export function HomeDashboard({
                     className={cn(
                       "rounded-full px-1.5 text-[11px] leading-4",
                       tab === t.key ? "bg-active text-accent" : "bg-panel-2 text-dim",
-                      t.key === "attention" && attention.length > 0 && tab !== t.key && "bg-warn/10 text-warn",
+                      t.key === "attention" && waitCount > 0 && tab !== t.key && "bg-warn/10 text-warn",
                     )}
                   >
                     {tabCount(t.key)}
@@ -558,9 +591,10 @@ export function HomeDashboard({
                 </button>
               ))}
             </div>
-            {/* 运行中实时卡：与下方表格互斥（「运行中」页签改用表格展示，
-                其余页签用实时卡），保证同一会话只出现一次 */}
-            {tab !== "running" && (
+            {/* 运行中实时卡只在「全部」出现：它是总览的一部分。
+                其余页签用表格承载自己的范围 —— 否则「空闲」上方挂着运行卡、
+                「等我」里运行中的会话又会同时出现在卡片和表格里。 */}
+            {tab === "all" && (
               <div className="shrink-0">
                 <RunningCards running={runningSessions} usage={usage} approvalReasons={approvalReasons} onOpenSession={onOpenSession} />
               </div>
@@ -582,14 +616,14 @@ export function HomeDashboard({
                 {tabbed.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-10 text-center text-[13px] text-dim">
-                      {tab === "attention" ? "没有等你处理的会话" : "暂无会话，点击右上角「新建会话」开始"}
+                      {emptyLabel}
                     </td>
                   </tr>
                 )}
                 {/* 不再截断 10 条：表格区已可滚动，固定的是卡片高度而不是可见条数 */}
                 {tabbed.map((s) => {
                   const running = runningIds.has(s.id);
-                  const attn = attentionById.get(s.id);
+                  const wait = waitInfoById.get(s.id);
                   const overdue = overdueById.get(s.id);
                   return (
                     <tr key={s.id} className="cursor-pointer t-fast hover:bg-hover" onClick={() => onOpenSession(s)}>
@@ -601,7 +635,7 @@ export function HomeDashboard({
                               <span className="truncate text-[13px] font-semibold">{displayTitle(s)}</span>
                               {/* 逾期徽标：只在有值、且该会话没被「等你处理」置顶时出现——
                                   等待审批 / 中断已有自己的警示位，不再叠一个抢视线。 */}
-                              {overdue && !waitById.has(s.id) && (
+                              {overdue && !waitInfoById.has(s.id) && (
                                 <span
                                   className="chip chip-warn shrink-0"
                                   data-testid="session-overdue"
@@ -653,17 +687,26 @@ export function HomeDashboard({
                         })()}
                       </td>
                       <td className="whitespace-nowrap border-b border-line-soft px-3 py-2.5">
-                        {running ? (
+                        {wait ? (
+                          /* 等待信号优先于「运行中」：会话在跑但被审批挡住时，
+                             「在等我」比「在跑」更接近下一步该做什么 */
+                          <span
+                            className={cn(
+                              "inline-flex items-center gap-1.5 text-[12px] font-medium",
+                              wait.source === "approval-live" ? "text-danger" : "text-warn",
+                            )}
+                            title={wait.detail}
+                          >
+                            {wait.source === "approval-live" ? (
+                              <ShieldAlert size={12} className="shrink-0" />
+                            ) : (
+                              <span className="size-1.5 rounded-full bg-warn anim-pulse-dot" />
+                            )}
+                            {WAIT_LABELS[wait.source]}
+                          </span>
+                        ) : running ? (
                           <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-accent">
                             <Loader2 size={12} className="anim-spin" /> 运行中
-                          </span>
-                        ) : attn ? (
-                          <span
-                            className="inline-flex items-center gap-1.5 text-[12px] font-medium text-warn"
-                            title={attn.detail}
-                          >
-                            <span className="size-1.5 rounded-full bg-warn anim-pulse-dot" />
-                            {attn.reasons.includes("interrupted") ? "被中断" : "工具报错"}
                           </span>
                         ) : unreadIds?.has(s.id) ? (
                           /* 跑完但还没看的：实心绿点（静态，不用闪烁） */
@@ -734,15 +777,18 @@ export function HomeDashboard({
             <div className="mt-1.5 flex flex-col">
               {completions.map((c) => {
                 const sess = sessionsById.get(c.sessionId);
+                // 会话可能在 24h 窗口内被删（或列表尚未刷新）—— 找不到就不渲染，
+                // 避免又出现一条点了没反应的 id 片段。
+                if (!sess) return null;
                 const reply = c.detail.length > 60 ? `${c.detail.slice(0, 60)}…` : c.detail;
                 return (
                   <button
                     key={c.sessionId}
-                    onClick={() => sess && onOpenSession(sess)}
+                    onClick={() => onOpenSession(sess)}
                     className="flex w-full cursor-pointer items-center gap-2 rounded-md border-b border-line-soft px-1.5 py-2 text-left t-fast last:border-b-0 hover:bg-hover"
                   >
                     <span className="min-w-0 shrink-0 max-w-[36%] truncate text-[12px] font-medium text-fg">
-                      {sess ? displayTitle(sess) : c.sessionId.slice(0, 8)}
+                      {displayTitle(sess)}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-[12px] text-muted">{reply}</span>
                     <span className="shrink-0 text-[12px] text-dim">{relTime(c.at)}</span>
@@ -753,8 +799,35 @@ export function HomeDashboard({
           </div>
         )}
 
-        {/* 中部两列：模型排行 | 技能（两卡各固定 5 槽，数据量不同也对齐） */}
-        <div className="mt-3.5 grid gap-3.5 lg:grid-cols-2">
+        {/* 低频分析与维护信息默认收起，让首屏优先呈现待处理、运行和完成状态。 */}
+        <section className="mt-3.5" data-testid="support-info">
+          <button
+            type="button"
+            aria-expanded={supportInfoOpen}
+            aria-controls="home-support-info-content"
+            onClick={() => setSupportInfoOpen((open) => !open)}
+            className="flex w-full cursor-pointer items-center gap-2 border-y border-line-soft px-2 py-3 text-left t-fast hover:bg-hover"
+          >
+            <ChevronDown
+              size={14}
+              className={cn("shrink-0 text-dim transition-transform", supportInfoOpen && "rotate-180")}
+            />
+            <span className="text-[13px] font-semibold">辅助信息</span>
+            <span className="min-w-0 flex-1 truncate text-[12px] text-dim">
+              {supportSummary || "模型排行 · 本机状态"}
+            </span>
+            <span className="shrink-0 text-[12px] text-accent">
+              {supportInfoOpen ? "收起" : "展开"}
+            </span>
+          </button>
+          <div
+            id="home-support-info-content"
+            hidden={!supportInfoOpen}
+            className={cn(
+              "pt-3.5",
+              supportInfoOpen ? "grid gap-3.5 lg:grid-cols-2" : "hidden",
+            )}
+          >
           <div className="card px-4 py-3.5">
             <div className="flex items-center justify-between">
               <h2 className="flex items-center gap-1.5 text-[14px] font-semibold">
@@ -825,7 +898,8 @@ export function HomeDashboard({
               <div className="mt-2.5 pb-2 text-[12px] text-dim/40">读取中…</div>
             )}
           </div>
-        </div>
+          </div>
+        </section>
 
       </div>
 
