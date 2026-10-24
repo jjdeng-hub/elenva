@@ -540,7 +540,12 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
             />
           )}
           {!loading && !loadError && skills.length === 0 && (
-            <div className="px-4 py-6 text-[12px] text-dim">当前项目没有可用技能</div>
+            <EmptyState
+              icon={<Library size={16} />}
+              title="当前项目没有可用技能"
+              hint="可以从右侧 skills.sh 搜索安装，或把 SKILL.md 放进项目的 .pi/skills/。"
+              className="py-10"
+            />
           )}
           {skills.map((s) => {
             const enabled = !s.disableModelInvocation;
