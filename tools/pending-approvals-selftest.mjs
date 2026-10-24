@@ -50,6 +50,11 @@ const clearLive = () => {
   for (const item of listPendingApprovals()) resolvePendingApproval(item.sessionId, item.kind);
 };
 
+// 队列条目有 TTL（7 天）：用例的时间戳必须相对当前时间，写死日期会随日历流逝而失效。
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+const ago = (ms) => new Date(Date.now() - ms).toISOString();
+
 /* ============================ 活审批注册表 ============================ */
 
 check("getPendingApprovalsPath 指向 agentDir 下的 jsonl", () => {
@@ -125,8 +130,8 @@ check("缺 sessionId / 非法 kind 静默跳过，且 resolve 缺失键不抛", 
 check("队列正常解析：字段保留 + kind=queued + 新→旧", () => {
   clearLive();
   writeQueue([
-    JSON.stringify({ toolName: "bash", detail: "git push", reason: "推送到远端", cwd: "/home/demo/w", sessionId: "q1", at: "2026-10-15T01:00:00.000Z" }),
-    JSON.stringify({ toolName: "write", detail: "x.ts", reason: "越界写入", ruleKey: "write:outside", cwd: "/home/demo/w", sessionId: "q2", at: "2026-10-15T02:00:00.000Z" }),
+    JSON.stringify({ toolName: "bash", detail: "git push", reason: "推送到远端", cwd: "/home/demo/w", sessionId: "q1", at: ago(2 * HOUR) }),
+    JSON.stringify({ toolName: "write", detail: "x.ts", reason: "越界写入", ruleKey: "write:outside", cwd: "/home/demo/w", sessionId: "q2", at: ago(HOUR) }),
   ]);
   const items = readQueuedApprovals();
   eq(items.length, 2, "条数");
@@ -160,7 +165,7 @@ check("文件缺失 = []", () => {
 check("cap：只取尾部最近 QUEUE_TAIL_LIMIT 条（首条为最新）", () => {
   const total = QUEUE_TAIL_LIMIT + 5;
   const lines = Array.from({ length: total }, (_, i) =>
-    JSON.stringify({ toolName: "bash", reason: `r${i + 1}`, sessionId: `s${i + 1}`, at: `2026-10-15T00:${String(i).padStart(2, "0")}:00.000Z` }),
+    JSON.stringify({ toolName: "bash", reason: `r${i + 1}`, sessionId: `s${i + 1}`, at: ago((total - i) * 60_000) }),
   );
   writeQueue(lines);
   const items = readQueuedApprovals();
@@ -170,13 +175,55 @@ check("cap：只取尾部最近 QUEUE_TAIL_LIMIT 条（首条为最新）", () =
 });
 
 check("字段缺省：没有的字段为 undefined，不伪造", () => {
-  writeQueue([JSON.stringify({ at: "2026-10-15T00:00:00.000Z" })]);
+  writeQueue([JSON.stringify({ at: ago(HOUR) })]);
   const items = readQueuedApprovals();
   eq(items.length, 1, "条数");
   eq(items[0].sessionId, undefined, "sessionId 缺省");
   eq(items[0].reason, undefined, "reason 缺省");
   eq(items[0].toolName, undefined, "toolName 缺省");
   eq(items[0].kind, "queued", "kind 仍补齐");
+});
+
+check("TTL：超过 7 天的条目不再返回，未过期的保留", () => {
+  writeQueue([
+    JSON.stringify({ toolName: "bash", reason: "旧", sessionId: "t1", at: ago(8 * DAY) }),
+    JSON.stringify({ toolName: "bash", reason: "新", sessionId: "t2", at: ago(6 * DAY) }),
+  ]);
+  const items = readQueuedApprovals();
+  eq(items.length, 1, "只剩未过期的一条");
+  eq(items[0].sessionId, "t2", "保留未过期的");
+});
+
+check("at 缺失或非法：保留（不吞真待办）", () => {
+  writeQueue([
+    JSON.stringify({ toolName: "bash", reason: "no-at", sessionId: "t3" }),
+    JSON.stringify({ toolName: "bash", reason: "bad-at", sessionId: "t4", at: "not-a-date" }),
+  ]);
+  eq(readQueuedApprovals().length, 2, "两条都保留");
+});
+
+check("同会话同规则去重：只留最新一条", () => {
+  writeQueue([
+    JSON.stringify({ toolName: "bash", reason: "旧", ruleKey: "bash:rm", sessionId: "d1", at: ago(3 * HOUR) }),
+    JSON.stringify({ toolName: "bash", reason: "新", ruleKey: "bash:rm", sessionId: "d1", at: ago(2 * HOUR) }),
+    JSON.stringify({ toolName: "bash", reason: "另一会话", ruleKey: "bash:rm", sessionId: "d2", at: ago(HOUR) }),
+  ]);
+  const items = readQueuedApprovals();
+  eq(items.length, 2, "同规则跨会话不合并");
+  eq(items[0].reason, "另一会话", "首条是全局最新");
+  const sameSession = items.find((x) => x.sessionId === "d1");
+  eq(sameSession.reason, "新", "同会话取最新那条");
+});
+
+check("无 ruleKey 时用 detail 折叠", () => {
+  writeQueue([
+    JSON.stringify({ toolName: "bash", detail: "npm i -g x", sessionId: "e1", at: ago(3 * HOUR) }),
+    JSON.stringify({ toolName: "bash", detail: "npm i -g x", sessionId: "e1", at: ago(2 * HOUR) }),
+    JSON.stringify({ toolName: "bash", detail: "npm i -g y", sessionId: "e1", at: ago(HOUR) }),
+  ]);
+  const items = readQueuedApprovals();
+  eq(items.length, 2, "同 detail 折叠，不同 detail 保留");
+  eq(items[0].detail, "npm i -g y", "首条是全局最新");
 });
 
 rmSync(root, { recursive: true, force: true });

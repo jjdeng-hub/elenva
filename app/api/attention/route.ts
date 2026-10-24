@@ -23,7 +23,13 @@ export async function GET() {
     const running = new Set(getRunningAgentSessionIds());
     const { items, completions } = await detectAttentionOverview(sessions, running);
     const live = listPendingApprovals();
-    const queued = readQueuedApprovals();
+    // 审批队列只追加、从不清理，里面可能有对不上任何会话的孤儿行（测试残留 /
+    // 会话已删除）。这种行在首页只是一条点不动的死链：显示成截断 id、点击无
+    // 反应，「查看全部」页也永远是空的（2026-10-17 实测踩到）。会话列表才是
+    // 「哪个会话在等我」的唯一口径 —— 对不上的条目不入列；审批详情仍在
+    // approvals 历史页可见。
+    const sessionIds = new Set(sessions.map((s) => s.id));
+    const queued = readQueuedApprovals().filter((q) => q.sessionId && sessionIds.has(q.sessionId));
     // 「刚完成」要排除任何等待信号（含活审批与队列里的审批）
     const waiting = new Set<string>();
     for (const approval of [...live, ...queued]) {

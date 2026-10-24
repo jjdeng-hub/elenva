@@ -23,6 +23,22 @@ export const PENDING_APPROVALS_FILE = "elenva-pending-approvals.jsonl";
 /** 队列只呈现最近 N 条（工作台是「最近在等我什么」，不是全量审计） */
 export const QUEUE_TAIL_LIMIT = 20;
 
+/**
+ * 待审批的有效期：超过这个时间不再打扰（该文件 append-only，没有人为它收尾）。
+ * 一条 7 天前的「要不要执行 rm」早就没有决策价值了 —— 会话可能已经结束、
+ * 操作可能已经用别的方式做过。过期只影响**展示**，文件里的历史行不动
+ * （审计痕迹归 `elenva-approval-log.jsonl`，这里只是待办视图）。
+ */
+export const QUEUED_APPROVAL_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * 折叠键：同一会话 + 同一规则视为「同一件事」。节律任务每轮都会为同一条规则
+ * 重新入队（上一轮的条目已无意义），只留最新一条；没有 ruleKey 时用 detail 兜底。
+ */
+function queueKey(q: QueuedApproval): string {
+  return `${q.sessionId ?? ""}\u0000${q.ruleKey ?? q.detail ?? ""}`;
+}
+
 export type LiveApprovalKind = "tool" | "plan";
 
 export interface PendingApproval {
@@ -116,10 +132,16 @@ export function getPendingApprovalsPath(): string {
 }
 
 /**
- * 读审批队列 JSONL：文件缺失 = []；损坏行跳过；最多取尾部最近 QUEUE_TAIL_LIMIT 条，
- * 返回新 → 旧；每条补 `kind: "queued"` 作为来源标记。不抛。
+ * 读审批队列 JSONL：文件缺失 = []；损坏行跳过。
+ *
+ * 读端做三件事（文件自身永不清理，清理代价放在读取这一侧）：
+ *  ① 丢弃超过 TTL 的旧条目（at 缺失或非法时**保留** —— 宁可多显示，不吞真待办）；
+ *  ② 同一会话 + 同一规则只留最新一条（重复入队不刷屏）；
+ *  ③ 按时间新→旧取尾部 QUEUE_TAIL_LIMIT 条。
+ *
+ * `now` 可注入，便于自检固定时间。任何一步失败都不抛（旁路纪律）。
  */
-export function readQueuedApprovals(): QueuedApproval[] {
+export function readQueuedApprovals(now: number = Date.now()): QueuedApproval[] {
   let raw: string;
   try {
     raw = readFileSync(getPendingApprovalsPath(), "utf8");
@@ -127,24 +149,41 @@ export function readQueuedApprovals(): QueuedApproval[] {
     return [];
   }
   const lines = raw.split("\n").filter((line) => line.trim().length > 0);
-  const out: QueuedApproval[] = [];
-  for (const line of lines.slice(-QUEUE_TAIL_LIMIT)) {
+  const parsed: QueuedApproval[] = [];
+  for (const line of lines) {
     try {
-      const parsed = JSON.parse(line) as Record<string, unknown>;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
-      out.push({
+      const entry = JSON.parse(line) as Record<string, unknown>;
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
+      parsed.push({
         kind: "queued",
-        sessionId: typeof parsed.sessionId === "string" ? parsed.sessionId : undefined,
-        at: typeof parsed.at === "string" ? parsed.at : undefined,
-        toolName: typeof parsed.toolName === "string" ? parsed.toolName : undefined,
-        detail: typeof parsed.detail === "string" ? parsed.detail : undefined,
-        reason: typeof parsed.reason === "string" ? parsed.reason : undefined,
-        ruleKey: typeof parsed.ruleKey === "string" ? parsed.ruleKey : undefined,
-        cwd: typeof parsed.cwd === "string" ? parsed.cwd : undefined,
+        sessionId: typeof entry.sessionId === "string" ? entry.sessionId : undefined,
+        at: typeof entry.at === "string" ? entry.at : undefined,
+        toolName: typeof entry.toolName === "string" ? entry.toolName : undefined,
+        detail: typeof entry.detail === "string" ? entry.detail : undefined,
+        reason: typeof entry.reason === "string" ? entry.reason : undefined,
+        ruleKey: typeof entry.ruleKey === "string" ? entry.ruleKey : undefined,
+        cwd: typeof entry.cwd === "string" ? entry.cwd : undefined,
       });
     } catch {
       /* 损坏行跳过 */
     }
   }
-  return out.reverse();
+
+  // ① TTL：时间戳读不出来就当作「未知」保留，不因为字段脏就吞掉一条待办。
+  const fresh = parsed.filter((q) => {
+    const t = Date.parse(q.at ?? "");
+    return Number.isNaN(t) ? true : now - t <= QUEUED_APPROVAL_TTL_MS;
+  });
+
+  // ② 同会话同规则折叠：取 at 更新的一条（at 相同则保留后出现的，等价于后写入）。
+  const byKey = new Map<string, QueuedApproval>();
+  for (const q of fresh) {
+    const prev = byKey.get(queueKey(q));
+    if (!prev || (q.at ?? "") >= (prev.at ?? "")) byKey.set(queueKey(q), q);
+  }
+
+  // ③ 新 → 旧，封顶 QUEUE_TAIL_LIMIT。
+  return [...byKey.values()]
+    .sort((a, b) => (b.at ?? "").localeCompare(a.at ?? ""))
+    .slice(0, QUEUE_TAIL_LIMIT);
 }
