@@ -811,7 +811,7 @@ export function ChatView({
     wasRunningRef.current = agentRunning;
   }, [agentRunning, planSessionId]);
   /** 本轮证据的唯一数据源：输入框上方一行与观测栏明细共用它 */
-  const turn = useTurnCheckpoints(planSessionId, checkpointRefreshKey);
+  const turn = useTurnCheckpoints(planSessionId, checkpointRefreshKey, agentRunning);
   /** 当前任务清单（最后一条成功的 todo_write 参数；消息流一变即重算，回滚 / 切分支自动正确） */
   const todos = useMemo(() => latestTodoState(messages, toolResults), [messages, toolResults]);
 

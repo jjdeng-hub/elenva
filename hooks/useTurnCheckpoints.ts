@@ -11,6 +11,11 @@ import { dialogConfirm, toast } from "@/components/ui/dialog";
  * 另一个还是上一轮），所以在这里拉一次、两处共用。
  */
 
+/** 运行中的刷新节奏（与首页「等你处理」轮询同档） */
+const LIVE_POLL_MS = 2000;
+/** 运行中只取最近几条：当前用户轮的子轮次通常个位数，没必要全量读盘 */
+const LIVE_LIMIT = 12;
+
 export interface TurnFile {
   path: string;
   tool: string;
@@ -112,14 +117,17 @@ export function mergeRound(checkpoints: readonly TurnCheckpoint[]): TurnRound | 
 export function useTurnCheckpoints(
   sessionId: string | null,
   refreshKey: number,
+  /** agent 正在运行：本轮快照仍在增长（每个工具调用都会实时落盘），需要按节奏刷新 */
+  live = false,
 ): TurnCheckpointsState {
   const [checkpoints, setCheckpoints] = useState<TurnCheckpoint[]>([]);
   const [restoring, setRestoring] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
-  const load = useCallback(async (sid: string): Promise<TurnCheckpoint[] | null> => {
+  const load = useCallback(async (sid: string, limit?: number): Promise<TurnCheckpoint[] | null> => {
     try {
-      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/checkpoints`, { cache: "no-store" });
+      const query = limit ? `?limit=${limit}` : "";
+      const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/checkpoints${query}`, { cache: "no-store" });
       if (!res.ok) return null;
       const data = (await res.json()) as { checkpoints?: TurnCheckpoint[] };
       const list = Array.isArray(data.checkpoints) ? data.checkpoints : [];
@@ -138,6 +146,20 @@ export function useTurnCheckpoints(
     }
     void load(sessionId);
   }, [sessionId, refreshKey, reloadKey, load]);
+
+  /*
+   * 运行中按节奏刷新。
+   *
+   * 本轮快照是**实时落盘**的：`turn_start` 建档、每个 `tool_call` 追一条命令 /
+   * 文件预镜像、`tool_result` 回填成败。但前端原先只在轮末（refreshKey）、切会话、
+   * 窗口聚焦时拉 —— 于是「思考中已经跑了十条命令，观测栏还停在上一轮甚至空的」
+   * 成了稳定复现的错觉（2026-10-24 实测）。
+   */
+  useEffect(() => {
+    if (!sessionId || !live) return;
+    const timer = setInterval(() => void load(sessionId, LIVE_LIMIT), LIVE_POLL_MS);
+    return () => clearInterval(timer);
+  }, [sessionId, live, load]);
 
   /* 回到窗口时刷一次：文件可能刚在编辑器里被改过（「被改过」标签要跟上） */
   useEffect(() => {

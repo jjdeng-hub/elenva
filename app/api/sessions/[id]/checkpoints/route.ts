@@ -10,12 +10,16 @@ export const dynamic = "force-dynamic";
  * 文件 / 可回滚」。只读，不触发任何还原。changedSince 供「回滚会跳过」预告。
  */
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
+  // 运行中观测栏按 2s 轮询（`hooks/useTurnCheckpoints`），只取最近几条 ——
+  // mergeRound 只需要覆盖当前用户轮，没必要每次全量读 50 个 manifest。
+  const raw = Number(new URL(req.url).searchParams.get("limit"));
+  const limit = Number.isFinite(raw) && raw > 0 ? Math.min(Math.floor(raw), 50) : undefined;
   try {
-    const checkpoints = listCheckpoints(id).map((checkpoint) => ({
+    const checkpoints = listCheckpoints(id, undefined, limit).map((checkpoint) => ({
       id: checkpoint.id,
       turnIndex: checkpoint.turnIndex,
       createdAt: checkpoint.createdAt,
