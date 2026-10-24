@@ -774,7 +774,8 @@ export function HomeDashboard({
               </h2>
               <span className="text-[12px] text-dim">近 24 小时</span>
             </div>
-            <div className="mt-1.5 flex flex-col">
+            {/* 显式 grid-cols-1：隐式 auto 列会被内容撑破（900px 下实测 929px > 卡片 836px） */}
+            <div className="mt-1.5 grid grid-cols-1 gap-x-8 gap-y-0.5 lg:grid-cols-2">
               {completions.map((c) => {
                 const sess = sessionsById.get(c.sessionId);
                 // 会话可能在 24h 窗口内被删（或列表尚未刷新）—— 找不到就不渲染，
@@ -785,9 +786,9 @@ export function HomeDashboard({
                   <button
                     key={c.sessionId}
                     onClick={() => onOpenSession(sess)}
-                    className="flex w-full cursor-pointer items-center gap-2 rounded-md border-b border-line-soft px-1.5 py-2 text-left t-fast last:border-b-0 hover:bg-hover"
+                    className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-2 text-left t-fast hover:bg-hover"
                   >
-                    <span className="min-w-0 shrink-0 max-w-[36%] truncate text-[12px] font-medium text-fg">
+                    <span className="min-w-0 max-w-[220px] shrink-0 truncate text-[12px] font-medium text-fg">
                       {displayTitle(sess)}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-[12px] text-muted">{reply}</span>
