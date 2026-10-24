@@ -5,6 +5,7 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { toast } from "@/components/ui/dialog";
+import { SlowHint } from "@/components/ui/bits";
 import { useModelNotes } from "@/hooks/useModelNotes";
 
 /** 与 lib/model-notes.ts 的 MAX_NOTE_LENGTH 一致（客户端不能运行时导入该文件——下半有 node:fs）。 */
@@ -300,17 +301,33 @@ export function ModelScopeEditor({ refreshKey = 0 }: { refreshKey?: number }) {
 
       <div className="max-h-[22rem] overflow-y-auto px-4 py-3">
         {loading && (
-          <div className="flex items-center gap-2 py-4 text-[12px] text-dim">
-            <Loader2 size={14} className="animate-spin" /> 加载模型库…
+          <div className="py-4">
+            <div className="flex items-center gap-2 text-[12px] text-dim">
+              <Loader2 size={14} className="animate-spin" /> 加载模型库…
+            </div>
+            <SlowHint className="mt-1" hint="首次加载会读取项目扩展，可能需要几秒" />
           </div>
         )}
         {!loading && groups.length === 0 && (
           <div className="py-4 text-[12px] text-dim">
-            {loadError
-              ? `模型库加载失败：${loadError}`
-              : models.length === 0
-                ? "没有可用模型，请先在下方配置厂商密钥。"
-                : "没有匹配的模型"}
+            {loadError ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <span>模型库加载失败：{loadError}</span>
+                <button
+                  onClick={() => {
+                    setLoading(true);
+                    void loadModels().finally(() => setLoading(false));
+                  }}
+                  className="btn btn-sm btn-ghost"
+                >
+                  重试
+                </button>
+              </div>
+            ) : models.length === 0 ? (
+              "没有可用模型，请先在下方配置厂商密钥。"
+            ) : (
+              "没有匹配的模型"
+            )}
           </div>
         )}
         {!loading &&

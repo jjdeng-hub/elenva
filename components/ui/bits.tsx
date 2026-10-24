@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
 
 /** 通用空状态 */
@@ -31,6 +32,32 @@ export function EmptyState({
 /** 骨架屏块 */
 export function Skeleton({ className }: { className?: string }) {
   return <div className={cn("anim-pulse rounded-md bg-panel-2", className)} />;
+}
+
+/**
+ * 慢加载提示：骨架屏超过 afterMs 仍未结束时补一句说明。
+ * 没有它，几秒以上的加载看起来就像卡死 —— 用户只能猜是不是坏了。
+ */
+export function SlowHint({
+  afterMs = 1500,
+  hint,
+  className,
+}: {
+  afterMs?: number;
+  hint?: string;
+  className?: string;
+}) {
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), afterMs);
+    return () => clearTimeout(timer);
+  }, [afterMs]);
+  if (!slow) return null;
+  return (
+    <div role="status" className={cn("text-[11px] leading-relaxed text-dim", className)}>
+      仍在加载…{hint ? ` · ${hint}` : ""}
+    </div>
+  );
 }
 
 /** 消息加载骨架屏：右侧用户气泡 + 左侧回复块 */

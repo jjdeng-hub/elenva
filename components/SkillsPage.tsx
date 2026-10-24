@@ -1,13 +1,13 @@
 "use client";
 
-import { Archive, ArchiveRestore, Download, FileText, Library, Loader2, Plus, RefreshCw, Save, Search, TrendingUp, X } from "lucide-react";
+import { Archive, ArchiveRestore, AlertTriangle, Download, FileText, Library, Loader2, Plus, RefreshCw, Save, Search, TrendingUp, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SkillAdvisorReport } from "@/lib/skill-advisor";
 import { buildSkillAdvisorReport } from "@/lib/skill-advisor";
 import type { SkillUsageReport } from "@/lib/skill-usage";
 import { cn } from "@/components/lib/utils";
-import { PageHeader, Skeleton } from "@/components/ui/bits";
+import { EmptyState, PageHeader, Skeleton, SlowHint } from "@/components/ui/bits";
 import { dialogConfirm, toast } from "@/components/ui/dialog";
 
 type SkillInfo = {
@@ -127,6 +127,8 @@ function SkillEditor({ filePath, onClose }: { filePath: string; onClose: () => v
 export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [loading, setLoading] = useState(false);
+  /** 加载失败与「没有技能」必须分开：此前 catch 后统一置空，失败被显示成「没有可用技能」 */
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
   const [editingPath, setEditingPath] = useState<string | null>(null);
   // 更新检查状态：filePath → 状态文本
@@ -168,10 +170,14 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
     if (!cwd) return;
     setLoading(true);
     try {
-      const data = await fetch(`/api/skills?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" }).then((r) => r.json());
-      setSkills(data.skills ?? []);
-    } catch {
+      const res = await fetch(`/api/skills?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" });
+      const data = (await res.json().catch(() => ({}))) as { skills?: SkillInfo[]; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+      setSkills(Array.isArray(data.skills) ? data.skills : []);
+      setLoadError(null);
+    } catch (e) {
       setSkills([]);
+      setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -429,7 +435,7 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
         <PageHeader
           icon={<Library size={16} />}
           title="技能"
-          subtitle={`管理 Agent 可用的 Skills · 共 ${skills.length} 个`}
+          subtitle={`管理 Agent 可用的 Skills · 共 ${loading ? "—" : skills.length} 个`}
           actions={
             <button
               onClick={() => defaultCwd && load(defaultCwd)}
@@ -517,9 +523,23 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
                   </div>
                 </div>
               ))}
+              <SlowHint className="px-4 pb-3" hint="首次加载要读取技能目录与安装信息" />
             </div>
           )}
-          {!loading && skills.length === 0 && (
+          {!loading && loadError && (
+            <EmptyState
+              icon={<AlertTriangle size={16} />}
+              title="技能列表加载失败"
+              hint={loadError}
+              action={
+                <button onClick={() => defaultCwd && void load(defaultCwd)} className="btn btn-ghost">
+                  重试
+                </button>
+              }
+              className="py-10"
+            />
+          )}
+          {!loading && !loadError && skills.length === 0 && (
             <div className="px-4 py-6 text-[12px] text-dim">当前项目没有可用技能</div>
           )}
           {skills.map((s) => {
