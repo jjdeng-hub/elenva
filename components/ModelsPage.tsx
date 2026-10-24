@@ -1,17 +1,18 @@
 "use client";
 
-import { Check, Cpu, Download, KeyRound, Loader2, RefreshCw, Save, ShieldCheck, Star, X } from "lucide-react";
+import { Check, Cpu, KeyRound, Loader2, Plus, RefreshCw, Save, ShieldCheck, Star, X } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
-import { dialogConfirm, dialogPrompt, toast } from "@/components/ui/dialog";
+import { dialogConfirm, toast } from "@/components/ui/dialog";
 import { relTime } from "@/lib/format";
 import { EmptyState, PageHeader, Skeleton } from "@/components/ui/bits";
 import { ModelScopeEditor } from "@/components/ModelScopeEditor";
 import { ModelSetupDialog } from "@/components/ModelSetupDialog";
+import { CustomProviderDialog, type CustomProviderSource } from "@/components/CustomProviderDialog";
 
 type ProviderConfig = { baseUrl?: string; apiKey?: string; [k: string]: unknown };
-type CatalogEntry = { providerName?: string; id: string; name?: string; provider?: string };
+type CatalogEntry = { providerName?: string; id: string; name?: string; provider?: string; providerBaseUrl?: string };
 type ProviderAuthStatus = {
   id: string;
   label: string;
@@ -437,9 +438,9 @@ function ModelHealthSection() {
 export function ModelsPage() {
   const [config, setConfig] = useState<Record<string, ProviderConfig>>({});
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
+  /* 自定义厂商保存后要让「模型库」卡重新拉一次（白名单 + 新模型），否则它拿旧白名单保存会把同步结果覆盖掉 */
+  const [scopeVersion, setScopeVersion] = useState(0);
 
   // catalog 搜索
   const [catQuery, setCatQuery] = useState("");
@@ -448,12 +449,12 @@ export function ModelsPage() {
   /* 「接入模型」向导（选厂商 → 凭据 → 默认模型），对应 pi CLI 的 /login */
   const [setupOpen, setSetupOpen] = useState(false);
   const [setupProvider, setSetupProvider] = useState<string | undefined>(undefined);
-  /* 自定义 Provider：拉取网关实际可用的模型（/api/models-config/discover） */
-  const [discovering, setDiscovering] = useState<string | null>(null);
-  const [discovered, setDiscovered] = useState<
-    Record<string, { models: { id: string; name?: string }[]; endpoint: string } | undefined>
-  >({});
-  const [discoverError, setDiscoverError] = useState<Record<string, string | undefined>>({});
+  /* 自定义模型对话框：新增 / 编辑中转站与自建网关（写 models.json） */
+  const [customDialog, setCustomDialog] = useState<{
+    mode: "create" | "edit";
+    name?: string;
+    provider?: CustomProviderSource;
+  } | null>(null);
 
   // 测试
   const [testing, setTesting] = useState<string | null>(null);
@@ -475,54 +476,60 @@ export function ModelsPage() {
     load();
   }, [load]);
 
-  const save = async (providers: Record<string, ProviderConfig>) => {
-    setSaving(true);
-    setSavedMsg(null);
+  /** 写整份 providers 到 models.json；失败时抛错，由调用方决定怎么提示 */
+  const persistProviders = useCallback(async (providers: Record<string, ProviderConfig>) => {
+    const res = await fetch("/api/models-config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ providers }),
+    });
+    if (!res.ok) {
+      const d = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(d.error || `保存失败（HTTP ${res.status}）`);
+    }
+    setConfig(providers);
+    setSavedMsg("已保存");
+    setTimeout(() => setSavedMsg(null), 2000);
+  }, []);
+
+  /**
+   * 把模型同步进「模型库」白名单（enabledModels）。
+   * 有白名单时，不在其中的模型不会出现在对话的模型选择器里 ——
+   * 刚接好的中转模型会「保存成功却选不到」。无白名单（空 / 未设）时全部可见，不动设置。
+   */
+  const syncEnabledModels = useCallback(async (
+    providerName: string,
+    nextIds: string[],
+    previousIds: string[],
+  ): Promise<{ scopeAdded?: number; scopeError?: string }> => {
     try {
-      const res = await fetch("/api/models-config", {
+      const data = (await fetch("/api/pi-settings", { cache: "no-store" }).then((r) => r.json())) as {
+        settings?: { enabledModels?: string[] };
+      };
+      const current = data.settings?.enabledModels;
+      if (!Array.isArray(current) || current.length === 0) return {};
+
+      const previousRefs = new Set(previousIds.map((id) => `${providerName}/${id}`));
+      const kept = current.filter((pattern) => !previousRefs.has(pattern));
+      const additions = nextIds
+        .map((id) => `${providerName}/${id}`)
+        .filter((ref) => !kept.includes(ref));
+      if (additions.length === 0 && kept.length === current.length) return {};
+
+      const res = await fetch("/api/pi-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...config, providers }),
+        body: JSON.stringify({ enabledModels: [...kept, ...additions] }),
       });
-      if (res.ok) {
-        setConfig(providers);
-        setSavedMsg("已保存");
-        setTimeout(() => setSavedMsg(null), 2000);
-      } else {
-        setSavedMsg("保存失败");
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(body.error || `HTTP ${res.status}`);
       }
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const updateProvider = (name: string, patch: Partial<ProviderConfig>) => {
-    setConfig((prev) => ({ ...prev, [name]: { ...prev[name], ...patch } }));
-  };
-
-  /** 拉取自定义 Provider 网关的模型清单（先用当前编辑中的值，未保存也能试） */
-  const discoverModels = async (name: string, provider: ProviderConfig) => {
-    setDiscovering(name);
-    setDiscoverError((prev) => ({ ...prev, [name]: undefined }));
-    try {
-      const res = await fetch("/api/models-config/discover", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerName: name, provider }),
-      });
-      const d = (await res.json()) as {
-        models?: { id: string; name?: string }[];
-        endpoint?: string;
-        error?: string;
-      };
-      if (!res.ok) throw new Error(d.error || `拉取失败（HTTP ${res.status}）`);
-      setDiscovered((prev) => ({ ...prev, [name]: { models: d.models ?? [], endpoint: d.endpoint ?? "" } }));
+      return { scopeAdded: additions.length };
     } catch (e) {
-      setDiscoverError((prev) => ({ ...prev, [name]: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setDiscovering(null);
+      return { scopeError: e instanceof Error ? e.message : String(e) };
     }
-  };
+  }, []);
 
   const searchCatalog = async () => {
     const q = catQuery.trim();
@@ -538,23 +545,18 @@ export function ModelsPage() {
     }
   };
 
-  const addFromCatalog = async (entry: CatalogEntry) => {
-    const provider = entry.provider || entry.providerName || "custom";
-    const name = await dialogPrompt({
-      title: `保存 Provider（模型 ${entry.id}）`,
-      message: "为这个 Provider 取一个名称，保存后可配置 Base URL 与 API Key。",
-      defaultValue: provider,
-      select: true,
-      confirmText: "保存",
-      placeholder: "provider 名称",
-    });
-    if (!name) return;
-    const providers = { ...config, [name]: { ...config[name], baseUrl: config[name]?.baseUrl ?? "" } };
-    setConfig(providers);
-    await save(providers);
-    setEditing(name);
+  /** 从 models.dev 目录挑中一个模型：带着厂商名与模型 ID 进自定义对话框，补完接入点才算落地 */
+  const addFromCatalog = (entry: CatalogEntry) => {
     setCatalog(null);
     setCatQuery("");
+    setCustomDialog({
+      mode: "create",
+      name: (entry.provider || entry.providerName || "").toLowerCase(),
+      provider: {
+        ...(entry.providerBaseUrl ? { baseUrl: entry.providerBaseUrl } : {}),
+        models: [{ id: entry.id, name: entry.name }],
+      },
+    });
   };
 
   const testProvider = async (name: string, p: ProviderConfig) => {
@@ -591,9 +593,18 @@ export function ModelsPage() {
           title="模型"
           subtitle="管理模型 Provider、API Key 与连接"
           actions={
-            <button onClick={() => setSetupOpen(true)} data-testid="open-setup" className="btn btn-primary">
-              <KeyRound size={12} /> 接入模型
-            </button>
+            <>
+              <button
+                onClick={() => setCustomDialog({ mode: "create" })}
+                data-testid="open-custom-provider"
+                className="btn btn-ghost"
+              >
+                <Plus size={12} /> 自定义模型
+              </button>
+              <button onClick={() => setSetupOpen(true)} data-testid="open-setup" className="btn btn-primary">
+                <KeyRound size={12} /> 接入模型
+              </button>
+            </>
           }
         />
 
@@ -603,19 +614,25 @@ export function ModelsPage() {
         <div className="grid gap-5 xl:grid-cols-2">
           <ProviderAuthSection onOpenSetup={(id) => { setSetupProvider(id); setSetupOpen(true); }} />
 
-          <ModelScopeEditor />
+          <ModelScopeEditor refreshKey={scopeVersion} />
 
-        {/* 已配置 providers（models.json 自定义 Provider，高级用法） */}
+        {/* 自定义厂商（models.json）：中转站 / 自建网关的写入入口 */}
         <Card>
           <CardHeader>
-            <CardTitle>自定义 Provider（高级）</CardTitle>
-            <span className="text-[11px] text-dim">写入 models.json，用于中转站 / 自建网关；开箱即用的厂商直接在上方「厂商与密钥」输入 Key 即可</span>
-            <span className="ml-auto shrink-0 text-[11px] text-dim">{providerNames.length} 个</span>
+            <CardTitle className="shrink-0 whitespace-nowrap">自定义厂商</CardTitle>
+            <span className="min-w-0 truncate text-[11px] text-dim">中转 / 自建网关 · 写入 models.json</span>
             {savedMsg && (
-              <span className={cn("ml-auto text-[12px]", savedMsg === "已保存" ? "text-success" : "text-danger")}>
+              <span className={cn("shrink-0 text-[12px]", savedMsg === "已保存" ? "text-success" : "text-danger")}>
                 {savedMsg}
               </span>
             )}
+            <span className="ml-auto shrink-0 text-[11px] text-dim">{providerNames.length} 个</span>
+            <button
+              onClick={() => setCustomDialog({ mode: "create" })}
+              className="btn btn-sm btn-ghost shrink-0"
+            >
+              <Plus size={12} /> 新增
+            </button>
           </CardHeader>
           {loading && (
             <div aria-busy="true" aria-label="加载配置" className="flex flex-col">
@@ -631,45 +648,66 @@ export function ModelsPage() {
             </div>
           )}
           {!loading && providerNames.length === 0 && (
-            <div className="px-4 py-4 text-[12px] text-dim">暂无自定义 Provider。绝大多数场景不需要这里 —— 上方选厂商、贴 Key 即可。</div>
+            <div className="flex flex-col items-center gap-2.5 px-4 py-8 text-center">
+              <div className="max-w-md text-[12px] leading-relaxed text-dim">
+                还没有自定义厂商。中转站、自建网关（Ollama / vLLM / 内网）从这里接入；官方厂商不用填这里。
+              </div>
+              <button onClick={() => setCustomDialog({ mode: "create" })} className="btn btn-ghost">
+                <Plus size={12} /> 接入中转 / 自定义端点
+              </button>
+            </div>
           )}
           {providerNames.map((name) => {
             const p = config[name];
-            const isEditing = editing === name;
+            const modelCount = Array.isArray(p.models) ? p.models.length : 0;
             return (
               <div key={name} className="border-t border-line-soft px-4 py-3 first:border-t-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-[13px] font-semibold text-fg">{name}</span>
+                  <span className="shrink-0 text-[13px] font-semibold text-fg">{name}</span>
                   <span className="truncate font-mono text-[11px] text-dim">{p.baseUrl || "未设置 baseUrl"}</span>
-                  <div className="ml-auto flex items-center gap-1.5">
+                  <span className="chip shrink-0">{modelCount} 模型</span>
+                  <div className="ml-auto flex shrink-0 items-center gap-1.5">
                     <button
                       onClick={() => testProvider(name, p)}
-                      disabled={testing !== null}
-                      className="flex h-7 cursor-pointer items-center gap-1 rounded-md border border-line px-2.5 text-[12px] text-muted t-fast hover:text-fg disabled:opacity-50"
+                      disabled={testing !== null || modelCount === 0}
+                      title={modelCount === 0 ? "先添加模型再测试" : "用第一个模型发一条最短请求"}
+                      className="btn btn-sm btn-ghost"
                     >
-                      {testing === name ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                      {testing === name ? <Loader2 size={12} className="anim-spin" /> : <Check size={12} />}
                       测试
                     </button>
                     <button
-                      onClick={() => setEditing(isEditing ? null : name)}
-                      className="flex h-7 cursor-pointer items-center gap-1 rounded-md border border-line px-2.5 text-[12px] text-muted t-fast hover:text-fg"
+                      onClick={() => setCustomDialog({ mode: "edit", name })}
+                      className="btn btn-sm btn-ghost"
                     >
-                      {isEditing ? "收起" : "编辑"}
+                      编辑
                     </button>
                     <button
                       onClick={async () => {
                         const ok = await dialogConfirm({
-                          title: "删除 Provider",
-                          message: `确定删除「${name}」的配置？此操作不可撤销。`,
+                          title: "删除厂商",
+                          message: `确定删除「${name}」的配置？该厂商下的模型会一起移除。`,
                           confirmText: "删除",
                           danger: true,
                         });
                         if (!ok) return;
+                        const previousIds = Array.isArray(p.models)
+                          ? (p.models as { id: string }[]).map((model) => model.id).filter(Boolean)
+                          : [];
                         const next = { ...config };
                         delete next[name];
-                        save(next);
+                        try {
+                          await persistProviders(next);
+                          const sync = await syncEnabledModels(name, [], previousIds);
+                          setScopeVersion((v) => v + 1);
+                          if (sync.scopeError) {
+                            toast(`厂商已删除，但模型库同步失败：${sync.scopeError}`);
+                          }
+                        } catch (e) {
+                          toast(e instanceof Error ? e.message : String(e));
+                        }
                       }}
-                      className="flex h-7 cursor-pointer items-center gap-1 rounded-md border border-line px-2.5 text-[12px] text-danger t-fast hover:bg-danger/10"
+                      className="btn btn-sm btn-subtle text-danger hover:bg-danger/10"
                     >
                       <X size={12} /> 删除
                     </button>
@@ -685,86 +723,15 @@ export function ModelsPage() {
                     {testResult[name].msg}
                   </div>
                 )}
-                {isEditing && (
-                  <div className="mt-2.5 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                    <label className="block">
-                      <span className="mb-1 block text-[11px] text-dim">Base URL</span>
-                      <input
-                        value={p.baseUrl ?? ""}
-                        onChange={(e) => updateProvider(name, { baseUrl: e.target.value })}
-                        placeholder="https://api.example.com/v1"
-                        className="h-8 w-full rounded-md border border-line bg-panel-2 px-2.5 font-mono text-[12px] text-fg outline-none focus:border-accent/50"
-                      />
-                    </label>
-                    <label className="block">
-                      <span className="mb-1 block text-[11px] text-dim">API Key</span>
-                      <input
-                        type="password"
-                        value={p.apiKey ?? ""}
-                        onChange={(e) => updateProvider(name, { apiKey: e.target.value })}
-                        placeholder="sk-…"
-                        className="h-8 w-full rounded-md border border-line bg-panel-2 px-2.5 font-mono text-[12px] text-fg outline-none focus:border-accent/50"
-                      />
-                    </label>
-                    <button
-                      onClick={() => save(config)}
-                      disabled={saving}
-                      className="flex h-8 w-fit cursor-pointer items-center gap-1.5 rounded-md bg-accent px-3 text-[12px] font-semibold text-accent-fg t-fast hover:bg-accent-hover disabled:opacity-50"
-                    >
-                      {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
-                      保存配置
-                    </button>
-                    {/* 用填好的 Base URL + Key 去网关自己的 /models 端点拉列表 ——
-                        自定义网关（中转站/自建）的模型 ID 无从得知，不接这个只能靠猜 */}
-                    <button
-                      onClick={() => void discoverModels(name, p)}
-                      disabled={discovering === name}
-                      title="请求该网关的 /models 端点，列出实际可用的模型"
-                      className="flex h-8 w-fit cursor-pointer items-center gap-1.5 rounded-md border border-line px-3 text-[12px] text-muted t-fast hover:text-fg disabled:opacity-50"
-                    >
-                      {discovering === name ? (
-                        <Loader2 size={12} className="anim-spin" />
-                      ) : (
-                        <Download size={12} />
-                      )}
-                      拉取可用模型
-                    </button>
-                  </div>
-                )}
-                {discovered[name] && (
-                  <div className="mt-2 rounded-lg border border-line bg-panel-2 p-2.5">
-                    <div className="flex items-center gap-2 text-[11px] text-dim">
-                      <span>发现 {discovered[name].models.length} 个模型</span>
-                      <span className="truncate font-mono text-[10px] text-dim/70">{discovered[name].endpoint}</span>
-                      <button
-                        onClick={() => setDiscovered((prev) => ({ ...prev, [name]: undefined as never }))}
-                        className="btn btn-sm btn-subtle ml-auto"
-                      >
-                        关闭
-                      </button>
-                    </div>
-                    <div className="mt-1.5 flex max-h-40 flex-wrap gap-1 overflow-y-auto">
-                      {discovered[name].models.map((m) => (
-                        <span key={m.id} className="chip chip-mono">
-                          {m.id}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                {discoverError[name] && (
-                  <div className="mt-1.5 rounded-md bg-danger/10 px-2.5 py-1 text-[12px] text-danger">
-                    {discoverError[name]}
-                  </div>
-                )}
               </div>
             );
           })}
         </Card>
 
-        {/* 从目录添加（自定义 Provider 的高级用法） */}
+        {/* 从模型目录入手：预填厂商名与模型 ID，仍要补 Base URL / Key */}
         <Card className="p-4">
-          <div className="mb-2 text-[12px] font-semibold text-fg">从模型目录添加（models.dev · 高级）</div>
+          <div className="mb-2 text-[12px] font-semibold text-fg">从模型目录入手（models.dev）</div>
+          <div className="mb-2 text-[11px] text-dim">不知道厂商 / 模型 ID 时先搜这里；选中后进「自定义模型」填接入点与 Key。</div>
           <div className="flex gap-2">
             <input
               value={catQuery}
@@ -806,9 +773,37 @@ export function ModelsPage() {
         <ModelHealthSection />
       </div>
 
+      <CustomProviderDialog
+        open={customDialog !== null}
+        mode={customDialog?.mode ?? "create"}
+        providerName={customDialog?.name}
+        provider={
+          customDialog?.provider
+          ?? (customDialog?.mode === "edit" && customDialog.name
+            ? (config[customDialog.name] as CustomProviderSource)
+            : undefined)
+        }
+        existingNames={providerNames}
+        onClose={() => setCustomDialog(null)}
+        onSave={async (name, patch) => {
+          const previousIds = Array.isArray(config[name]?.models)
+            ? (config[name].models as { id: string }[]).map((model) => model.id).filter(Boolean)
+            : [];
+          await persistProviders({ ...config, [name]: { ...config[name], ...patch } });
+          const result = await syncEnabledModels(name, patch.models.map((model) => model.id), previousIds);
+          setScopeVersion((v) => v + 1);
+          return result;
+        }}
+      />
+
       <ModelSetupDialog
         open={setupOpen}
         initialProviderId={setupProvider}
+        onCustomProvider={() => {
+          setSetupOpen(false);
+          setSetupProvider(undefined);
+          setCustomDialog({ mode: "create" });
+        }}
         onClose={() => {
           setSetupOpen(false);
           setSetupProvider(undefined);

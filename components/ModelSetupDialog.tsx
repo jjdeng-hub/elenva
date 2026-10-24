@@ -60,6 +60,7 @@ export function ModelSetupDialog({
   onDone,
   initialProviderId,
   reason,
+  onCustomProvider,
 }: {
   open: boolean;
   onClose: () => void;
@@ -68,6 +69,8 @@ export function ModelSetupDialog({
   initialProviderId?: string;
   /** 顶部说明文案（首页引导与模型页复用时措辞不同） */
   reason?: string;
+  /** 目录里没有的厂商：转去「自定义模型」对话框（中转站 / 自建网关） */
+  onCustomProvider?: () => void;
 }) {
   const [step, setStep] = useState<Step>("provider");
   const [providers, setProviders] = useState<ProviderAuthStatus[]>([]);
@@ -419,6 +422,21 @@ export function ModelSetupDialog({
                 <div className="py-8 text-center text-[12px] text-dim">没有匹配的厂商</div>
               )}
             </div>
+            {onCustomProvider && (
+              <div className="flex items-center gap-2 border-t border-line-soft px-5 py-2.5">
+                <span className="text-[11px] text-dim">目录里没有你的厂商？（中转站 / 自建网关）</span>
+                <button
+                  onClick={() => {
+                    closeEs();
+                    onCustomProvider();
+                  }}
+                  data-testid="setup-custom-provider"
+                  className="btn btn-sm btn-ghost ml-auto shrink-0"
+                >
+                  接入自定义端点
+                </button>
+              </div>
+            )}
           </>
         )}
 

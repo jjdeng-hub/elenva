@@ -60,6 +60,7 @@ tools/*.mjs
 !tools/auth-profiles-selftest.mjs
 !tools/skill-advisor-selftest.mjs
 !tools/model-notes-selftest.mjs
+!tools/models-config-selftest.mjs
 !tools/tool-risk-bash-selftest.mjs
 !tools/mcp-annotations-selftest.mjs
 !tools/mcp-probe-selftest.mjs

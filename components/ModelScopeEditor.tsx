@@ -63,7 +63,7 @@ function formatAgo(ms: number | undefined): string {
  * 实现上，勾选集合就是 pi 的 `enabledModels` 白名单（glob 模式；pi 没有黑名单）。
  * 未做选择时全部可用；保存过选择后，厂商上新模型默认留在库里，勾选后才进选择器。
  */
-export function ModelScopeEditor() {
+export function ModelScopeEditor({ refreshKey = 0 }: { refreshKey?: number }) {
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [patterns, setPatterns] = useState<string[]>([]);
   const [defaultRef, setDefaultRef] = useState<string | null>(null);
@@ -143,7 +143,7 @@ export function ModelScopeEditor() {
     return () => {
       cancelled = true;
     };
-  }, [loadModels]);
+  }, [loadModels, refreshKey]);
 
   const globPatterns = useMemo(() => patterns.filter(isGlobPattern), [patterns]);
 
