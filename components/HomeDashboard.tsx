@@ -750,7 +750,7 @@ export function HomeDashboard({
               跟着容器无限拉伸只会把内容摊薄；但在 1024~1440 这类中等屏上
               固定 620 会把左列表格挤扁，所以用百分比兜底。 */}
           <div className="flex min-h-0 w-full shrink-0 flex-col gap-3.5 lg:w-[min(620px,40%)]">
-            {usage && <TodayOverview report={usage} className="min-h-0 flex-1" />}
+            {usage && <TodayOverview report={usage} className="h-[248px] shrink-0" />}
             {/* 用量分析搬到原来热力图的位置（用户：热力图没用，把用量分析压进来）。
                 它原先在底部通栏占满整行，三列布局；现在是右列紧凑版。 */}
             {usage && (

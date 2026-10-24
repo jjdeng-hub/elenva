@@ -12,6 +12,16 @@ function shortModel(model?: string): string {
   return id;
 }
 
+/**
+ * 占比文案：非零但不足 1% 时写「<1%」，不四舍五入成 0%。
+ * 「缓存写入 26.8k → 0%」会被读成「没花钱」，实际是花了但占比极小。
+ */
+function pctLabel(value: number, total: number): string {
+  if (!(total > 0) || value <= 0) return "0%";
+  const pct = (value / total) * 100;
+  return pct < 1 ? "<1%" : `${Math.round(pct)}%`;
+}
+
 /** Token 构成堆叠条 + 分项数值 */
 function CompositionBar({ report }: { report: UsageReport }) {
   const t = report.allTime.tokens;
@@ -55,7 +65,7 @@ function CompositionBar({ report }: { report: UsageReport }) {
               <span className="text-dim">{p.key}</span>
               <span className="ml-auto tabular-nums text-muted">{formatTokens(p.value)}</span>
               <span className="w-10 shrink-0 text-right tabular-nums text-dim">
-                {Math.round((p.value / total) * 100)}%
+                {pctLabel(p.value, total)}
               </span>
             </div>
           ))}
@@ -163,7 +173,7 @@ export function UsageAnalysis({
               >
                 <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{projectLabel(p.cwd)}</span>
                 <span className="w-10 shrink-0 text-right text-[12px] tabular-nums text-dim">
-                  {Math.round((p.cost / projectRows.total) * 100)}%
+                  {pctLabel(p.cost, projectRows.total)}
                 </span>
                 <span className="shrink-0 text-[12px] tabular-nums text-muted">
                   {formatTokens(p.tokens)}
@@ -175,7 +185,7 @@ export function UsageAnalysis({
               <div className="flex items-center gap-2 px-1.5 py-1">
                 <span className="min-w-0 flex-1 truncate text-[12px] text-dim">其余项目</span>
                 <span className="w-10 shrink-0 text-right text-[12px] tabular-nums text-dim">
-                  {Math.round((projectRows.rest.cost / projectRows.total) * 100)}%
+                  {pctLabel(projectRows.rest.cost, projectRows.total)}
                 </span>
                 <span className="shrink-0 text-[12px] tabular-nums text-muted">
                   {formatTokens(projectRows.rest.tokens)}

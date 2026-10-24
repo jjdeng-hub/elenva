@@ -33,7 +33,8 @@ export function TodayOverview({ report, className }: { report: UsageReport; clas
             <div className="text-[12px] text-dim tabular-nums">峰值 {formatCost(Math.max(...days.map((d) => d.cost)))}</div>
           </div>
       </div>
-      {/* 柱状图区吃满剩余高度：卡片被拉到与左列等高时，增长的是图形而不是空白 */}
+      {/* 高度由右列分配（上方数字块 + 下方柱状图），不再用 max-h 压住图表 ——
+          卡片被拉高时增长的是图，而不是中间一大片空白。 */}
       <div className="mt-2.5 flex min-h-0 flex-1 flex-col justify-end">
         {/* 全空态（2026-09-21）：14 天都无消耗时给一句说明，而不是一张看起来没加载完的空图 */}
         {!hasData && (
@@ -43,7 +44,7 @@ export function TodayOverview({ report, className }: { report: UsageReport; clas
         )}
         <svg
           viewBox={`0 0 100 22`}
-          className={cn("h-full max-h-24 w-full", !hasData && "hidden")}
+          className={cn("h-full w-full", !hasData && "hidden")}
           preserveAspectRatio="none"
         >
           {/* 底槽 + 只画有值的日：成本为 0 的日子若也画 h=1 的柱，
