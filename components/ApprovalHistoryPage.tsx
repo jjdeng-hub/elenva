@@ -97,8 +97,8 @@ export function ApprovalHistoryPage({
   const hasMore = entries.length < total;
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-      <div className="mx-auto w-full max-w-4xl">
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="page-col py-6">
         <PageHeader
           icon={<History size={16} />}
           title="审批历史"

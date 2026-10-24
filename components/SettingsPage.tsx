@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRight,
   Boxes,
+  Check,
   Loader2,
   Monitor,
   Moon,
@@ -816,12 +817,17 @@ function GuardrailsSection({ projects, defaultCwd }: {
                   className={cn(
                     "t-fast flex flex-1 cursor-pointer flex-col items-start gap-1 rounded-lg border px-3 py-2 text-left",
                     on
-                      ? "border-accent bg-active text-accent"
+                      ? "border-accent bg-accent-soft/40 text-fg"
                       : "border-line bg-panel-2 text-muted hover:border-accent/40 hover:text-fg",
                   )}
                 >
-                  <span className="text-[12px] font-semibold">{choice.label}</span>
-                  <span className={cn("text-[10px] leading-relaxed", on ? "text-accent/80" : "text-dim")}>
+                  {/* 选中态不再用红字：accent 是品牌色，但红字红底会被读成「报错」，
+                      而这里表达的是「当前选择」。改用强调边框 + 浅底 + 勾选。 */}
+                  <span className="flex items-center gap-1.5 text-[12px] font-semibold">
+                    {choice.label}
+                    {on && <Check size={12} className="shrink-0 text-accent" />}
+                  </span>
+                  <span className={cn("text-[10px] leading-relaxed", on ? "text-muted" : "text-dim")}>
                     {choice.hint}
                   </span>
                 </button>
