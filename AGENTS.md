@@ -217,3 +217,13 @@ CI（`.github/workflows/gates.yml`）在 push / PR 时跑同样三道门 + 生�
 - **`tools/memory-eval` 已修复（2026-10-17 · R4 ③）**：`installExtensionInto()` 改为与 `install.mjs` 同款递归拷贝（顶层 `.ts` + `README.md` + `vendor/`），layered 模式 `settings.packages` 置空（避免与 vendored 底座双注册）。验证：`node tools/memory-eval/run.mjs --case l1-pref` → 10/10、常驻注入 500 字符。余：R3/R4 改动后**完整 10 条基线（尤其 L5「细节在摘要之外」）尚未复跑一次**——需要时跑 `node tools/memory-eval/run.mjs`（约 5 分钟）。
 - **只读节律档拦下 `node <脚本>` 与只读记忆工具（2026-10-17 · R4 发现）**：`lib/tool-risk.ts` 的 `isReadOnlyShellCommand` 只放行 `node -e/-p/--version`，`node <脚本路径>` 被判为可写；`memory_find` / `memory_status` 也不在 `READ_ONLY_TOOLS` 里。于是「记忆周整理（只读）」任务只能用 `node -e 'import("./…")'` + `cat`/`grep` 绕行（实测可用，但绕）。若要正解：给只读档加「仓库内已知只读脚本」白名单，或让 `memory_find` / `memory_status(action=list)` 进只读集。
 - **`docs/feature-map.md` 在本仓库不存在（2026-10-17 · R4 发现）**：功能地图目前只存在于项目外的工作目录（`/root/content/elenva-work/feature-map.md`，含飞书链接等个人信息，按隐私规则不入仓库）。任务书里说的「更新 docs/feature-map.md」本轮改的是那份项目外文档；若确实要进仓库，需先脱敏并定下维护责任。
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

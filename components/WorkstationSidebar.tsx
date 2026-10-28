@@ -108,6 +108,7 @@ export function WorkstationSidebar({
   runningCount,
   projectCount,
   defaultCwd,
+  topSlot,
   collapsed,
   onToggle,
   drawer = false,
@@ -120,6 +121,8 @@ export function WorkstationSidebar({
   runningCount: number;
   projectCount: number;
   defaultCwd: string | null;
+  /** 顶部插槽（Agent 切换器等）：由外壳注入，侧栏本身不关心内容 */
+  topSlot?: React.ReactNode;
   collapsed: boolean;
   onToggle: () => void;
   /** 窄屏抽屉模式：脱离文档流，从左侧滑入覆盖内容区 */
@@ -177,6 +180,8 @@ export function WorkstationSidebar({
           重建整棵子树 —— 于是容器宽度还在走 200ms 过渡、文字却已经换掉了，
           观感就是「文字被直接删掉，栏还在慢慢缩」。现在文字常驻、只改 opacity。 */}
       {isCollapsed ? <LogoMark size={24} /> : <Logo />}
+
+      {topSlot && <div className="mt-3 w-full shrink-0">{topSlot}</div>}
 
       {/* 工作台不归组：它是所有分组的公共起点（总览 + 入口），不是一个"台面" */}
       <div className="h-3 shrink-0" />

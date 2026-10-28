@@ -22,6 +22,9 @@ import { SystemPage } from "@/components/SystemPage";
 import { SystemPromptPage } from "@/components/SystemPromptPage";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { WorkstationSidebar, type View } from "@/components/WorkstationSidebar";
+import { AgentHome } from "@/components/AgentHome";
+import { AgentSwitcher } from "@/components/AgentSwitcher";
+import { BUILTIN_AGENT_ID, builtinAgents, findAgent, type AgentRecord } from "@/lib/agents/manifest";
 import { cn } from "@/components/lib/utils";
 import { dialogConfirm, toast } from "@/components/ui/dialog";
 import { basename } from "@/lib/format";
@@ -57,8 +60,21 @@ const WS_AUTO_COLLAPSE_WIDTH = 1280;
 const WS_DRAWER_MAX_WIDTH = 1024;
 
 /* ---------------- hash 路由 ---------------- */
-function parseHash(): { view: View; sessionId: string | null; newCwd: string | null; sideId: string | null } {
-  const h = window.location.hash.replace(/^#/, "");
+/**
+ * Agent 前缀：`#a/<agentId>/<原 hash>`。
+ * 不带前缀的旧深链接一律落到内置 Agent（Justin），保证历史链接不失效。
+ */
+const AGENT_HASH_RE = /^a\/([a-z0-9][a-z0-9-]{0,63})(?:\/(.*))?$/;
+
+function parseHash(): { agent: string; view: View; sessionId: string | null; newCwd: string | null; sideId: string | null } {
+  const raw = window.location.hash.replace(/^#/, "");
+  let agent = BUILTIN_AGENT_ID;
+  let h = raw;
+  const prefixed = AGENT_HASH_RE.exec(raw);
+  if (prefixed) {
+    agent = prefixed[1];
+    h = prefixed[2] ?? "";
+  }
   if (h.startsWith("chat/")) {
     const rest = h.slice(5);
     // 查询串只出现在路径之后：`chat/<sid>?side=<sid2>` / `chat/new?cwd=<cwd>`。
@@ -69,21 +85,25 @@ function parseHash(): { view: View; sessionId: string | null; newCwd: string | n
     // URLSearchParams 已做百分号解码，勿再 decodeURIComponent（会二次解码）
     const sideId = params?.get("side") || null;
     if (pathPart === "new") {
-      return { view: "chat", sessionId: null, newCwd: params?.get("cwd") ?? null, sideId: null };
+      return { agent, view: "chat", sessionId: null, newCwd: params?.get("cwd") ?? null, sideId: null };
     }
     if (pathPart) {
-      return { view: "chat", sessionId: decodeURIComponent(pathPart), newCwd: null, sideId };
+      return { agent, view: "chat", sessionId: decodeURIComponent(pathPart), newCwd: null, sideId };
     }
   }
   // 旧深链接兼容：「Git 变更」「文件浏览器」已合并为「代码」
-  if (h === "git" || h === "files") return { view: "code", sessionId: null, newCwd: null, sideId: null };
-  if (h in PAGE_TITLES) return { view: h as View, sessionId: null, newCwd: null, sideId: null };
-  return { view: "home", sessionId: null, newCwd: null, sideId: null };
+  if (h === "git" || h === "files") return { agent, view: "code", sessionId: null, newCwd: null, sideId: null };
+  if (h in PAGE_TITLES) return { agent, view: h as View, sessionId: null, newCwd: null, sideId: null };
+  return { agent, view: "home", sessionId: null, newCwd: null, sideId: null };
 }
 
 /* ---------------- 主 AppShell ---------------- */
 export function AppShell() {
   const [view, setView] = useState<View>("home");
+  /** Agent 注册表：先用内置（Justin）渲染，挂载后由 /api/agents 补齐用户目录里的应用包 */
+  const [agents, setAgents] = useState<AgentRecord[]>(() => builtinAgents());
+  /** 当前 Agent；由 hash 前缀 `#a/<id>/...` 决定，缺省是内置编码 Agent */
+  const [activeAgent, setActiveAgent] = useState<string>(BUILTIN_AGENT_ID);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set());
   /** 会话默认工作区（~/pi-workspace，非项目语义；仅由 /api/default-cwd 初始化，勿他写） */
@@ -211,6 +231,22 @@ export function AppShell() {
     };
   }, [refreshSessions]);
 
+  /* Agent 注册表：内置 Agent 先渲染，用户目录里的应用包随后补齐（读盘失败保持内置，不阻塞工作台） */
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/agents", { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data: { agents?: AgentRecord[] }) => {
+        if (alive && Array.isArray(data.agents) && data.agents.length > 0) setAgents(data.agents);
+      })
+      .catch(() => {
+        /* 注册表读不到就只显示内置 Agent —— 不弹错，不阻塞 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   /* 标题栏未读提示 */
   useEffect(() => {
     document.title = unreadIds.size > 0 ? `(${unreadIds.size}) ELENVA · 工作台` : "ELENVA · 工作台";
@@ -226,9 +262,10 @@ export function AppShell() {
     });
   }, [selected?.id]);
 
-  /* 首次挂载：从 hash 恢复视图/会话（深链接）。在 effect 里做以保证 SSR 一致 */
+  /* 首次挂载：从 hash 恢复 Agent/视图/会话（深链接）。在 effect 里做以保证 SSR 一致 */
   useEffect(() => {
     const p = parseHash();
+    setActiveAgent(p.agent);
     if (p.view === "chat" && p.sessionId) {
       const tryRestore = async () => {
         // 空列表可能是瞬时失败/冷启动，重试几次再判「未找到」
@@ -290,6 +327,8 @@ export function AppShell() {
     } else if (view !== "home") {
       hash = `#${view}`;
     }
+    // Agent 前缀：内置 Agent（Justin）保持历史格式，应用包才加 `a/<id>/`
+    if (activeAgent !== BUILTIN_AGENT_ID) hash = `#a/${activeAgent}/${hash.slice(1)}`;
     if (typeof window === "undefined") return;
     // 地址栏已经是目标值（通常是前进/后退触发的状态同步）→ 不写历史
     if (window.location.hash === hash) {
@@ -302,7 +341,7 @@ export function AppShell() {
       window.history.pushState(null, "", hash);
     }
     syncedHashRef.current = hash;
-  }, [view, selected, newSessionCwd, sideSessionId]);
+  }, [view, selected, newSessionCwd, sideSessionId, activeAgent]);
 
   /* 浏览器前进/后退（hashchange 只在真实 hash 跳转时触发，replaceState 不会） */
   useEffect(() => {
@@ -310,6 +349,7 @@ export function AppShell() {
       const p = parseHash();
       // 前进/后退驱动的同步：记录已同步的 hash，避免随后的写回 effect 再压一条历史
       syncedHashRef.current = window.location.hash;
+      setActiveAgent(p.agent);
       if (p.view === "chat" && p.sessionId) {
         const found = sessions.find((s) => s.id === p.sessionId);
         if (found) {
@@ -705,6 +745,21 @@ export function AppShell() {
     );
   }, [sessions, homeQuery]);
 
+  /** 当前 Agent 记录：注册表尚未补齐时回落到内置 Agent，保证类型与首帧都不空 */
+  const activeAgentRecord: AgentRecord = findAgent(agents, activeAgent) ?? agents[0] ?? builtinAgents()[0];
+  /** 应用包 Agent：P0 只有首页，平台面板（观测/审查/成长）暂不适用 */
+  const isPackageAgent = activeAgentRecord.source === "package";
+
+  /** 切换 Agent = 换一套 workspace：视图回到首页、清掉当前会话，hash 由同步 effect 写回 */
+  const selectAgent = (id: string) => {
+    if (id === activeAgent) return;
+    setActiveAgent(id);
+    setView("home");
+    setSelected(null);
+    setSideSessionId(null);
+    setDrawerOpen(false);
+  };
+
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-bg text-fg">
       {/* 窄屏抽屉遮罩：点击任意处收起 */}
@@ -713,7 +768,17 @@ export function AppShell() {
       )}
       <WorkstationSidebar
         view={view}
+        topSlot={
+          <AgentSwitcher
+            agents={agents}
+            activeId={activeAgent}
+            collapsed={wsCollapsed}
+            onSelect={selectAgent}
+          />
+        }
         onViewChange={(v) => {
+          // 应用包 Agent 的专属视图还没接（P1）；先只允许停在它的首页，避免点进 Justin 的面板
+          if (isPackageAgent && v !== "home") return;
           if (v === "chat") openChatView();
           else {
             if (v !== "code") {
@@ -786,7 +851,9 @@ export function AppShell() {
         )}
 
         {/* 视图内容 */}
-        {view === "home" && (
+        {view === "home" && (isPackageAgent ? (
+          <AgentHome agent={activeAgentRecord} />
+        ) : (
           <HomeDashboard
             sessions={filteredHomeSessions}
             runningIds={runningIds}
@@ -800,7 +867,7 @@ export function AppShell() {
             contentTruncated={contentTruncated}
             defaultCwd={defaultCwd}
           />
-        )}
+        ))}
         {view === "code" && (
           <CodeView
             roots={browseRoots}
