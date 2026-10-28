@@ -42,7 +42,9 @@ ELENVA_AGENTS_DIR=D:\Agents hermes start
 字段说明：
 
 - `id`：小写字母 / 数字 / 连字符，≤64，必须与目录名一致。稳定键，改显示名不要改它。
-- `runtime`：`pi`（进程内 SDK）或 `hermes`（ACP 子进程，P1 接入）。缺省 `pi`。
+- `runtime`：`pi`（进程内 SDK）或 `hermes`（ACP 子进程）。缺省 `pi`。
+- `profile`（仅 `hermes`）：对应的 Hermes profile 名，缺省等于 `id`。
+  创建：`hermes profile create <id> --clone`（复制当前 profile 的模型与凭据）。
 - `panels`：声明式面板。每项是 `{ id, title, type, source }`：
   `type` 只能是 `cards` / `table` / `timeline` / `gallery` / `queue`；
   `source` 是应用包内的 JSON 文件（可省略 = 空面板）。

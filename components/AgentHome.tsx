@@ -2,6 +2,7 @@
 
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { AgentPanels } from "@/components/AgentPanels";
+import { AgentChat } from "@/components/AgentChat";
 import { agentGlyph, type AgentRecord } from "@/lib/agents/manifest";
 
 /**
@@ -50,16 +51,19 @@ export function AgentHome({ agent }: { agent: AgentRecord }) {
 
       <AgentPanels agentId={agent.id} />
 
-      <Card className="mt-4">
-        <CardHeader>
-          <CardTitle>运行时尚未接入</CardTitle>
-        </CardHeader>
-        <div className="px-4 py-3 text-[12px] text-dim">
-          P1 之前的骨架：注册表、切换、声明式面板都已就位，但运行时（{agent.runtime}）还没接上。
-          接上之后，它的会话、工具卡片、审批与图片会跑在这里；后台上跑什么由 runtime 决定，
-          面板只读它目录里的结构化文件。
-        </div>
-      </Card>
+      {agent.runtime === "hermes" ? (
+        <AgentChat agentId={agent.id} profile={agent.profile ?? agent.id} />
+      ) : (
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle>运行时尚未接入</CardTitle>
+          </CardHeader>
+          <div className="px-4 py-3 text-[12px] text-dim">
+            这个 Agent 声明的是 {agent.runtime} 运行时。平台内置的 Justin 走进程内 Pi；
+            应用包目前支持 hermes（ACP 子进程）。
+          </div>
+        </Card>
+      )}
     </div>
   );
 }

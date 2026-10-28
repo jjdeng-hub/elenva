@@ -23,6 +23,8 @@ export interface AgentManifest {
   icon?: string;
   /** 运行时：pi = 进程内 SDK；hermes = ACP 子进程（P1 接入） */
   runtime: AgentRuntime;
+  /** Hermes profile 名（runtime=hermes 时用）；缺省等于 agent id */
+  profile?: string;
   version?: string;
   /** 声明式面板：字符串或对象都接受，解析规则见 lib/agents/panels.ts */
   panels?: AgentPanel[];
@@ -114,6 +116,7 @@ export function parseAgentManifest(raw: unknown, dirName: string): ManifestParse
       description: trimmedString(obj.description) ?? undefined,
       icon: trimmedString(obj.icon) ?? undefined,
       runtime: runtimeText as AgentRuntime,
+      profile: trimmedString(obj.profile) ?? undefined,
       version: trimmedString(obj.version) ?? undefined,
       panels,
       capabilities,
