@@ -69,6 +69,8 @@ class AgentProc {
     this.usage = null;
     /** 本轮 agent 的可见文本，收尾时落进历史 */
     this.turnText = "";
+    /** Hermes 自动生成的会话标题（session_info_update） */
+    this.title = null;
   }
 
   /** 对话落盘：与应用包数据同目录，刷新/重开页面能读回来 */
@@ -194,8 +196,13 @@ class AgentProc {
     if (msg.method) {
       if (msg.method === "session/update") {
         const update = msg.params?.update ?? {};
-        if (update.sessionUpdate === "usage_update") this.usage = update;
-        if (update.sessionUpdate === "agent_message_chunk" && typeof update.content?.text === "string") {
+        const kind = update.sessionUpdate;
+        if (kind === "usage_update") this.usage = update;
+        if (kind === "session_info_update" && typeof update.title === "string" && update.title.trim()) {
+          this.title = update.title.trim();
+          this.emit({ type: "title", title: this.title });
+        }
+        if (kind === "agent_message_chunk" && typeof update.content?.text === "string") {
           this.turnText += update.content.text;
         }
         this.emit({ type: "update", update });
@@ -239,6 +246,21 @@ class AgentProc {
       usage: result?.usage ?? null,
     });
     return result;
+  }
+
+  /** 发通知（无 id）—— ACP 里 cancel 是 notification，带 id 会 -32601 Method not found */
+  notify(method, params) {
+    try {
+      this.proc.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`);
+    } catch (error) {
+      log(this.agentId, "notify failed", String(error));
+    }
+  }
+
+  async cancel() {
+    if (!this.sessionId) return;
+    this.lastActivity = Date.now();
+    this.notify("session/cancel", { sessionId: this.sessionId });
   }
 
   resolvePermission(requestId, optionId) {
@@ -390,6 +412,18 @@ const server = http.createServer(async (req, res) => {
       if (!agent) return json(res, 404, { error: "agent not running" });
       const ok = agent.resolvePermission(Number(body.requestId), String(body.optionId || "deny"));
       return json(res, ok ? 200 : 409, { ok });
+    } catch (error) {
+      return json(res, 500, { error: String(error) });
+    }
+  }
+
+  if (req.method === "POST" && url.pathname === "/cancel") {
+    try {
+      const body = await readBody(req);
+      const agent = agents.get(body.agentId);
+      if (!agent) return json(res, 404, { error: "agent not running" });
+      await agent.cancel();
+      return json(res, 202, { ok: true });
     } catch (error) {
       return json(res, 500, { error: String(error) });
     }

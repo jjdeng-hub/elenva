@@ -66,10 +66,13 @@ export async function POST(req: Request) {
       ? { agentId, profile: runtime.profile, cwd: runtime.cwd, text: String(body.text ?? "") }
       : action === "permission"
         ? { agentId, requestId: body.requestId, optionId: body.optionId }
-        : { agentId, cwd: runtime.cwd };
+        : action === "cancel"
+          ? { agentId }
+          : { agentId, cwd: runtime.cwd };
+  const endpoint = action === "prompt" || action === "permission" || action === "cancel" ? action : "reset";
 
   try {
-    const res = await fetch(`${HOST}/${action === "prompt" ? "prompt" : action === "permission" ? "permission" : "reset"}`, {
+    const res = await fetch(`${HOST}/${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

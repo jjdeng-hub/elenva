@@ -13,7 +13,7 @@ import { cn } from "@/components/lib/utils";
  */
 
 type ChatMessage = { id: number; role: "user" | "agent"; text: string };
-type ToolRow = { id: string; title: string; status?: string };
+type ToolRow = { id: string; title: string; kind?: string; locations?: string[]; status?: string; output?: string };
 type PermissionOption = { optionId: string; name?: string; kind?: string };
 type PermissionRequest = { requestId: number; title: string; options: PermissionOption[] };
 
@@ -28,6 +28,8 @@ export function AgentChat({ agentId, profile }: { agentId: string; profile: stri
   const [error, setError] = useState<string | null>(null);
   const [input, setInput] = useState("");
   const [sessionId, setSessionId] = useState<string | null>(null);
+  /** Hermes 自动生成的会话标题 */
+  const [title, setTitle] = useState<string | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
 
   const appendAgentText = useCallback((text: string) => {
@@ -54,6 +56,8 @@ export function AgentChat({ agentId, profile }: { agentId: string; profile: stri
       if (type === "ready") {
         setSessionId(String(data.sessionId ?? ""));
         setStatus("idle");
+      } else if (type === "title") {
+        setTitle(String(data.title ?? ""));
       } else if (type === "update") {
         const update = (data.update ?? {}) as Record<string, unknown>;
         const kind = String(update.sessionUpdate ?? "");
@@ -63,12 +67,35 @@ export function AgentChat({ agentId, profile }: { agentId: string; profile: stri
         else if (kind === "tool_call") {
           setTools((prev) => [
             ...prev,
-            { id: String(update.toolCallId ?? prev.length), title: String(update.title ?? "工具调用"), status: String(update.status ?? "") },
+            {
+              id: String(update.toolCallId ?? prev.length),
+              title: String(update.title ?? "工具调用"),
+              kind: typeof update.kind === "string" ? update.kind : undefined,
+              locations: Array.isArray(update.locations)
+                ? (update.locations as { path?: string }[]).map((l) => l.path).filter((p): p is string => !!p)
+                : undefined,
+              status: String(update.status ?? ""),
+            },
           ]);
         } else if (kind === "tool_call_update") {
+          const rawContent = Array.isArray(update.content) ? (update.content as unknown[]) : [];
+          const outputText = rawContent
+            .flatMap((block) => {
+              const b = block as { type?: string; content?: { text?: string } };
+              if (b?.type === "content" && typeof b.content?.text === "string") return [b.content.text];
+              return [];
+            })
+            .join("\n")
+            .trim();
           setTools((prev) =>
             prev.map((tool) =>
-              tool.id === String(update.toolCallId) ? { ...tool, status: String(update.status ?? tool.status) } : tool,
+              tool.id === String(update.toolCallId)
+                ? {
+                    ...tool,
+                    status: String(update.status ?? tool.status),
+                    output: outputText || tool.output,
+                  }
+                : tool,
             ),
           );
         }
@@ -161,6 +188,14 @@ export function AgentChat({ agentId, profile }: { agentId: string; profile: stri
     }).catch(() => {});
   };
 
+  const cancel = async () => {
+    await fetch("/api/agents/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId, action: "cancel" }),
+    }).catch(() => {});
+  };
+
   const reset = async () => {
     await fetch("/api/agents/chat", {
       method: "POST",
@@ -179,7 +214,10 @@ export function AgentChat({ agentId, profile }: { agentId: string; profile: stri
     <Card className="mt-6" data-testid="agent-chat">
       <CardHeader>
         <CardTitle>对话</CardTitle>
-        <span className="text-[10px] text-dim/70">ACP · {profile}</span>
+        <span className="truncate text-[10px] text-dim/70" title={title ?? "ACP"}>
+          ACP · {profile}
+          {title ? ` · ${title}` : ""}
+        </span>
         <button
           type="button"
           onClick={reset}
@@ -213,11 +251,30 @@ export function AgentChat({ agentId, profile }: { agentId: string; profile: stri
         {tools.length > 0 && (
           <div className="mt-2 flex flex-col gap-1">
             {tools.map((tool) => (
-              <div key={tool.id} className="flex items-center gap-2 text-[11px] text-dim">
-                <span className="rounded-sm border border-line px-1">工具</span>
-                <span className="min-w-0 flex-1 truncate">{tool.title}</span>
-                {tool.status && <span className="text-dim/70">{tool.status}</span>}
-              </div>
+              <details
+                key={tool.id}
+                data-testid="agent-tool"
+                className="rounded-lg border border-line bg-panel-2"
+              >
+                <summary className="flex cursor-pointer items-center gap-2 px-3 py-1.5 text-[11px] text-dim">
+                  <span className="shrink-0 rounded-sm border border-line px-1">{tool.kind ?? "工具"}</span>
+                  <span className="min-w-0 flex-1 truncate text-fg">{tool.title}</span>
+                  {tool.status && <span className="shrink-0 text-dim/70">{tool.status}</span>}
+                </summary>
+                <div className="px-3 pb-2">
+                  {tool.locations && tool.locations.length > 0 && (
+                    <div className="text-[10px] text-dim/70">{tool.locations.join(" · ")}</div>
+                  )}
+                  {tool.output ? (
+                    <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-md bg-panel px-2 py-1.5 text-[11px] leading-relaxed text-dim">
+                      {tool.output.slice(0, 4000)}
+                      {tool.output.length > 4000 ? "\n…（已截断）" : ""}
+                    </pre>
+                  ) : (
+                    <div className="mt-1 text-[11px] text-dim/70">没有输出</div>
+                  )}
+                </div>
+              </details>
             ))}
           </div>
         )}
@@ -257,14 +314,24 @@ export function AgentChat({ agentId, profile }: { agentId: string; profile: stri
           placeholder={sessionId ? "说点什么…（Enter 发送，Shift+Enter 换行）" : "说点什么…（首次发送会启动这个 Agent 的 ACP 进程）"}
           className="min-h-9 w-full resize-none rounded-lg border border-line bg-panel-2 px-3 py-2 text-[13px] text-fg outline-none placeholder:text-dim"
         />
-        <button
-          type="button"
-          onClick={() => void send()}
-          disabled={status === "waiting" || !input.trim()}
-          className="h-9 shrink-0 cursor-pointer rounded-lg bg-accent px-3.5 text-[12px] font-semibold text-accent-fg t-fast hover:bg-accent-hover disabled:cursor-default disabled:opacity-50"
-        >
-          {status === "waiting" ? "运行中…" : "发送"}
-        </button>
+        {status === "waiting" ? (
+          <button
+            type="button"
+            onClick={() => void cancel()}
+            className="h-9 shrink-0 cursor-pointer rounded-lg border border-line px-3.5 text-[12px] text-dim t-fast hover:bg-hover hover:text-fg"
+          >
+            停止
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => void send()}
+            disabled={!input.trim()}
+            className="h-9 shrink-0 cursor-pointer rounded-lg bg-accent px-3.5 text-[12px] font-semibold text-accent-fg t-fast hover:bg-accent-hover disabled:cursor-default disabled:opacity-50"
+          >
+            发送
+          </button>
+        )}
       </div>
     </Card>
   );
