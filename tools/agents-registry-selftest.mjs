@@ -16,6 +16,8 @@ process.env.ELENVA_AGENTS_DIR = agentsDir;
 const jiti = createJiti(import.meta.url, { alias: { "@": new URL("../", import.meta.url).pathname } });
 const manifestLib = await jiti.import("../lib/agents/manifest.ts");
 const registryLib = await jiti.import("../lib/agents/registry.ts");
+const panelsLib = await jiti.import("../lib/agents/panels.ts");
+const panelsServerLib = await jiti.import("../lib/agents/panels-server.ts");
 
 let fail = 0;
 const check = (name, fn) => {
@@ -65,7 +67,8 @@ check("合法 manifest 归一化：过滤空面板 / 只留布尔能力", () => 
     "house",
   );
   assert.equal(parsed.ok, true);
-  assert.deepEqual(parsed.manifest.panels, ["budget", "decisions"]);
+  assert.deepEqual(parsed.manifest.panels.map((panel) => panel.id), ["budget", "decisions"]);
+  assert.deepEqual(parsed.manifest.panels.map((panel) => panel.type), ["cards", "cards"]);
   assert.deepEqual(parsed.manifest.capabilities, { growth: false });
   assert.equal(parsed.manifest.runtime, "hermes");
 });
@@ -120,6 +123,71 @@ check("注册表：目录不存在时只返回内置 Agent", () => {
   const snapshot = registryLib.listAgents();
   assert.deepEqual(snapshot.agents.map((a) => a.id), ["justin"]);
   assert.deepEqual(snapshot.errors, []);
+});
+
+// ---------------------------------------------------------------- 面板
+check("面板：字符串与对象都接受，非法类型/重复 id 跳过", () => {
+  const panels = panelsLib.parsePanels([
+    "budget",
+    { id: "decisions", title: "决策", type: "cards", source: "data/decisions.json" },
+    { id: "bad", title: "坏类型", type: "video" },
+    { id: "decisions", title: "重复", type: "cards" },
+    "",
+  ]);
+  assert.deepEqual(panels.map((panel) => panel.id), ["budget", "decisions"]);
+  assert.equal(panels[0].type, "cards");
+  assert.equal(panels[1].source, "data/decisions.json");
+});
+
+check("面板数据：表格行归一化，非数组行丢弃、单元格转字符串", () => {
+  const data = panelsLib.normalizePanelData("table", { columns: ["A", 3], rows: [["x", 1], "bad", [null, "y"]] });
+  assert.deepEqual(data.columns, ["A"]);
+  assert.deepEqual(data.rows, [["x", "1"], ["", "y"]]);
+});
+
+check("面板数据：items 接受字符串与对象，缺 title 丢弃", () => {
+  const data = panelsLib.normalizePanelData("queue", {
+    items: ["随便", { title: "条目", status: "草稿" }, { meta: "无标题" }],
+  });
+  assert.deepEqual(data.items.map((item) => item.title), ["随便", "条目"]);
+  assert.equal(data.items[1].status, "草稿");
+});
+
+check("面板数据：空/坏结构退化为空面板", () => {
+  assert.deepEqual(panelsLib.normalizePanelData("cards", null), { items: [] });
+  assert.deepEqual(panelsLib.normalizePanelData("table", "nope"), { columns: [], rows: [] });
+  assert.equal(panelsLib.panelHasData("table", { columns: [], rows: [] }), false);
+});
+
+check("路径沙箱：包内 source 可读，越界拒绝", () => {
+  const pkgDir = join(root, "pkg");
+  mkdirSync(join(pkgDir, "data"), { recursive: true });
+  writeFileSync(join(pkgDir, "data", "budget.json"), JSON.stringify({ columns: ["A"], rows: [["1"]] }));
+
+  const inside = panelsServerLib.readPanelData(pkgDir, {
+    id: "b",
+    title: "B",
+    type: "table",
+    source: "data/budget.json",
+  });
+  assert.deepEqual(inside.data.rows, [["1"]]);
+  assert.equal(inside.error, undefined);
+
+  const escape = panelsServerLib.readPanelData(pkgDir, {
+    id: "x",
+    title: "X",
+    type: "table",
+    source: "../../etc/passwd",
+  });
+  assert.equal(escape.error, "source 越出应用包目录");
+
+  const missing = panelsServerLib.readPanelData(pkgDir, {
+    id: "m",
+    title: "M",
+    type: "table",
+    source: "data/none.json",
+  });
+  assert.ok(missing.error);
 });
 
 rmSync(root, { recursive: true, force: true });

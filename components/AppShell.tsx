@@ -328,7 +328,10 @@ export function AppShell() {
       hash = `#${view}`;
     }
     // Agent 前缀：内置 Agent（Justin）保持历史格式，应用包才加 `a/<id>/`
-    if (activeAgent !== BUILTIN_AGENT_ID) hash = `#a/${activeAgent}/${hash.slice(1)}`;
+    // 首次写回时用**地址栏里解析出的 agent**，而不是 state —— 深链接挂载时 state 可能还是默认值，
+    // 直接读 state 会把 `#a/content/home` 覆写成 `#home`。
+    const agentForHash = syncedHashRef.current === null ? parseHash().agent : activeAgent;
+    if (agentForHash !== BUILTIN_AGENT_ID) hash = `#a/${agentForHash}/${hash.slice(1)}`;
     if (typeof window === "undefined") return;
     // 地址栏已经是目标值（通常是前进/后退触发的状态同步）→ 不写历史
     if (window.location.hash === hash) {

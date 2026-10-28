@@ -1,6 +1,7 @@
 "use client";
 
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
+import { AgentPanels } from "@/components/AgentPanels";
 import { agentGlyph, type AgentRecord } from "@/lib/agents/manifest";
 
 /**
@@ -43,18 +44,20 @@ export function AgentHome({ agent }: { agent: AgentRecord }) {
             {agent.version ? ` · v${agent.version}` : ""}
           </div>
           <div className="break-all">目录：{agent.dir ?? "（内置，不占用户目录）"}</div>
-          <div>面板：{agent.panels?.length ? agent.panels.join(" / ") : "未声明"}</div>
+          <div>面板：{agent.panels?.length ? agent.panels.map((panel) => panel.title).join(" / ") : "未声明"}</div>
         </div>
       </Card>
+
+      <AgentPanels agentId={agent.id} />
 
       <Card className="mt-4">
         <CardHeader>
           <CardTitle>运行时尚未接入</CardTitle>
         </CardHeader>
         <div className="px-4 py-3 text-[12px] text-dim">
-          P0 只装好了 Agent 注册表与切换：这个 Agent 的运行时（{agent.runtime}）与结果面板在 P1 接入。
-          届时它的会话、工具卡片、审批与图片都会跑在这里，而平台侧的面板（观测 / 审查台账 / 成长）
-          会按它的能力声明决定是否出现。
+          P1 之前的骨架：注册表、切换、声明式面板都已就位，但运行时（{agent.runtime}）还没接上。
+          接上之后，它的会话、工具卡片、审批与图片会跑在这里；后台上跑什么由 runtime 决定，
+          面板只读它目录里的结构化文件。
         </div>
       </Card>
     </div>

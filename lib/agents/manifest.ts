@@ -8,6 +8,8 @@
  *   各自独立版本化、可私有、可分发，**不随本仓库开源**。
  */
 
+import { parsePanels, type AgentPanel } from "./panels";
+
 export type AgentRuntime = "pi" | "hermes";
 
 /** 应用包清单（manifest.json）。字段只增不改；未知字段忽略。 */
@@ -22,8 +24,8 @@ export interface AgentManifest {
   /** 运行时：pi = 进程内 SDK；hermes = ACP 子进程（P1 接入） */
   runtime: AgentRuntime;
   version?: string;
-  /** 声明式面板 id（P0 只透传与展示，不渲染） */
-  panels?: string[];
+  /** 声明式面板：字符串或对象都接受，解析规则见 lib/agents/panels.ts */
+  panels?: AgentPanel[];
   /** 平台面板开关（growth / subagents / observatory …，P0 只透传） */
   capabilities?: Record<string, boolean>;
   /** 数据目录（相对应用包目录；P1 起用于面板读取） */
@@ -95,9 +97,7 @@ export function parseAgentManifest(raw: unknown, dirName: string): ManifestParse
     return { ok: false, reason: `runtime 只支持 pi / hermes：${runtimeText}` };
   }
 
-  const panels = Array.isArray(obj.panels)
-    ? obj.panels.filter((panel): panel is string => typeof panel === "string" && panel.trim() !== "").map((p) => p.trim())
-    : undefined;
+  const panels = parsePanels(obj.panels);
 
   let capabilities: Record<string, boolean> | undefined;
   if (typeof obj.capabilities === "object" && obj.capabilities !== null && !Array.isArray(obj.capabilities)) {

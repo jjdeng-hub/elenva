@@ -5,7 +5,14 @@
   "icon": "◇",
   "runtime": "pi",
   "version": "0.0.1",
-  "panels": ["overview"],
+  "panels": [
+    {
+      "id": "overview",
+      "title": "概览",
+      "type": "cards",
+      "source": "data/overview.json"
+    }
+  ],
   "capabilities": {
     "growth": false
   },

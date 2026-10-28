@@ -29,7 +29,11 @@ ELENVA_AGENTS_DIR=D:\Agents hermes start
   "icon": "🏠",
   "runtime": "hermes",
   "version": "0.1.0",
-  "panels": ["budget", "decisions", "phases"],
+  "panels": [
+    { "id": "budget", "title": "预算", "type": "table", "source": "data/budget.json" },
+    { "id": "decisions", "title": "决策", "type": "cards", "source": "data/decisions.json" },
+    { "id": "phases", "title": "施工阶段", "type": "timeline", "source": "data/phases.json" }
+  ],
   "capabilities": { "growth": false, "schedules": true },
   "dataDir": "data"
 }
@@ -39,7 +43,10 @@ ELENVA_AGENTS_DIR=D:\Agents hermes start
 
 - `id`：小写字母 / 数字 / 连字符，≤64，必须与目录名一致。稳定键，改显示名不要改它。
 - `runtime`：`pi`（进程内 SDK）或 `hermes`（ACP 子进程，P1 接入）。缺省 `pi`。
-- `panels`：声明式面板 id。P0 只展示，不渲染。
+- `panels`：声明式面板。每项是 `{ id, title, type, source }`：
+  `type` 只能是 `cards` / `table` / `timeline` / `gallery` / `queue`；
+  `source` 是应用包内的 JSON 文件（可省略 = 空面板）。
+  数据格式：`table` 用 `{ columns, rows }`，其余用 `{ items: [{ title, meta, status, detail, date, src }] }`。
 - `capabilities`：平台面板开关（如 `growth` / `subagents`），只接受布尔值。
 - `dataDir`：应用包自己的数据目录（相对包根），P1 起供面板读取。
 
