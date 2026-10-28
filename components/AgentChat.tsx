@@ -98,6 +98,27 @@ export function AgentChat({ agentId, profile }: { agentId: string; profile: stri
     return () => source.close();
   }, [agentId, appendAgentText]);
 
+  // 历史：刷新页面后把落盘的对话读回来（落盘在 ACP 宿主侧，文件在应用包 data/chat.jsonl）
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/agents/chat/history?agentId=${encodeURIComponent(agentId)}`, { cache: "no-store" })
+      .then((res) => res.json())
+      .then((data: { messages?: { role: "user" | "agent"; text: string }[] }) => {
+        if (!alive) return;
+        const items = (data.messages ?? []).map((message) => ({
+          id: nextMessageId++,
+          role: message.role,
+          text: message.text,
+        }));
+        // 只在本轮还没有任何消息时回填，避免把正在流的这一轮盖掉
+        if (items.length > 0) setMessages((prev) => (prev.length > 0 ? prev : items));
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [agentId]);
+
   useEffect(() => {
     scroller.current?.scrollTo({ top: scroller.current.scrollHeight });
   }, [messages, thought, tools, permission]);

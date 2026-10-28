@@ -20,6 +20,7 @@
 
 const http = require("http");
 const { spawn } = require("child_process");
+const fs = require("fs");
 const path = require("path");
 
 const PORT = Number(process.env.ELENVA_ACP_PORT || 30201);
@@ -66,6 +67,28 @@ class AgentProc {
     this.state = "starting"; // starting | ready | dead
     this.error = null;
     this.usage = null;
+    /** 本轮 agent 的可见文本，收尾时落进历史 */
+    this.turnText = "";
+  }
+
+  /** 对话落盘：与应用包数据同目录，刷新/重开页面能读回来 */
+  historyPath() {
+    return path.join(this.cwd, "data", "chat.jsonl");
+  }
+
+  appendHistory(entry) {
+    try {
+      const file = this.historyPath();
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      // 简单封顶：超过 1MB 只留最近 200 行，避免长期使用把文件养成巨物
+      if (fs.existsSync(file) && fs.statSync(file).size > 1024 * 1024) {
+        const kept = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).slice(-200);
+        fs.writeFileSync(file, kept.length ? `${kept.join("\n")}\n` : "");
+      }
+      fs.appendFileSync(file, `${JSON.stringify({ ts: Date.now(), ...entry })}\n`);
+    } catch (error) {
+      log(this.agentId, "history write failed", String(error));
+    }
   }
 
   emit(event) {
@@ -172,6 +195,9 @@ class AgentProc {
       if (msg.method === "session/update") {
         const update = msg.params?.update ?? {};
         if (update.sessionUpdate === "usage_update") this.usage = update;
+        if (update.sessionUpdate === "agent_message_chunk" && typeof update.content?.text === "string") {
+          this.turnText += update.content.text;
+        }
         this.emit({ type: "update", update });
       }
       return;
@@ -196,10 +222,15 @@ class AgentProc {
   async prompt(text) {
     if (!this.sessionId) throw new Error("会话尚未建立");
     this.lastActivity = Date.now();
+    this.turnText = "";
+    this.appendHistory({ role: "user", text });
     const result = await this.request("session/prompt", {
       sessionId: this.sessionId,
       prompt: [{ type: "text", text }],
     });
+    const reply = this.turnText.trim();
+    if (reply) this.appendHistory({ role: "agent", text: reply });
+    this.turnText = "";
     // session/prompt 的响应带着 stopReason，是这一轮的真正收尾：
     // 从线程池/等待队列里回来时也要让前端把「运行中」放掉。
     this.emit({
@@ -284,6 +315,29 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
+  if (req.method === "GET" && url.pathname === "/history") {
+    const agentId = url.searchParams.get("agentId") || "";
+    const dir = url.searchParams.get("dir") || agents.get(agentId)?.cwd;
+    if (!dir) return json(res, 200, { messages: [] });
+    try {
+      const file = path.join(dir, "data", "chat.jsonl");
+      if (!fs.existsSync(file)) return json(res, 200, { messages: [] });
+      const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).slice(-200);
+      const messages = lines.flatMap((line) => {
+        try {
+          const entry = JSON.parse(line);
+          if (!entry || (entry.role !== "user" && entry.role !== "agent")) return [];
+          return [{ ts: entry.ts ?? null, role: entry.role, text: String(entry.text ?? "") }];
+        } catch {
+          return [];
+        }
+      });
+      return json(res, 200, { messages });
+    } catch (error) {
+      return json(res, 500, { error: String(error) });
+    }
+  }
+
   if (req.method === "GET" && url.pathname === "/events") {
     const agentId = url.searchParams.get("agentId") || "";
     res.writeHead(200, {
@@ -344,8 +398,17 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/reset") {
     const body = await readBody(req).catch(() => ({}));
     const agent = agents.get(body.agentId);
+    const dir = agent?.cwd || (typeof body.cwd === "string" ? body.cwd : null);
     agent?.stop();
     if (agent) agents.delete(body.agentId);
+    // 重置会话 = 清掉这轮对话记录；进程重启后是全新上下文
+    if (dir) {
+      try {
+        fs.writeFileSync(path.join(dir, "data", "chat.jsonl"), "");
+      } catch {
+        /* 文件不存在也无需处理 */
+      }
+    }
     return json(res, 200, { ok: true });
   }
 
