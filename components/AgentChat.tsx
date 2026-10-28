@@ -84,6 +84,8 @@ export function AgentChat({ agentId, profile }: { agentId: string; profile: stri
       } else if (type === "turn_end") {
         setStatus("idle");
         setThought("");
+        // 面板重新读盘：Agent 这一轮可能刚写完 data/*.json
+        window.dispatchEvent(new Event("elenva:agent-turn-end"));
       } else if (type === "error") {
         setError(String(data.message ?? "未知错误"));
         setStatus("error");

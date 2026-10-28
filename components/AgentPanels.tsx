@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { panelHasData, type AgentPanel, type PanelData, type PanelItem } from "@/lib/agents/panels";
 
@@ -15,9 +15,8 @@ type PanelWithData = { panel: AgentPanel; data: PanelData; error?: string };
 export function AgentPanels({ agentId }: { agentId: string }) {
   const [panels, setPanels] = useState<PanelWithData[] | null>(null);
 
-  useEffect(() => {
+  const load = useCallback(() => {
     let alive = true;
-    setPanels(null);
     fetch(`/api/agents/panels?id=${encodeURIComponent(agentId)}`, { cache: "no-store" })
       .then((res) => res.json())
       .then((data: { panels?: PanelWithData[] }) => {
@@ -30,6 +29,18 @@ export function AgentPanels({ agentId }: { agentId: string }) {
       alive = false;
     };
   }, [agentId]);
+
+  useEffect(() => {
+    setPanels(null);
+    load();
+  }, [load]);
+
+  // 对话一轮结束后重新读盘：Agent 刚写完 data/*.json，面板应该自己长出来，而不是要人刷新
+  useEffect(() => {
+    const onTurnEnd = () => load();
+    window.addEventListener("elenva:agent-turn-end", onTurnEnd);
+    return () => window.removeEventListener("elenva:agent-turn-end", onTurnEnd);
+  }, [load]);
 
   if (panels === null) {
     return <div className="mt-6 text-[12px] text-dim">加载面板…</div>;
