@@ -211,7 +211,7 @@ export function invalidateProfilesCache(): void {
 
 export interface AuditLine {
   ts: string;
-  action: "connect" | "disconnect";
+  action: "connect" | "disconnect" | "create" | "delete" | "import";
   profile: string;
   result: "ok" | "error";
   detail?: string;

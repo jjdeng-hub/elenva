@@ -7,6 +7,7 @@ import {
   invalidateProfilesCache,
   PROFILE_ID_RE,
 } from "@/lib/profiles";
+import { ApiError, startCreateProfile } from "@/lib/profiles-mutate";
 
 export const dynamic = "force-dynamic";
 
@@ -32,18 +33,48 @@ interface ConnectBody {
   id?: string;
 }
 
+interface CreateBody {
+  action?: string;
+  id?: string;
+  displayName?: string;
+  soul?: string;
+  cloneFrom?: string;
+  model?: string;
+  connect?: boolean;
+}
+
 export async function POST(req: Request) {
-  let body: ConnectBody;
+  let body: CreateBody;
   try {
-    body = (await req.json()) as ConnectBody;
+    body = (await req.json()) as CreateBody;
   } catch {
     return NextResponse.json({ error: "body 不是 JSON" }, { status: 400 });
+  }
+
+  // 创建：校验同步返回（含 409 重名），执行异步，返回 { jobId } 轮询
+  if (body.action === "create") {
+    try {
+      const { jobId } = startCreateProfile({
+        id: body.id ?? "",
+        displayName: body.displayName ?? "",
+        soul: body.soul ?? "",
+        cloneFrom: body.cloneFrom,
+        model: body.model,
+        connect: body.connect,
+      });
+      return NextResponse.json({ jobId }, { status: 202 });
+    } catch (error) {
+      if (error instanceof ApiError) {
+        return NextResponse.json({ error: error.message }, { status: error.status });
+      }
+      return NextResponse.json({ error: String(error) }, { status: 500 });
+    }
   }
 
   const action = body.action?.trim();
   const id = body.id?.trim() ?? "";
   if (action !== "connect" && action !== "disconnect") {
-    return NextResponse.json({ error: "action 只支持 connect / disconnect" }, { status: 400 });
+    return NextResponse.json({ error: "action 只支持 connect / disconnect / create" }, { status: 400 });
   }
   // 路径穿越防线：id 必须过名册同款规则，拒绝任何 / .. 变体
   if (!PROFILE_ID_RE.test(id)) {
