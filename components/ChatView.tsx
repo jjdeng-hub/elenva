@@ -192,6 +192,21 @@ export function ChatView({
   /* ---------- UI 音效（规格 docs/specs/2026-11-12-ui-sound.md） ----------
      八条「事件 → cue」统一在这里接：两条运行时链路都经过 SessionRuntimeSurface，
      所以只接一次。loop 偏好在设置里单独开（默认关）。 */
+  /* ---------- 侧栏按当前 Agent 过滤（2026-11-12） ----------
+     P2 统一索引把 Pi 与全部 Hermes 会话混在一个全局列表里，侧栏原样吃全量 ——
+     切到 Tom 看到的和 Elen 一模一样，看不出这是哪个 Agent 的会话。
+     现在：Elen（pi）只看 pi 会话；Hermes Agent 只看自己 profile 的会话
+     （含「默认会话」组 —— 那组全是 pi 会话，在 hermes 视图里整体隐藏）。
+     只过滤侧栏展示；按 id 打开会话（315/327）与副屏选择仍用全量，避免跨源会话打不开。 */
+  const sidebarSessions = useMemo(() => {
+    if (runtime === "hermes") {
+      const profile = hermesProfile ?? hermesAgentId ?? "";
+      const prefixes = [`hermes:${profile}:`, `hermes:${hermesAgentId ?? ""}:`];
+      return sessions.filter((s) => prefixes.some((p) => p !== "hermes:" && s.id.startsWith(p)));
+    }
+    return sessions.filter((s) => s.runtime !== "hermes");
+  }, [sessions, runtime, hermesProfile, hermesAgentId]);
+
   const approvalPending = runtime === "hermes" ? rt.hermesPermission : extensionDialog;
   const soundEvents = useSoundEvents({
     agentRunning,
@@ -1130,7 +1145,7 @@ export function ChatView({
   return (
     <div className="flex min-h-0 flex-1">
       <SessionSidebar
-        sessions={sessions}
+        sessions={sidebarSessions}
         runningIds={runningIds}
         unreadIds={unreadIds}
         selectedId={session?.id ?? null}
