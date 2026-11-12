@@ -26,6 +26,10 @@ if (!isNodeVersionSupported(process.versions.node)) {
 
 const projectDir = path.resolve(__dirname, "..");
 const nextBin = path.join(projectDir, "node_modules", "next", "dist", "bin", "next");
+/** ACP 宿主：Hermes 子进程的边界都放在这里（Next 侧零 spawn，见 AGENTS.md 架构要点） */
+const acpHostPath = path.join(projectDir, "bin", "acp-host.cjs");
+const acpPort = String(process.env.ELENVA_ACP_PORT || 30201);
+let acpChild = null;
 const nextBuildDir = path.join(projectDir, ".next");
 const buildStampFile = path.join(nextBuildDir, ".elenva-build-stamp");
 const updateStateFile = path.join(projectDir, ".elenva-update.json");
@@ -205,7 +209,38 @@ function buildProduction() {
   return true;
 }
 
+/* ---------------- ACP 宿主（Hermes 子进程边界） ---------------- */
+
+function startAcpHost() {
+  if (acpChild && acpChild.exitCode === null) return;
+  say(`正在启动 ACP 宿主（端口 ${acpPort}）…`);
+  acpChild = spawn(process.execPath, [acpHostPath], {
+    cwd: projectDir,
+    stdio: ["ignore", "inherit", "inherit"],
+    env: { ...process.env, ELENVA_ACP_PORT: acpPort },
+  });
+  acpChild.on("error", (error) => {
+    say(`ACP 宿主启动失败：${error.message}（Agent 对话暂不可用，其余功能不受影响）`);
+  });
+  acpChild.on("exit", (code) => {
+    if (!updating) say(`ACP 宿主已退出（${code ?? "signal"}）`);
+    acpChild = null;
+  });
+}
+
+function stopAcpHost() {
+  const child = acpChild;
+  if (!child || child.exitCode !== null) return;
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    // ignore
+  }
+  acpChild = null;
+}
+
 function startProduction(onReady) {
+  startAcpHost();
   say(`正在启动生产服务（端口 ${port}）…`);
   const child = spawn(process.execPath, [nextBin, "start", "-H", hostname, "-p", port], {
     cwd: projectDir,
@@ -285,6 +320,7 @@ function isUpdateNoise(line) {
 }
 
 function stopChild() {
+  stopAcpHost();
   return new Promise((resolve) => {
     const child = currentChild;
     if (!child || child.exitCode !== null) return resolve();
@@ -467,6 +503,7 @@ function startMonitors() {
 /* ---------------- 进程生命周期 ---------------- */
 
 function shutdown(signal) {
+  stopAcpHost();
   const child = currentChild;
   if (child && child.exitCode === null) {
     child.once("exit", () => process.exit(0));

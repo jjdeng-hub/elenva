@@ -5,6 +5,32 @@ export function basename(p: string): string {
   return idx >= 0 ? norm.slice(idx + 1) : norm;
 }
 
+/**
+ * 问候语随小时切换（工作台与 Agent 头共用）。
+ * 入参由调用方给时间，避免 SSR/首帧的时区与时刻不一致。
+ */
+export function greeting(now: Date): string {
+  const h = now.getHours();
+  if (h < 6) return "凌晨好";
+  if (h < 12) return "早上好";
+  if (h < 14) return "中午好";
+  if (h < 18) return "下午好";
+  return "晚上好";
+}
+
+/** 时刻 HH:mm（等宽数字，给头部时钟用） */
+export function clockLabel(now: Date): string {
+  return now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+/** 日期的两行写法：M月D日 / 星期X */
+export function dateLines(now: Date): { date: string; weekday: string } {
+  return {
+    date: now.toLocaleDateString("zh-CN", { month: "long", day: "numeric" }),
+    weekday: now.toLocaleDateString("zh-CN", { weekday: "long" }),
+  };
+}
+
 /** 会话列表时间标签：当天显示 HH:mm，否则 M/D */
 export function timeLabel(iso: string): string {
   const d = new Date(iso);

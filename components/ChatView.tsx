@@ -21,7 +21,8 @@ import { SessionGoal } from "@/components/SessionGoal";
 import { SideSessionPane } from "@/components/SideSessionPane";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { WorkspacePicker, type WorkspaceOption } from "@/components/WorkspacePicker";
-import { useAgentSession, type AttachedImage, type ChatInputHandle } from "@/hooks/useAgentSession";
+import type { AttachedImage, ChatInputHandle } from "@/hooks/useAgentSession";
+import { useSessionRuntime } from "@/lib/session-runtime";
 import { useSessionActions } from "@/hooks/useSessionActions";
 import { usePersistedWidth } from "@/components/ui/Resizer";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
@@ -92,6 +93,9 @@ export function ChatView({
   unreadIds,
   sideSessionId,
   onSelectSide,
+  runtime,
+  hermesAgentId,
+  hermesProfile,
 }: {
   session: SessionInfo | null;
   newSessionCwd: string | null;
@@ -134,10 +138,30 @@ export function ChatView({
   sideSessionId?: string | null;
   /** 切换副屏会话；传 null 收起副屏 */
   onSelectSide?: (sessionId: string | null) => void;
+  /** 运行时（P2 统一外壳）：pi = 内核 SDK；hermes = ACP 适配器。缺省 pi */
+  runtime?: "pi" | "hermes";
+  /** runtime=hermes 时的 ACP agent id 与 profile（侧栏/观测栏数据源用） */
+  hermesAgentId?: string;
+  hermesProfile?: string;
 }) {
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   /** 当前会话可用工具全集（get_tools 回读，供自定义工具选择 UI 分组展示） */
   const [systemTools, setSystemTools] = useState<ToolEntry[] | null>(null);
+  const rt = /* 数据来源（P2）：按运行时分发到 useAgentSession / useAcpSession，表面一致，JSX 零改动 */ useSessionRuntime({
+    session,
+    newSessionCwd,
+    // 新会话草稿统一挂在「待发会话」上：切换工作区不丢草稿。
+    // 必须与下方 draftKey 的新会话值一致（rekeyDraft 按它迁移到正式会话 id）。
+    newSessionDraftKey: "new",
+    chatInputRef,
+    onSystemToolsChange: setSystemTools,
+    onAgentEnd,
+    onSessionCreated,
+    onSessionForked,
+    runtime,
+    hermesAgentId,
+    hermesProfile,
+  });
   const {
     loading, error, messages, streamState, agentRunning, agentPhase,
     data,
@@ -160,18 +184,7 @@ export function ChatView({
     bashRunning, pendingBash,
     hasEarlierMessages, loadingEarlier, loadEarlier,
     lastUserMsgRef,
-  } = useAgentSession({
-    session,
-    newSessionCwd,
-    // 新会话草稿统一挂在「待发会话」上：切换工作区不丢草稿。
-    // 必须与下方 draftKey 的新会话值一致（rekeyDraft 按它迁移到正式会话 id）。
-    newSessionDraftKey: "new",
-    chatInputRef,
-    onSystemToolsChange: setSystemTools,
-    onAgentEnd,
-    onSessionCreated,
-    onSessionForked,
-  });
+  } = rt;
 
   // 自定义工具选择的可用清单：切会话时先清空，避免上一条会话的工具串台。
   const sessionToolsKey = session?.id ?? (newSessionCwd ? "__new__" : null);
@@ -810,8 +823,11 @@ export function ChatView({
     }
     wasRunningRef.current = agentRunning;
   }, [agentRunning, planSessionId]);
-  /** 本轮证据的唯一数据源：输入框上方一行与观测栏明细共用它 */
-  const turn = useTurnCheckpoints(planSessionId, checkpointRefreshKey);
+  /** 本轮证据的唯一数据源：输入框上方一行与观测栏明细共用它。
+   *  P2：Hermes 侧 turn 来自适配器（turn_end 事件），Pi 侧仍走检查点快照。 */
+  const piTurn = useTurnCheckpoints(runtime === "hermes" ? null : planSessionId, checkpointRefreshKey);
+  // Hermes 侧 turn 来自适配器（turn_end 事件）；还没跑过一轮时退到 piTurn 的空态（不编数据）
+  const turn = runtime === "hermes" ? (rt.acpTurn ?? piTurn) : piTurn;
   /** 当前任务清单（最后一条成功的 todo_write 参数；消息流一变即重算，回滚 / 切分支自动正确） */
   const todos = useMemo(() => latestTodoState(messages, toolResults), [messages, toolResults]);
 

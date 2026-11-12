@@ -3,7 +3,7 @@
 import { AlertTriangle, ArrowRight, CheckCircle2, Cpu, Gauge, KeyRound, Loader2, Play } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
-import { basename, formatCost, formatTokens, relTime, timeLabel } from "@/lib/format";
+import { basename, formatCost, formatTokens, greeting, relTime, timeLabel } from "@/lib/format";
 import type { UsageReport } from "@/lib/usage-aggregate";
 import type { AttentionItem, RecentCompletion } from "@/lib/attention";
 import type { PendingApproval, QueuedApproval } from "@/lib/pending-approvals";
@@ -85,14 +85,6 @@ function SnapRow({ label, value, tone }: { label: string; value: ReactNode; tone
 }
 
 /** 问候语随小时切换；入参用调用方的时间，避免与首屏渲染不一致。 */
-function greeting(now: Date): string {
-  const h = now.getHours();
-  if (h < 6) return "凌晨好";
-  if (h < 12) return "早上好";
-  if (h < 14) return "中午好";
-  if (h < 18) return "下午好";
-  return "晚上好";
-}
 
 /** 会话名首字母头像 */
 function Avatar({ session, running }: { session: SessionInfo; running: boolean }) {
