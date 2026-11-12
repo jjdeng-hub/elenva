@@ -166,49 +166,71 @@ export function sealTurn(state: AcpChatState): AcpChatState {
   };
 }
 
-/** 历史（chat.jsonl）→ AgentMessage[]：同一套组件能读回上一次的对话 */
-export function recordsToMessages(
-  records: { role: string; text?: string; items?: unknown[]; ts?: number | null }[],
+/** Hermes state.db 的一行消息（lib/agents/resources.ts 的 HermesMessage，这里按结构接受） */
+export type HermesDbRecord = {
+  role: string;
+  text?: string;
+  at?: string;
+  toolCalls?: { id: string; toolName: string; input?: string; output?: string; isError?: boolean }[];
+};
+
+/**
+ * Hermes state.db 的消息行 → ELENVA 会话模型。
+ *
+ * assistant 行可能同时带正文与 tool_calls：先出 assistant（文本 + 工具卡），
+ * 每张卡后面跟一条 toolResult（结果正文在 resources 层已拼好）。没有结果时
+ * 工具卡照样渲染，点开为空 —— 不编造。
+ */
+export function hermesDbToMessages(
+  records: HermesDbRecord[],
   ctx: { provider: string; modelId: string },
 ): AgentMessage[] {
   const messages: AgentMessage[] = [];
   for (const record of records) {
+    const ts = record.at ? new Date(record.at).getTime() : undefined;
     if (record.role === "user") {
-      messages.push({ role: "user", content: record.text ?? "", timestamp: record.ts ?? undefined });
+      messages.push({ role: "user", content: record.text ?? "", timestamp: ts });
       continue;
     }
-    if (record.role === "agent") {
-      messages.push({
-        role: "assistant",
-        content: [{ type: "text", text: record.text ?? "" }],
-        model: ctx.modelId,
-        provider: ctx.provider,
-        timestamp: record.ts ?? undefined,
-      });
-      continue;
-    }
-    if (record.role === "tools") {
-      // 只留下了「哪几步」，没有输出正文；工具卡照样显示，点开是空的
-      const items = (record.items ?? []) as { title?: string; status?: string; ms?: number }[];
-      const calls = items
-        .map((item, index): ToolCallContent => ({
-          type: "toolCall",
-          toolCallId: `history-${index}-${item.title ?? "tool"}`,
-          toolName: toolNameFromTitle(item.title ?? "tool"),
-          input: {},
-        }));
-      if (calls.length > 0) {
-        messages.push({ role: "assistant", content: calls, model: ctx.modelId, provider: ctx.provider });
-        for (const call of calls) {
-          messages.push({
-            role: "toolResult",
-            toolCallId: call.toolCallId,
-            toolName: call.toolName,
-            content: [],
-            isError: false,
-          });
+    if (record.role !== "assistant" || (!record.text && !(record.toolCalls && record.toolCalls.length > 0))) continue;
+
+    const content: (ToolCallContent | { type: "text"; text: string })[] = [];
+    if (record.text) content.push({ type: "text", text: record.text });
+    const calls: ToolCallContent[] = [];
+    for (const call of record.toolCalls ?? []) {
+      let input: Record<string, unknown> = {};
+      if (call.input) {
+        try {
+          const parsed = JSON.parse(call.input) as unknown;
+          if (parsed && typeof parsed === "object") input = parsed as Record<string, unknown>;
+        } catch {
+          input = { raw: call.input };
         }
       }
+      const block: ToolCallContent = {
+        type: "toolCall",
+        toolCallId: call.id,
+        toolName: normalizeToolName(call.toolName),
+        input,
+      };
+      content.push(block);
+      calls.push(block);
+    }
+    messages.push({
+      role: "assistant",
+      content,
+      model: ctx.modelId,
+      provider: ctx.provider,
+      timestamp: ts,
+    });
+    for (const call of calls) {
+      messages.push({
+        role: "toolResult",
+        toolCallId: call.toolCallId,
+        toolName: call.toolName,
+        content: [],
+        isError: false,
+      });
     }
   }
   return messages;

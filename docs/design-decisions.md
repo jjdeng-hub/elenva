@@ -132,6 +132,24 @@ SD4m 针对的是「用 mono 装小标签凑科技感」；这里的 mono 只包
   并且**每 3 秒对一次 `/pending`**——SSE 事件丢了不能让整轮静默卡死。
 - 附件暂时只记数量：ACP 的 prompt 只收文本，图片上传要另做端点。
 
+## 14. 单一真源与投影式 UI（2026-11-12）
+
+**数据由运行时/Agent 生产，UI 只做投影。**原来会话有两处真源：Hermes 的 `state.db` 已有完整记录
+（含工具调用、标题），ELENVA 又在应用包写了一份 `data/chat.jsonl`，靠同步维持一致——实测已经不一致
+（刷新后工具输出和标题都丢）。结论：删除 `chat.jsonl`，不再写、不再读、不做迁移（历史在 state.db 里）。
+
+- **会话识别口径是 `cwd`，不是 `source`**：ACP 探针建的空会话是 `source='acp'`、`message_count=0`；
+  真实会话是 `source='local'` + `cwd='<应用包目录>'`。同时忽略 `message_count=0` 的空会话。
+  读取集中在 `lib/agents/resources.ts`（state.db 是 Hermes 内部结构，升级 Hermes 只改这一处）。
+- **工具调用序列在资源层拼**：assistant 行的 `tool_calls`（JSON 数组）与后续 `role='tool'` 行
+  按 `tool_call_id` 配对，产出 `toolCalls[]`（含参数与结果正文）；
+  `lib/acp-chat.ts` 的 `hermesDbToMessages` 转成平台的 `AgentMessage`。
+- **宿主瘦身**：`bin/acp-host.cjs` 删掉落盘（`historyPath`/`appendHistory`、prompt 收尾写记录、
+  `/reset` 清盘）与 `/history` 读盘端点；历史由 `/api/agents/chat/history` 直连资源层读 state.db。
+- **不变量**（详见 `docs/specs/2026-11-12-single-source-of-truth.md`）：每类数据只有一个真相来源；
+  UI 只读不写；界面动作产出的是意图，交给 Agent 落盘；领域数据（data/*.json）先有
+  路径/schema/schemaVersion/写入口径四件事的契约（应用包 `AGENTS.md`），界面才渲染。
+
 ## 相关
 
 - 色板与档位唯一来源：`tools/design-system.html` + `app/globals.css`

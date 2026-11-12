@@ -13,8 +13,9 @@ import {
   appendAssistantText,
   appendThinkingText,
   appendUserText,
-  recordsToMessages,
+  hermesDbToMessages,
   sealTurn,
+  type HermesDbRecord,
   type AcpChatState,
 } from "@/lib/acp-chat";
 
@@ -297,12 +298,13 @@ export function HermesChat({
     let alive = true;
     fetch(`/api/agents/chat/history?agentId=${encodeURIComponent(agentId)}`, { cache: "no-store" })
       .then((res) => res.json())
-      .then((data: { messages?: { role: string; text?: string; items?: unknown[]; ts?: number | null }[]; sessionId?: string | null }) => {
+      // 历史来自 Hermes state.db（单一真源，按 cwd 认会话）；返回的 toolCalls 已由资源层拼好
+      .then((data: { messages?: HermesDbRecord[]; sessionId?: string | null }) => {
         if (!alive) return;
         if (data.sessionId) setSessionId(data.sessionId);
         const records = data.messages ?? [];
         if (records.length === 0) return;
-        setChat((prev) => (prev.messages.length > 0 ? prev : { messages: recordsToMessages(records, ctx), streaming: null }));
+        setChat((prev) => (prev.messages.length > 0 ? prev : { messages: hermesDbToMessages(records, ctx), streaming: null }));
       })
       .catch(() => {});
     return () => {

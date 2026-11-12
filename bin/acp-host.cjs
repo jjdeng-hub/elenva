@@ -80,34 +80,12 @@ class AgentProc {
      * 只存事件（update / permission / turn_end），不存状态快照。
      */
     this.turnEvents = [];
-    /** 本轮的步数清单：收尾时随对话一起落盘，刷新后过程不丢 */
-    this.turnTools = [];
-    this.turnToolIndex = new Map();
     /** ACP 给的可选模型清单（session/new 的 models）与当前选中项 */
     this.models = null;
-    /** 新会话的第一句话还没来：边界行要落在那之前 */
-    this.freshSession = false;
   }
 
-  /** 对话落盘：与应用包数据同目录，刷新/重开页面能读回来 */
-  historyPath() {
-    return path.join(this.cwd, "data", "chat.jsonl");
-  }
-
-  appendHistory(entry) {
-    try {
-      const file = this.historyPath();
-      fs.mkdirSync(path.dirname(file), { recursive: true });
-      // 简单封顶：超过 1MB 只留最近 200 行，避免长期使用把文件养成巨物
-      if (fs.existsSync(file) && fs.statSync(file).size > 1024 * 1024) {
-        const kept = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).slice(-200);
-        fs.writeFileSync(file, kept.length ? `${kept.join("\n")}\n` : "");
-      }
-      fs.appendFileSync(file, `${JSON.stringify({ ts: Date.now(), ...entry })}\n`);
-    } catch (error) {
-      log(this.agentId, "history write failed", String(error));
-    }
-  }
+  // 会话历史不再由宿主落盘：单一真源是 Hermes 的 state.db，
+  // 历史读取走资源层（lib/agents/resources.ts，按 cwd 认会话）。
 
   emit(event) {
     // 记进本轮日志：type=ready 之类的连接级事件不记，免得重放时把状态搅乱
@@ -189,8 +167,6 @@ class AgentProc {
       const session = await this.request("session/new", { cwd: this.cwd, mcpServers: [] });
       this.sessionId = session?.sessionId ?? session?.session_id ?? null;
       this.models = session?.models ?? null;
-      // 会话边界延到第一句话再落：只打开页面（为了看模型列表）不该在记录里留一条空分界
-      this.freshSession = true;
       if (!this.sessionId) throw new Error("session/new 没返回 sessionId");
     }
     this.state = "ready";
@@ -248,28 +224,6 @@ class AgentProc {
         if (kind === "agent_message_chunk" && typeof update.content?.text === "string") {
           this.turnText += update.content.text;
         }
-        // 记一份「这一轮做了什么」：对话落盘时一起写，刷新后仍能看见过程
-        if (kind === "tool_call") {
-          const id = String(update.toolCallId ?? "");
-          const entry = {
-            id,
-            title: String(update.title ?? "工具调用"),
-            kind: typeof update.kind === "string" ? update.kind : undefined,
-            locations: Array.isArray(update.locations)
-              ? update.locations.map((item) => item?.path).filter((value) => typeof value === "string")
-              : undefined,
-            status: String(update.status ?? ""),
-            at: Date.now(),
-          };
-          if (id) this.turnToolIndex.set(id, entry);
-          this.turnTools.push(entry);
-        } else if (kind === "tool_call_update") {
-          const entry = this.turnToolIndex.get(String(update.toolCallId ?? ""));
-          if (entry) {
-            if (typeof update.status === "string" && update.status) entry.status = update.status;
-            if (!entry.endedAt && (entry.status === "completed" || entry.status === "failed")) entry.endedAt = Date.now();
-          }
-        }
         this.emit({ type: "update", update });
       }
       return;
@@ -297,37 +251,12 @@ class AgentProc {
     this.turnText = "";
     this.turnEvents = [];
     this.turnDone = false;
-    this.turnTools = [];
-    this.turnToolIndex = new Map();
     this.lastPrompt = text;
-    if (this.freshSession) {
-      // 新会话的第一句话之前落分界：上面那些内容它确实不记得
-      this.appendHistory({ role: "session", sessionId: this.sessionId });
-      this.freshSession = false;
-    }
-    this.appendHistory({ role: "user", text });
     const result = await this.request("session/prompt", {
       sessionId: this.sessionId,
       prompt: [{ type: "text", text }],
     });
-    const reply = this.turnText.trim();
-    // 先记过程，再记回答：读回来时顺序就是「我说 → 它做了 → 它说」
-    if (this.turnTools.length > 0) {
-      this.appendHistory({
-        role: "tools",
-        items: this.turnTools.map((tool) => ({
-          title: tool.title,
-          kind: tool.kind,
-          status: tool.status,
-          locations: tool.locations,
-          ms: tool.endedAt ? tool.endedAt - tool.at : undefined,
-        })),
-      });
-    }
-    if (reply) this.appendHistory({ role: "agent", text: reply });
-    this.turnText = "";
-    this.turnTools = [];
-    this.turnToolIndex = new Map();
+    // 会话记录由 Hermes 自己写 state.db，宿主不再复制一份
     // session/prompt 的响应带着 stopReason，是这一轮的真正收尾：
     // 从线程池/等待队列里回来时也要让前端把「运行中」放掉。
     this.emit({
@@ -469,35 +398,7 @@ const server = http.createServer(async (req, res) => {
     return json(res, 200, { agentId, pending, queued: agent?.queued ?? 0, state: agent?.state ?? "idle" });
   }
 
-  if (req.method === "GET" && url.pathname === "/history") {
-    const agentId = url.searchParams.get("agentId") || "";
-    const dir = url.searchParams.get("dir") || agents.get(agentId)?.cwd;
-    if (!dir) return json(res, 200, { messages: [] });
-    try {
-      const file = path.join(dir, "data", "chat.jsonl");
-      if (!fs.existsSync(file)) return json(res, 200, { messages: [] });
-      const lines = fs.readFileSync(file, "utf8").split("\n").filter(Boolean).slice(-200);
-      const messages = lines.flatMap((line) => {
-        try {
-          const entry = JSON.parse(line);
-          if (!entry) return [];
-          if (entry.role === "tools") {
-            return [{ ts: entry.ts ?? null, role: "tools", items: Array.isArray(entry.items) ? entry.items : [] }];
-          }
-          if (entry.role === "session") {
-            return [{ ts: entry.ts ?? null, role: "session", sessionId: entry.sessionId ?? null }];
-          }
-          if (entry.role !== "user" && entry.role !== "agent") return [];
-          return [{ ts: entry.ts ?? null, role: entry.role, text: String(entry.text ?? "") }];
-        } catch {
-          return [];
-        }
-      });
-      return json(res, 200, { messages, sessionId: agents.get(agentId)?.sessionId ?? null });
-    } catch (error) {
-      return json(res, 500, { error: String(error) });
-    }
-  }
+  // /history 端点已移除：会话历史从 Hermes state.db 读（资源层），不再经宿主。
 
   if (req.method === "GET" && url.pathname === "/events") {
     const agentId = url.searchParams.get("agentId") || "";
@@ -633,17 +534,9 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/reset") {
     const body = await readBody(req).catch(() => ({}));
     const agent = agents.get(body.agentId);
-    const dir = agent?.cwd || (typeof body.cwd === "string" ? body.cwd : null);
     agent?.stop();
     if (agent) agents.delete(body.agentId);
-    // 重置会话 = 清掉这轮对话记录；进程重启后是全新上下文
-    if (dir) {
-      try {
-        fs.writeFileSync(path.join(dir, "data", "chat.jsonl"), "");
-      } catch {
-        /* 文件不存在也无需处理 */
-      }
-    }
+    // 重置会话 = 停掉进程、下次重开新会话；历史记录归 Hermes state.db 管，宿主不清盘
     return json(res, 200, { ok: true });
   }
 

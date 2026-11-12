@@ -29,10 +29,23 @@ export interface HermesSession {
   model?: string;
 }
 
+export interface HermesToolCall {
+  id: string;
+  toolName: string;
+  /** assistant.tool_calls.function.arguments 的 JSON 字符串（可解析失败，原样给出） */
+  input?: string;
+  /** role='tool' 那一行的结果文本（抳平后） */
+  output?: string;
+  isError?: boolean;
+  at: string;
+}
+
 export interface HermesMessage {
   role: string;
   text: string;
   toolName?: string;
+  /** assistant 行拼出的工具调用序列（与 role='tool' 结果按 tool_call_id 配对） */
+  toolCalls?: HermesToolCall[];
   at: string;
 }
 
@@ -89,6 +102,7 @@ export async function listHermesSessions(profile: string, limit = 40): Promise<H
         `select id, title, source, started_at, last_activity_at, message_count, model
            from sessions
           where coalesce(archived, 0) = 0
+            and coalesce(message_count, 0) > 0
           order by coalesce(last_activity_at, started_at) desc
           limit ?`,
       )
@@ -113,7 +127,59 @@ export async function listHermesSessions(profile: string, limit = 40): Promise<H
   }
 }
 
-/** 单个会话的消息（只读、截断，避免一次拉太多）。 */
+/**
+ * 按 cwd 找该应用包最近的会话。
+ *
+ * 识别口径是 cwd（不是 source：ACP 探针建的空会话 source='acp'、message_count=0，
+ * 真实会话 source='local' 且 cwd=应用包目录），并忽略 message_count=0 的空会话。
+ */
+export async function findLatestHermesSessionByCwd(
+  profile: string,
+  cwd: string,
+): Promise<HermesSession | null> {
+  const dir = hermesProfileDir(profile);
+  if (!dir || !cwd) return null;
+  const dbPath = join(dir, "state.db");
+  if (!existsSync(dbPath)) return null;
+
+  const { DatabaseSync } = await loadSqlite();
+  let db: import("node:sqlite").DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const rows = db
+      .prepare(
+        `select id, title, source, started_at, last_activity_at, message_count, model
+           from sessions
+          where cwd = ?
+            and coalesce(archived, 0) = 0
+            and coalesce(message_count, 0) > 0
+          order by coalesce(last_activity_at, started_at) desc
+          limit 1`,
+      )
+      .all(cwd) as Record<string, unknown>[];
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      id: String(row.id ?? ""),
+      title: String(row.title ?? "") || "(无标题)",
+      source: String(row.source ?? ""),
+      startedAt: isoFromUnix(row.started_at),
+      lastActivityAt: isoFromUnix(row.last_activity_at ?? row.started_at),
+      messageCount: Number(row.message_count ?? 0),
+      model: row.model ? String(row.model) : undefined,
+    };
+  } catch {
+    return null;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* 关不掉不影响读取结果 */
+    }
+  }
+}
+
+/** 单个会话的消息（只读、截断，避免一次拉太多）；assistant.tool_calls 与 role='tool' 结果拼成工具调用序列。 */
 export async function readHermesMessages(profile: string, sessionId: string, limit = MAX_MESSAGES): Promise<HermesMessage[]> {
   const dir = hermesProfileDir(profile);
   if (!dir || !/^[A-Za-z0-9._-]{1,200}$/.test(sessionId)) return [];
@@ -126,19 +192,79 @@ export async function readHermesMessages(profile: string, sessionId: string, lim
     db = new DatabaseSync(dbPath, { readOnly: true });
     const rows = db
       .prepare(
-        `select role, content, tool_name, timestamp
+        `select role, content, tool_call_id, tool_calls, tool_name, timestamp
            from messages
           where session_id = ?
           order by id
           limit ?`,
       )
       .all(sessionId, limit) as Record<string, unknown>[];
-    return rows.map((row) => ({
-      role: String(row.role ?? ""),
-      text: String(row.content ?? "").slice(0, 4000),
-      toolName: row.tool_name ? String(row.tool_name) : undefined,
-      at: isoFromUnix(row.timestamp),
-    }));
+
+    const messages: HermesMessage[] = [];
+    for (const row of rows) {
+      const role = String(row.role ?? "");
+      const at = isoFromUnix(row.timestamp);
+      if (role === "assistant") {
+        // tool_calls 是 JSON 数组：[{ id, function: { name, arguments } }]
+        const toolCalls: HermesToolCall[] = [];
+        const rawCalls = typeof row.tool_calls === "string" ? row.tool_calls : "";
+        if (rawCalls) {
+          try {
+            const parsed = JSON.parse(rawCalls) as unknown;
+            if (Array.isArray(parsed)) {
+              for (const call of parsed) {
+                const entry = call as { id?: unknown; function?: { name?: unknown; arguments?: unknown } };
+                const id = entry?.id ? String(entry.id) : "";
+                const name = entry?.function?.name ? String(entry.function.name) : "";
+                if (!id && !name) continue;
+                toolCalls.push({
+                  id: id || `call-${toolCalls.length}`,
+                  toolName: name,
+                  input: entry?.function?.arguments ? String(entry.function.arguments) : undefined,
+                  at,
+                });
+              }
+            }
+          } catch {
+            /* 坏 JSON 不拦整条消息 */
+          }
+        }
+        messages.push({
+          role,
+          text: String(row.content ?? "").slice(0, 4000),
+          ...(toolCalls.length > 0 ? { toolCalls } : {}),
+          at,
+        });
+        continue;
+      }
+      if (role === "tool") {
+        // 结果行：按 tool_call_id 挂回最近的 assistant 消息
+        const callId = row.tool_call_id ? String(row.tool_call_id) : "";
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const target = messages[i];
+          const call = target.toolCalls?.find((item) => item.id === callId && item.output === undefined);
+          if (!call) continue;
+          call.output = String(row.content ?? "").slice(0, 4000);
+          // Hermes 的结果体形如 {"status":"success","output":"..."}；能解析就取 output 并记错误态
+          try {
+            const parsed = JSON.parse(call.output) as { status?: unknown; output?: unknown };
+            if (typeof parsed?.output === "string") call.output = parsed.output.slice(0, 4000);
+            if (typeof parsed?.status === "string") call.isError = parsed.status !== "success";
+          } catch {
+            /* 非 JSON 结果原样保留 */
+          }
+          break;
+        }
+        continue;
+      }
+      messages.push({
+        role,
+        text: String(row.content ?? "").slice(0, 4000),
+        toolName: row.tool_name ? String(row.tool_name) : undefined,
+        at,
+      });
+    }
+    return messages;
   } catch {
     return [];
   } finally {

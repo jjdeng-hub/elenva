@@ -133,6 +133,23 @@ Hermes 侧需要产出的观测数据：
 验收：同一个会话分别在 Pi 与 Hermes 下打开，侧栏行、标题栏、消息区、观测栏的
 `data-testid` 与关键文本结构一致；差异只允许出现在数据本身（模型名、工具名）。
 
+## 阶段零（P0）：运行时预检 —— 没装 Hermes 不能把宿主搞崩
+
+现状：Pi 是 ELENVA 的 npm 依赖（`@earendil-works/pi-*`，进程内），**Hermes 不是**——
+`bin/acp-host.cjs` 直接 `spawn("hermes", ["-p", profile, "acp"])` 走 PATH。
+机器上没装 Hermes 时：没有 preflight 探测，也没有 `proc.on("error")` 监听，
+子进程的 ENOENT 会变成未处理的 `error` 事件，把 ACP 宿主进程打挂，systemd 再拉起，循环。
+
+要求（Elen 实施）：
+1. 启动前探测 `hermes --version`（带超时）；不存在就拒绝启动该 Agent，返回明确错误码。
+2. `proc.on("error")` 必须兜住 ENOENT/EACCES，转成 `{type:"error", message:"这台机器没有安装 Hermes"}`。
+3. 界面在「Agent 名册」层面区分：`runtime: pi` 可用、`runtime: hermes` 未安装（置灰 + 一句怎么装），
+   而不是点进去才报错。
+4. 注册表不要把「没装运行时的 profile」当成坏包：它只是不可用。
+
+验收：在一台没有 `hermes` 的机器（或临时把 PATH 里的 hermes 移走）上启动 ELENVA：
+宿主进程不崩、侧栏 Elen 可用、Hermes 侧显示「未安装」，点它给出安装提示。
+
 ## 参考：Ekko Studio 怎么做的（2026-11-12 查证）
 
 - **像的部分**：一套 UI + 每个 runtime 一个适配器（`services/registry/native-agents.ts` 选配置与

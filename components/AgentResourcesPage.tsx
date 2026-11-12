@@ -252,7 +252,7 @@ export function AgentResourcesPage({ agent, kind }: { agent: AgentRecord; kind: 
             profile={agent.profile ?? agent.id}
             variant="pane"
             resumeSessionId={resumeId}
-            // 没选历史会话时，把应用包 data/chat.jsonl 里这一段的对话读回来（刷新不丢）；
+            // 没选历史会话时，从 Hermes state.db（单一真源）读回最近一段对话（刷新不丢）；
             // 选了历史会话则由 ACP 的 session/load 重放，避免两份记录缠在一起
             history={!resumeId}
           />
