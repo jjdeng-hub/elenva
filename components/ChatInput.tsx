@@ -17,6 +17,8 @@ import {
   Slash,
   Square,
   Undo2,
+  Volume2,
+  VolumeX,
   Wand2,
   Wrench,
   X,
@@ -32,6 +34,7 @@ import {
 } from "react";
 import { cn } from "@/components/lib/utils";
 import { compactionTrigger, useCompactionSettings } from "@/hooks/useCompactionSettings";
+import { useSound } from "@/hooks/useSound";
 import { Popover } from "@/components/ui/popover";
 import type { AttachedImage, ChatInputHandle, ThinkingLevelOption } from "@/hooks/useAgentSession";
 import { MAX_ATTACHED_IMAGE_BYTES, MAX_ATTACHED_IMAGES } from "@/lib/image-attachments";
@@ -886,6 +889,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-1">
+                <SoundToggle />
                 <ContextRing
                   usage={contextUsage ?? null}
                   onCompact={onCompactContext}
@@ -1454,3 +1458,26 @@ function ContextRing({
   );
 }
 
+
+/**
+ * 会话页 composer 右侧的静音小喇叭（规格 docs/specs/2026-11-12-ui-sound.md）。
+ * 状态写进 data-sound-state=on|off 供自动化断言；偏好持久化在 lib/sound.ts 单例。
+ */
+function SoundToggle() {
+  const { prefs, setEnabled } = useSound();
+  const enabled = prefs.enabled;
+  return (
+    <button
+      onClick={() => setEnabled(!enabled)}
+      className={cn(
+        "flex size-7 shrink-0 items-center justify-center rounded-md t-fast cursor-pointer",
+        enabled ? "text-dim hover:bg-hover hover:text-fg" : "text-dim/60 hover:bg-hover hover:text-dim",
+      )}
+      title={enabled ? "声音已开：点击静音" : "声音已静音：点击开启"}
+      data-testid="sound-toggle"
+      data-sound-state={enabled ? "on" : "off"}
+    >
+      {enabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
+    </button>
+  );
+}

@@ -14,11 +14,14 @@ import {
   Settings as SettingsIcon,
   ShieldCheck,
   SunMedium,
+  Volume2 as Volume2Icon,
   Wrench,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { AccountProfilesSection } from "@/components/AccountProfilesSection";
 import { cn } from "@/components/lib/utils";
+import { useSound } from "@/hooks/useSound";
+import type { SoundLevel, SoundPack } from "@/lib/sound";
 import { toast } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/bits";
 import { getToolNamesForPreset, TOOL_PRESET_VALUES, type ToolPreset } from "@/lib/tool-presets";
@@ -590,6 +593,129 @@ const THEME_CHOICES: { id: ThemePreference; label: string; hint: string; icon: R
   { id: "dark", label: "深色", hint: "墨底 · 提亮红", icon: <Moon size={12} /> },
   { id: "auto", label: "跟随系统", hint: "随系统外观切换", icon: <Monitor size={12} /> },
 ];
+
+/**
+ * UI 音效设置（规格 docs/specs/2026-11-12-ui-sound.md）。
+ * 开关 + 三档音量（静音/轻/标准）+ 音色（minimal/studio/scifi/soft）+ 试听 + 长任务 loop 开关。
+ * 偏好持久化在 lib/sound.ts 单例（localStorage `elenva:sound`）。
+ */
+const SOUND_LEVEL_CHOICES: { id: SoundLevel; label: string; hint: string }[] = [
+  { id: "muted", label: "静音", hint: "完全不出声" },
+  { id: "light", label: "轻", hint: "0.35，只有长任务提醒" },
+  { id: "standard", label: "标准", hint: "0.6，全部事件" },
+];
+const SOUND_PACK_CHOICES: { id: SoundPack; label: string }[] = [
+  { id: "minimal", label: "Minimal" },
+  { id: "studio", label: "Studio" },
+  { id: "scifi", label: "Sci-fi" },
+  { id: "soft", label: "Soft" },
+];
+
+function SoundSection() {
+  const { prefs, setEnabled, setLevel, setPack, setLoop, play, unlocked } = useSound();
+
+  return (
+    <Card data-testid="sound-settings">
+      <CardHeader>
+        <Volume2Icon size={14} className="text-accent" />
+        <CardTitle>声音</CardTitle>
+        <span className="ml-auto text-[11px] text-dim">
+          {prefs.enabled && prefs.level !== "muted" ? (unlocked ? "已解锁（可出声）" : "等待首次点击解锁") : "已静音"}
+        </span>
+      </CardHeader>
+      <div className="px-4 py-4">
+        {/* 开关 */}
+        <button
+          onClick={() => setEnabled(!prefs.enabled)}
+          aria-pressed={prefs.enabled}
+          data-testid="sound-enabled"
+          className={cn(
+            "t-fast flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-[12px]",
+            prefs.enabled ? "border-accent/50 bg-accent-soft text-accent" : "border-line bg-panel-2 text-muted hover:text-fg",
+          )}
+        >
+          {prefs.enabled ? "声音已开" : "声音已关"}
+        </button>
+
+        {/* 三档音量 */}
+        <div className="mt-3 text-[11px] text-dim">音量</div>
+        <div className="mt-1.5 flex flex-wrap gap-2" role="group" aria-label="音量档位">
+          {SOUND_LEVEL_CHOICES.map((c) => {
+            const on = prefs.level === c.id;
+            return (
+              <button
+                key={c.id}
+                onClick={() => {
+                  setLevel(c.id);
+                  if (c.id === "muted") setEnabled(false);
+                  else if (!prefs.enabled) setEnabled(true);
+                }}
+                aria-pressed={on}
+                className={cn(
+                  "t-fast cursor-pointer rounded-md border px-3 py-1.5 text-[12px]",
+                  on ? "border-accent bg-active text-accent" : "border-line bg-panel-2 text-muted hover:border-accent/40 hover:text-fg",
+                )}
+              >
+                {c.label}
+                <span className="ml-1.5 text-[11px] text-dim">{c.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 音色 */}
+        <div className="mt-4 text-[11px] text-dim">音色</div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2" role="group" aria-label="音色">
+          {SOUND_PACK_CHOICES.map((c) => {
+            const on = prefs.pack === c.id;
+            return (
+              <button
+                key={c.id}
+                onClick={() => {
+                  setPack(c.id);
+                  play("notification");
+                }}
+                aria-pressed={on}
+                className={cn(
+                  "t-fast cursor-pointer rounded-md border px-3 py-1.5 text-[12px]",
+                  on ? "border-accent bg-active text-accent" : "border-line bg-panel-2 text-muted hover:border-accent/40 hover:text-fg",
+                )}
+              >
+                {c.label}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => play("notification")}
+            data-testid="sound-preview"
+            className="t-fast ml-1 cursor-pointer rounded-md border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-muted hover:border-accent/40 hover:text-fg"
+            title="试听当前音色"
+          >
+            试听
+          </button>
+        </div>
+
+        {/* 长任务 loop（默认关） */}
+        <button
+          onClick={() => setLoop(!prefs.loop)}
+          aria-pressed={prefs.loop}
+          data-testid="sound-loop"
+          className={cn(
+            "t-fast mt-4 flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-[12px]",
+            prefs.loop ? "border-accent/50 bg-accent-soft text-accent" : "border-line bg-panel-2 text-muted hover:text-fg",
+          )}
+          title="任务超过 15 秒后响起循环提示音（音量 0.35），结束时自动停止"
+        >
+          {prefs.loop ? "长任务提示音：开" : "长任务提示音：关"}
+        </button>
+
+        <div className="mt-2.5 text-[11px] text-dim">
+          只在状态真正变化时响：一轮完成 / 失败 / 待审批 / 连接断开。标签页切走时音量升到 1.0，盯着屏幕时降到 0.55。
+        </div>
+      </div>
+    </Card>
+  );
+}
 
 function AppearanceSection() {
   const [pref, setPref] = useState<ThemePreference>("auto");
@@ -1316,6 +1442,7 @@ export function SettingsPage({
             <PiSettingsSection />
             <AccountProfilesSection />
             <AppearanceSection />
+            <SoundSection />
             <AboutSection />
             <HostPromptCard />
           </div>

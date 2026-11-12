@@ -28,6 +28,8 @@ import { usePersistedWidth } from "@/components/ui/Resizer";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
 import { computeTurnTrends } from "@/lib/turn-trends";
 import { useTurnCheckpoints } from "@/hooks/useTurnCheckpoints";
+import { useSound } from "@/hooks/useSound";
+import { useSoundEvents } from "@/hooks/useSoundEvents";
 import { latestTodoState } from "@/lib/todo-view";
 import { resolveLocalFilePath } from "@/lib/file-links";
 import type { SessionInfo, ToolResultMessage } from "@/lib/types";
@@ -162,6 +164,7 @@ export function ChatView({
     hermesAgentId,
     hermesProfile,
   });
+  const sound = useSound();
   const {
     loading, error, messages, streamState, agentRunning, agentPhase,
     data,
@@ -185,6 +188,26 @@ export function ChatView({
     hasEarlierMessages, loadingEarlier, loadEarlier,
     lastUserMsgRef,
   } = rt;
+
+  /* ---------- UI 音效（规格 docs/specs/2026-11-12-ui-sound.md） ----------
+     八条「事件 → cue」统一在这里接：两条运行时链路都经过 SessionRuntimeSurface，
+     所以只接一次。loop 偏好在设置里单独开（默认关）。 */
+  const approvalPending = runtime === "hermes" ? rt.hermesPermission : extensionDialog;
+  const soundEvents = useSoundEvents({
+    agentRunning,
+    error,
+    approvalPending,
+    connection: rt.hermesConnection,
+    sessionKey: session?.id ?? null,
+    loopEnabled: sound.prefs.loop,
+  });
+  const wrappedRespond = useCallback(
+    (request: Parameters<typeof respondToExtensionUi>[0], response: Parameters<typeof respondToExtensionUi>[1]) => {
+      soundEvents.notifyApprovalResponse(response);
+      return respondToExtensionUi(request, response);
+    },
+    [respondToExtensionUi, soundEvents],
+  );
 
   // 自定义工具选择的可用清单：切会话时先清空，避免上一条会话的工具串台。
   const sessionToolsKey = session?.id ?? (newSessionCwd ? "__new__" : null);
@@ -504,9 +527,11 @@ export function ChatView({
           return;
         }
       }
+      // 提交成功才响（send）；不叠 press
+      soundEvents.notifySubmit();
       handleSend(raw, images);
     },
-    [handleBuiltinSlashCommand, handleSend],
+    [handleBuiltinSlashCommand, handleSend, soundEvents],
   );
 
   /* ---------- 会话文件预览：write/edit 工具成功写入的文件 ---------- */
@@ -1083,7 +1108,7 @@ export function ChatView({
           switching={modelSwitching}
           thinkingLevel={thinkingLevel}
           thinkingLevels={currentThinkingLevels}
-          onModelChange={handleModelChange}
+          onModelChange={soundEvents.wrappedModelChange as typeof handleModelChange}
           onThinkingLevelChange={handleThinkingLevelChange}
           onReloadModels={() => loadModels()}
         />
@@ -1370,7 +1395,7 @@ export function ChatView({
           <ProjectTrustDialog cwd={cwd} onConfirm={confirmTrust} onCancel={onExit} />
         )}
         {extensionDialog && (
-          <ExtensionDialog request={extensionDialog} onRespond={respondToExtensionUi} />
+          <ExtensionDialog request={extensionDialog} onRespond={wrappedRespond} />
         )}
       </div>
     </div>
