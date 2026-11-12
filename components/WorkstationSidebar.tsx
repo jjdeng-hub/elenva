@@ -163,7 +163,7 @@ export function WorkstationSidebar({
   const aside = (
     <aside
       className={cn(
-        "flex flex-col border-r border-line bg-panel t-pane",
+        "flex h-full min-h-0 flex-col border-r border-line bg-panel t-pane",
         drawer
           ? cn(
               // lg:hidden 兜底：窗口由窄变宽、而 matchMedia 回调尚未跑完时，不让浮层盖住内容区
@@ -189,7 +189,8 @@ export function WorkstationSidebar({
       {/* 分组只表达一件事：哪些跟着 Agent 走，哪些是全平台共用。
           之前是全量平铺，切到内容创作后点「记忆」会静默无反应，看不出是坏了还是没做。 */}
       <div className="h-3 shrink-0" />
-      <div className={groupCls}>这个 Agent{agentLabel ? ` · ${agentLabel}` : ""}</div>
+      {/* 中部可滚动（2026-11-12）：内容高于视口时导航区自己滚，统计卡不挤出视口 */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
           <NavItem collapsed={isCollapsed} icon={<House size={14} />} label="工作台" active={view === "home"} onClick={() => onViewChange("home")} />
           <NavItem collapsed={isCollapsed} icon={<ListChecks size={14} />} label="会话" active={view === "chat"} onClick={() => onViewChange("chat")} />
           <NavItem collapsed={isCollapsed} icon={<Brain size={14} />} label="记忆" active={view === "memory"} onClick={() => onViewChange("memory")} />
@@ -208,10 +209,11 @@ export function WorkstationSidebar({
           <NavItem collapsed={isCollapsed} icon={<ShieldCheck size={14} />} label="审批历史" active={view === "approvals"} onClick={() => onViewChange("approvals")} />
           <NavItem collapsed={isCollapsed} icon={<Server size={14} />} label="系统" active={view === "system"} onClick={() => onViewChange("system")} />
           <NavItem collapsed={isCollapsed} icon={<Settings size={14} />} label="设置" active={view === "settings"} onClick={() => onViewChange("settings")} />
+      </div>
 
       {/* 侧栏统计卡。这里**刻意不再重复「Pi 内核就绪」** —— 内核状态已移到页脚
           （任何视图可见），侧栏再放一份只是同一信息的第三处副本。 */}
-      <div className={cn("mt-auto rounded-card bg-panel-2 px-3 py-3 text-[12px] text-dim", fadeBox)}>
+      <div className={cn("mt-auto shrink-0 rounded-card bg-panel-2 px-3 py-3 text-[12px] text-dim", fadeBox)}>
         <div className="flex justify-between">
           <span>会话</span>
           <b className="font-medium text-fg tabular-nums">{sessionCount}</b>

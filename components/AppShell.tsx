@@ -292,8 +292,21 @@ export function AppShell() {
       .catch(() => {
         /* 注册表读不到就只显示内置 Agent —— 不弹错，不阻塞 */
       });
+    /* 接入 / 断开 profile 后侧栏立即重取（事件由 ProfilesSection 广播） */
+    const onAgentsChanged = () => {
+      fetch("/api/agents", { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data: { agents?: AgentRecord[] }) => {
+          if (Array.isArray(data.agents) && data.agents.length > 0) setAgents(data.agents);
+        })
+        .catch(() => {
+          /* 读不到就保持现状 */
+        });
+    };
+    window.addEventListener("elenva-agents-changed", onAgentsChanged);
     return () => {
       alive = false;
+      window.removeEventListener("elenva-agents-changed", onAgentsChanged);
     };
   }, []);
 

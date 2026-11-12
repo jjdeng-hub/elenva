@@ -28,6 +28,8 @@ import { usePersistedWidth } from "@/components/ui/Resizer";
 import { extractTurnWrittenFiles } from "@/lib/turn-written-files";
 import { computeTurnTrends } from "@/lib/turn-trends";
 import { useTurnCheckpoints } from "@/hooks/useTurnCheckpoints";
+import { useSound } from "@/hooks/useSound";
+import { useSoundEvents } from "@/hooks/useSoundEvents";
 import { latestTodoState } from "@/lib/todo-view";
 import { resolveLocalFilePath } from "@/lib/file-links";
 import type { SessionInfo, ToolResultMessage } from "@/lib/types";
@@ -162,6 +164,7 @@ export function ChatView({
     hermesAgentId,
     hermesProfile,
   });
+  const sound = useSound();
   const {
     loading, error, messages, streamState, agentRunning, agentPhase,
     data,
@@ -185,6 +188,41 @@ export function ChatView({
     hasEarlierMessages, loadingEarlier, loadEarlier,
     lastUserMsgRef,
   } = rt;
+
+  /* ---------- UI 音效（规格 docs/specs/2026-11-12-ui-sound.md） ----------
+     八条「事件 → cue」统一在这里接：两条运行时链路都经过 SessionRuntimeSurface，
+     所以只接一次。loop 偏好在设置里单独开（默认关）。 */
+  /* ---------- 侧栏按当前 Agent 过滤（2026-11-12） ----------
+     P2 统一索引把 Pi 与全部 Hermes 会话混在一个全局列表里，侧栏原样吃全量 ——
+     切到 Tom 看到的和 Elen 一模一样，看不出这是哪个 Agent 的会话。
+     现在：Elen（pi）只看 pi 会话；Hermes Agent 只看自己 profile 的会话
+     （含「默认会话」组 —— 那组全是 pi 会话，在 hermes 视图里整体隐藏）。
+     只过滤侧栏展示；按 id 打开会话（315/327）与副屏选择仍用全量，避免跨源会话打不开。 */
+  const sidebarSessions = useMemo(() => {
+    if (runtime === "hermes") {
+      const profile = hermesProfile ?? hermesAgentId ?? "";
+      const prefixes = [`hermes:${profile}:`, `hermes:${hermesAgentId ?? ""}:`];
+      return sessions.filter((s) => prefixes.some((p) => p !== "hermes:" && s.id.startsWith(p)));
+    }
+    return sessions.filter((s) => s.runtime !== "hermes");
+  }, [sessions, runtime, hermesProfile, hermesAgentId]);
+
+  const approvalPending = runtime === "hermes" ? rt.hermesPermission : extensionDialog;
+  const soundEvents = useSoundEvents({
+    agentRunning,
+    error,
+    approvalPending,
+    connection: rt.hermesConnection,
+    sessionKey: session?.id ?? null,
+    loopEnabled: sound.prefs.loop,
+  });
+  const wrappedRespond = useCallback(
+    (request: Parameters<typeof respondToExtensionUi>[0], response: Parameters<typeof respondToExtensionUi>[1]) => {
+      soundEvents.notifyApprovalResponse(response);
+      return respondToExtensionUi(request, response);
+    },
+    [respondToExtensionUi, soundEvents],
+  );
 
   // 自定义工具选择的可用清单：切会话时先清空，避免上一条会话的工具串台。
   const sessionToolsKey = session?.id ?? (newSessionCwd ? "__new__" : null);
@@ -504,9 +542,11 @@ export function ChatView({
           return;
         }
       }
+      // 提交成功才响（send）；不叠 press
+      soundEvents.notifySubmit();
       handleSend(raw, images);
     },
-    [handleBuiltinSlashCommand, handleSend],
+    [handleBuiltinSlashCommand, handleSend, soundEvents],
   );
 
   /* ---------- 会话文件预览：write/edit 工具成功写入的文件 ---------- */
@@ -1083,7 +1123,7 @@ export function ChatView({
           switching={modelSwitching}
           thinkingLevel={thinkingLevel}
           thinkingLevels={currentThinkingLevels}
-          onModelChange={handleModelChange}
+          onModelChange={soundEvents.wrappedModelChange as typeof handleModelChange}
           onThinkingLevelChange={handleThinkingLevelChange}
           onReloadModels={() => loadModels()}
         />
@@ -1105,7 +1145,7 @@ export function ChatView({
   return (
     <div className="flex min-h-0 flex-1">
       <SessionSidebar
-        sessions={sessions}
+        sessions={sidebarSessions}
         runningIds={runningIds}
         unreadIds={unreadIds}
         selectedId={session?.id ?? null}
@@ -1370,7 +1410,7 @@ export function ChatView({
           <ProjectTrustDialog cwd={cwd} onConfirm={confirmTrust} onCancel={onExit} />
         )}
         {extensionDialog && (
-          <ExtensionDialog request={extensionDialog} onRespond={respondToExtensionUi} />
+          <ExtensionDialog request={extensionDialog} onRespond={wrappedRespond} />
         )}
       </div>
     </div>
