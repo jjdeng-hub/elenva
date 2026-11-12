@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { AccountProfilesSection } from "@/components/AccountProfilesSection";
+import { ProfilesSection } from "@/components/ProfilesSection";
 import { cn } from "@/components/lib/utils";
 import { useSound } from "@/hooks/useSound";
 import type { SoundLevel, SoundPack } from "@/lib/sound";
@@ -1439,6 +1440,7 @@ export function SettingsPage({
            所以只能靠搬卡把它与「工具」单放一栏，另一栏用多张小卡填平。 */}
         <div className="flex flex-col gap-5 xl:flex-row xl:items-start">
           <div className="flex min-w-0 flex-1 flex-col gap-5">
+            <ProfilesSection />
             <PiSettingsSection />
             <AccountProfilesSection />
             <AppearanceSection />
