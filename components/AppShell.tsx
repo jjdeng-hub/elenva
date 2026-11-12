@@ -23,6 +23,8 @@ import { SystemPromptPage } from "@/components/SystemPromptPage";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { WorkstationSidebar, type View } from "@/components/WorkstationSidebar";
 import { AgentHome } from "@/components/AgentHome";
+import { AgentScopePlaceholder } from "@/components/AgentScopePlaceholder";
+import { AgentResourcesPage } from "@/components/AgentResourcesPage";
 import { AgentSwitcher } from "@/components/AgentSwitcher";
 import { BUILTIN_AGENT_ID, builtinAgents, findAgent, type AgentRecord } from "@/lib/agents/manifest";
 import { cn } from "@/components/lib/utils";
@@ -34,6 +36,30 @@ type SessionsResponse = {
   sessions: SessionInfo[];
   sessionListVersion?: number;
   runningSessionIds?: string[];
+};
+
+/**
+ * 跟着 Agent 走的视图。切换 Agent 后它们指向的是**那个 Agent 的资源**，
+ * 而平台级视图（模型/插件/子代理/系统/设置/审批）永远共用一套。
+ */
+const AGENT_SCOPED_VIEWS = new Set([
+  "home", "chat", "memory", "skills", "rhythm", "growth", "code", "identity", "prompt",
+]);
+
+/**
+ * Agent 级视图 → 资源层的 kind。
+ *
+ * 对 Hermes 运行时的应用包来说，「会话 / 记忆 / 技能 / 节律 / 成长 / 身份」不是六套页面，
+ * 而是同一个 profile 目录下六种数据的投影（`lib/agents/resources.ts` 读盘、`/api/agents/resources` 暴露）。
+ * 没列在这里的视图（代码 / 提示词）走占位页说明数据在哪。
+ */
+const AGENT_RESOURCE_KINDS: Record<string, "sessions" | "memory" | "skills" | "soul" | "rhythm" | "usage"> = {
+  chat: "sessions",
+  memory: "memory",
+  skills: "skills",
+  identity: "soul",
+  rhythm: "rhythm",
+  growth: "usage",
 };
 
 const PAGE_TITLES: Record<string, string> = {
@@ -62,9 +88,24 @@ const WS_DRAWER_MAX_WIDTH = 1024;
 /* ---------------- hash 路由 ---------------- */
 /**
  * Agent 前缀：`#a/<agentId>/<原 hash>`。
- * 不带前缀的旧深链接一律落到内置 Agent（Justin），保证历史链接不失效。
+ * 不带前缀的旧深链接一律落到内置 Agent（Elen），保证历史链接不失效。
  */
 const AGENT_HASH_RE = /^a\/([a-z0-9][a-z0-9-]{0,63})(?:\/(.*))?$/;
+
+/**
+ * 应用包 Agent 的视图段（`#a/<id>/<viewId>`）。
+ *
+ * 平台页面级 hash（home / chat/… / code …）不算视图段 —— 返回 null 让调用方按原有逻辑走。
+ * 视图段由 AgentWorkspace 自己解析与维护，平台这层只负责「别把它改写掉」。
+ */
+function parseAgentSegment(rawHash: string): string | null {
+  const matched = AGENT_HASH_RE.exec(rawHash.replace(/^#/, ""));
+  const seg = matched?.[2]?.split("?")[0]?.trim();
+  if (!seg) return null;
+  if (seg === "home" || seg.startsWith("chat/")) return null;
+  if (seg in PAGE_TITLES) return null;
+  return seg;
+}
 
 function parseHash(): { agent: string; view: View; sessionId: string | null; newCwd: string | null; sideId: string | null } {
   const raw = window.location.hash.replace(/^#/, "");
@@ -93,6 +134,8 @@ function parseHash(): { agent: string; view: View; sessionId: string | null; new
   }
   // 旧深链接兼容：「Git 变更」「文件浏览器」已合并为「代码」
   if (h === "git" || h === "files") return { agent, view: "code", sessionId: null, newCwd: null, sideId: null };
+  // 裸 `chat` = 会话页（应用包 Agent 的资源页也挂在这个视图上）；带会话 id 的走上面那条
+  if (h === "chat") return { agent, view: "chat", sessionId: null, newCwd: null, sideId: null };
   if (h in PAGE_TITLES) return { agent, view: h as View, sessionId: null, newCwd: null, sideId: null };
   return { agent, view: "home", sessionId: null, newCwd: null, sideId: null };
 }
@@ -100,7 +143,7 @@ function parseHash(): { agent: string; view: View; sessionId: string | null; new
 /* ---------------- 主 AppShell ---------------- */
 export function AppShell() {
   const [view, setView] = useState<View>("home");
-  /** Agent 注册表：先用内置（Justin）渲染，挂载后由 /api/agents 补齐用户目录里的应用包 */
+  /** Agent 注册表：先用内置（Elen）渲染，挂载后由 /api/agents 补齐用户目录里的应用包 */
   const [agents, setAgents] = useState<AgentRecord[]>(() => builtinAgents());
   /** 当前 Agent；由 hash 前缀 `#a/<id>/...` 决定，缺省是内置编码 Agent */
   const [activeAgent, setActiveAgent] = useState<string>(BUILTIN_AGENT_ID);
@@ -311,27 +354,35 @@ export function AppShell() {
   const syncedHashRef = useRef<string | null>(null);
   useEffect(() => {
     if (!hashReady.current) return; // 等深链接恢复完成
-    let hash = "#home";
+    if (typeof window === "undefined") return;
+    // 先算「子路径」（不含 # 与 agent 前缀），最后统一加前缀 —— 这样应用包 Agent 的
+    // 视图段（`#a/<id>/<viewId>`）不会被拼成 `#a/<id>/a/<id>/...`。
+    let sub = "home";
     if (view === "chat") {
       if (selected) {
-        hash = `#chat/${encodeURIComponent(selected.id)}`;
+        sub = `chat/${encodeURIComponent(selected.id)}`;
         // 仅非空且不同于主会话时附加 side；否则维持原格式 `#chat/<sid>`（逐字节一致）
         if (sideSessionId && sideSessionId !== selected.id) {
-          hash += `?side=${encodeURIComponent(sideSessionId)}`;
+          sub += `?side=${encodeURIComponent(sideSessionId)}`;
         }
       } else {
-        hash = newSessionCwd
-          ? `#chat/new?cwd=${encodeURIComponent(newSessionCwd)}`
-          : "#chat/new";
+        sub = newSessionCwd ? `chat/new?cwd=${encodeURIComponent(newSessionCwd)}` : "chat/new";
       }
     } else if (view !== "home") {
-      hash = `#${view}`;
+      sub = view;
     }
-    // Agent 前缀：内置 Agent（Justin）保持历史格式，应用包才加 `a/<id>/`
+    // Agent 前缀：内置 Agent（Elen）保持历史格式，应用包才加 `a/<id>/`
     // 首次写回时用**地址栏里解析出的 agent**，而不是 state —— 深链接挂载时 state 可能还是默认值，
     // 直接读 state 会把 `#a/content/home` 覆写成 `#home`。
     const agentForHash = syncedHashRef.current === null ? parseHash().agent : activeAgent;
-    if (agentForHash !== BUILTIN_AGENT_ID) hash = `#a/${agentForHash}/${hash.slice(1)}`;
+    const isPackage = agentForHash !== BUILTIN_AGENT_ID;
+    // 应用包的 home 视图要保留地址栏里的视图段：那段由 AgentWorkspace 自己解析与维护，
+    // 平台这层若改写成 /home，深链接在子组件挂载前就被抹掉了（表现：刷新后总回到第一个视图）。
+    if (view === "home" && isPackage) {
+      const seg = parseAgentSegment(window.location.hash);
+      if (seg) sub = seg;
+    }
+    const hash = isPackage ? `#a/${agentForHash}/${sub}` : `#${sub}`;
     if (typeof window === "undefined") return;
     // 地址栏已经是目标值（通常是前进/后退触发的状态同步）→ 不写历史
     if (window.location.hash === hash) {
@@ -752,6 +803,8 @@ export function AppShell() {
   const activeAgentRecord: AgentRecord = findAgent(agents, activeAgent) ?? agents[0] ?? builtinAgents()[0];
   /** 应用包 Agent：P0 只有首页，平台面板（观测/审查/成长）暂不适用 */
   const isPackageAgent = activeAgentRecord.source === "package";
+  /** 应用包 Agent 的 Agent 级视图还没接数据：进得去，但显示「数据在哪」的空态页 */
+  const agentScoped = isPackageAgent && AGENT_SCOPED_VIEWS.has(view) && view !== "home";
 
   /** 切换 Agent = 换一套 workspace：视图回到首页、清掉当前会话，hash 由同步 effect 写回 */
   const selectAgent = (id: string) => {
@@ -780,9 +833,9 @@ export function AppShell() {
           />
         }
         onViewChange={(v) => {
-          // 应用包 Agent 的专属视图还没接（P1）；先只允许停在它的首页，避免点进 Justin 的面板
-          if (isPackageAgent && v !== "home") return;
-          if (v === "chat") openChatView();
+          // 不再静默拦截：Agent 级视图进得去，渲染空态页说明数据在哪；
+          // 平台级视图本来就共用，照常进。
+          if (v === "chat" && !isPackageAgent) openChatView();
           else {
             if (v !== "code") {
               setCodeFile(null);
@@ -792,6 +845,7 @@ export function AppShell() {
           }
           setDrawerOpen(false);
         }}
+        agentLabel={activeAgentRecord.name}
         sessionCount={sessions.length}
         runningCount={runningCount}
         projectCount={projectCount}
@@ -854,8 +908,16 @@ export function AppShell() {
         )}
 
         {/* 视图内容 */}
+        {agentScoped ? (
+          AGENT_RESOURCE_KINDS[view] ? (
+            <AgentResourcesPage agent={activeAgentRecord} kind={AGENT_RESOURCE_KINDS[view]} />
+          ) : (
+            <AgentScopePlaceholder agent={activeAgentRecord} view={view} />
+          )
+        ) : (
+          <>
         {view === "home" && (isPackageAgent ? (
-          <AgentHome agent={activeAgentRecord} />
+          <AgentHome agent={activeAgentRecord} onOpenSession={() => setView("chat")} />
         ) : (
           <HomeDashboard
             sessions={filteredHomeSessions}
@@ -945,6 +1007,8 @@ export function AppShell() {
               setView("home");
             }}
           />
+        )}
+          </>
         )}
 
         {/* 底部状态栏 */}

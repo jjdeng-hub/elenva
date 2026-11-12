@@ -83,3 +83,9 @@ tools/*.log
 tools/rev/
 # 临时截图：可能拍到记忆全文等私有内容
 public/_shots/
+!tools/agent-workspace-selftest.mjs
+!tools/acp-host-selftest.mjs
+
+# 设计静态稿（本机资产，不进仓库）
+.preview/
+!tools/agent-doc-selftest.mjs

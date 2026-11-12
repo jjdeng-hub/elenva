@@ -114,6 +114,7 @@ export function WorkstationSidebar({
   drawer = false,
   drawerOpen = false,
   onWidthChange,
+  agentLabel,
 }: {
   view: View;
   onViewChange: (v: View) => void;
@@ -131,6 +132,8 @@ export function WorkstationSidebar({
   drawerOpen?: boolean;
   /** 宽度变化时通知外壳（用于同步布局） */
   onWidthChange?: (width: number) => void;
+  /** 当前 Agent 名：Agent 级菜单分组标题用它（「这个 Agent · 内容创作」） */
+  agentLabel?: string;
 }) {
   const running = runningCount > 0;
   /* 展开态宽度可拖拽；抽屉模式（窄屏浮层）保持固定，拖拽只对静态侧栏有意义 */
@@ -183,28 +186,26 @@ export function WorkstationSidebar({
 
       {topSlot && <div className="mt-3 w-full shrink-0">{topSlot}</div>}
 
-      {/* 工作台不归组：它是所有分组的公共起点（总览 + 入口），不是一个"台面" */}
+      {/* 分组只表达一件事：哪些跟着 Agent 走，哪些是全平台共用。
+          之前是全量平铺，切到内容创作后点「记忆」会静默无反应，看不出是坏了还是没做。 */}
       <div className="h-3 shrink-0" />
-      <NavItem collapsed={isCollapsed} icon={<House size={14} />} label="工作台" active={view === "home"} onClick={() => onViewChange("home")} />
-
-      <div className={groupCls}>工作区</div>
+      <div className={groupCls}>这个 Agent{agentLabel ? ` · ${agentLabel}` : ""}</div>
+          <NavItem collapsed={isCollapsed} icon={<House size={14} />} label="工作台" active={view === "home"} onClick={() => onViewChange("home")} />
           <NavItem collapsed={isCollapsed} icon={<ListChecks size={14} />} label="会话" active={view === "chat"} onClick={() => onViewChange("chat")} />
-          <NavItem collapsed={isCollapsed} icon={<FolderGit2 size={14} />} label="代码" active={view === "code"} onClick={() => onViewChange("code")} />
+          <NavItem collapsed={isCollapsed} icon={<Brain size={14} />} label="记忆" active={view === "memory"} onClick={() => onViewChange("memory")} />
+          <NavItem collapsed={isCollapsed} icon={<Library size={14} />} label="技能" active={view === "skills"} onClick={() => onViewChange("skills")} />
           <NavItem collapsed={isCollapsed} icon={<AlarmClock size={14} />} label="节律" active={view === "rhythm"} onClick={() => onViewChange("rhythm")} />
           <NavItem collapsed={isCollapsed} icon={<TrendingUp size={14} />} label="成长" active={view === "growth"} onClick={() => onViewChange("growth")} />
-          <NavItem collapsed={isCollapsed} icon={<ShieldCheck size={14} />} label="审批历史" active={view === "approvals"} onClick={() => onViewChange("approvals")} />
-
-      <div className={groupCls}>资源</div>
-          <NavItem collapsed={isCollapsed} icon={<Cpu size={14} />} label="模型" active={view === "models"} onClick={() => onViewChange("models")} />
-          <NavItem collapsed={isCollapsed} icon={<Library size={14} />} label="技能" active={view === "skills"} onClick={() => onViewChange("skills")} />
-          <NavItem collapsed={isCollapsed} icon={<Brain size={14} />} label="记忆" active={view === "memory"} onClick={() => onViewChange("memory")} />
+          <NavItem collapsed={isCollapsed} icon={<FolderGit2 size={14} />} label="代码" active={view === "code"} onClick={() => onViewChange("code")} />
           <NavItem collapsed={isCollapsed} icon={<Fingerprint size={14} />} label="身份" active={view === "identity"} onClick={() => onViewChange("identity")} />
           <NavItem collapsed={isCollapsed} icon={<ScrollText size={14} />} label="提示词" active={view === "prompt"} onClick={() => onViewChange("prompt")} />
+
+      <div className={groupCls}>平台（所有 Agent 共用）</div>
+          <NavItem collapsed={isCollapsed} icon={<Cpu size={14} />} label="模型" active={view === "models"} onClick={() => onViewChange("models")} />
           <NavItem collapsed={isCollapsed} icon={<Plug size={14} />} label="插件" active={view === "plugins"} onClick={() => onViewChange("plugins")} />
           <NavItem collapsed={isCollapsed} icon={<Bot size={14} />} label="子代理" active={view === "subagents"} onClick={() => onViewChange("subagents")} />
           <NavItem collapsed={isCollapsed} icon={<FlaskConical size={14} />} label="并行试验" active={view === "candidates"} onClick={() => onViewChange("candidates")} />
-
-      <div className={groupCls}>本机</div>
+          <NavItem collapsed={isCollapsed} icon={<ShieldCheck size={14} />} label="审批历史" active={view === "approvals"} onClick={() => onViewChange("approvals")} />
           <NavItem collapsed={isCollapsed} icon={<Server size={14} />} label="系统" active={view === "system"} onClick={() => onViewChange("system")} />
           <NavItem collapsed={isCollapsed} icon={<Settings size={14} />} label="设置" active={view === "settings"} onClick={() => onViewChange("settings")} />
 

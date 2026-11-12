@@ -22,6 +22,26 @@ function resolveRuntime(agentId: string): AgentRuntimeInfo {
   return { profile: agent.profile ?? agent.id, cwd: agent.dir ?? process.cwd() };
 }
 
+/** 宿主不可用时也要回一条 SSE：EventSource 收到 JSON（非 event-stream）会永久关闭，不再重连 */
+function hostDownSse(message: string): Response {
+  const encoder = new TextEncoder();
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: "host_down", message })}\n\n`));
+      controller.close();
+    },
+  });
+  return new Response(body, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
+
 export async function GET(req: Request) {
   const agentId = new URL(req.url).searchParams.get("agentId");
   if (!agentId) return NextResponse.json({ error: "agentId required" }, { status: 400 });
@@ -34,7 +54,7 @@ export async function GET(req: Request) {
       cache: "no-store",
     });
     if (!upstream.ok || !upstream.body) {
-      return NextResponse.json({ error: `ACP 宿主不可用：HTTP ${upstream.status}` }, { status: 502 });
+      return hostDownSse(`ACP 宿主不可用：HTTP ${upstream.status}`);
     }
     return new Response(upstream.body, {
       headers: {
@@ -45,7 +65,7 @@ export async function GET(req: Request) {
       },
     });
   } catch (error) {
-    return NextResponse.json({ error: `ACP 宿主不可用：${String(error)}` }, { status: 502 });
+    return hostDownSse(`ACP 宿主不可用：${String(error)}`);
   }
 }
 
@@ -68,8 +88,13 @@ export async function POST(req: Request) {
         ? { agentId, requestId: body.requestId, optionId: body.optionId }
         : action === "cancel"
           ? { agentId }
-          : { agentId, cwd: runtime.cwd };
-  const endpoint = action === "prompt" || action === "permission" || action === "cancel" ? action : "reset";
+          : action === "resume"
+            ? { agentId, profile: runtime.profile, cwd: runtime.cwd, sessionId: String(body.sessionId ?? "") }
+            : { agentId, cwd: runtime.cwd };
+  const endpoint =
+    action === "prompt" || action === "permission" || action === "cancel" || action === "resume"
+      ? action
+      : "reset";
 
   try {
     const res = await fetch(`${HOST}/${endpoint}`, {

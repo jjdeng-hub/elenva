@@ -69,6 +69,12 @@ jobs:
           node tools/skill-advisor-selftest.mjs
       - name: 子代理模板与只读语义自检
         run: node tools/subagent-templates-selftest.mjs
+      - name: Agent 工作台（视图声明 / 数据契约 / 写入通道 / 动作渲染）
+        run: node tools/agent-workspace-selftest.mjs
+      - name: ACP 宿主（prompt 串行化 / 待批列表 / 审批重放）
+        run: node tools/acp-host-selftest.mjs
+      - name: 正文元信息与历史版本（字数/小节/缺口 / 备份与恢复）
+        run: node tools/agent-doc-selftest.mjs
       - name: 启动默认写入护栏（三条路径 / 写前备份 / 坏默认拦截 / 重置）
         run: node tools/model-default-persist-selftest.mjs
       - name: 模型页重构自检（健康 id 匹配 / 状态条与健康下沉接线）

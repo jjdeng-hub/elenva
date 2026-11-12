@@ -60,5 +60,5 @@ ELENVA_AGENTS_DIR=D:\Agents hermes start
 
 ## 内置 Agent
 
-`justin`（编码 Agent）是平台自带的，写在 `lib/agents/manifest.ts` 里，不占用户目录，
+`elen`（编码 Agent）是平台自带的，写在 `lib/agents/manifest.ts` 里，不占用户目录，
 也不允许被同名应用包覆盖（注册表会把冲突记进 `errors`）。

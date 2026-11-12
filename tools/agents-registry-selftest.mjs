@@ -95,8 +95,8 @@ check("拒绝：缺 name / runtime 不认识", () => {
 
 check("合并：内置优先、应用包按名称排序、冲突不覆盖", () => {
   const pkg = (id, name) => ({ id, name, runtime: "pi", source: "package", dir: `/tmp/${id}` });
-  const { agents, conflicts } = manifestLib.mergeAgentRecords([pkg("zeta", "Zeta"), pkg("justin", "假 Justin"), pkg("alpha", "Alpha")]);
-  assert.deepEqual(agents.map((a) => a.id), ["justin", "alpha", "zeta"]);
+  const { agents, conflicts } = manifestLib.mergeAgentRecords([pkg("zeta", "Zeta"), pkg("elen", "假 Elen"), pkg("alpha", "Alpha")]);
+  assert.deepEqual(agents.map((a) => a.id), ["elen", "alpha", "zeta"]);
   assert.equal(conflicts.length, 1);
 });
 
@@ -109,7 +109,7 @@ check("图标：有 icon 用 icon，没有就取名字首字", () => {
 check("注册表：内置 Agent 在首位，坏包降级成 errors", () => {
   const snapshot = registryLib.listAgents();
   assert.equal(snapshot.dir, agentsDir);
-  assert.deepEqual(snapshot.agents.map((a) => a.id), ["justin", "house"]);
+  assert.deepEqual(snapshot.agents.map((a) => a.id), ["elen", "house"]);
   const house = snapshot.agents[1];
   assert.equal(house.source, "package");
   assert.equal(house.runtime, "hermes");
@@ -121,7 +121,7 @@ check("注册表：内置 Agent 在首位，坏包降级成 errors", () => {
 check("注册表：目录不存在时只返回内置 Agent", () => {
   process.env.ELENVA_AGENTS_DIR = join(root, "not-created");
   const snapshot = registryLib.listAgents();
-  assert.deepEqual(snapshot.agents.map((a) => a.id), ["justin"]);
+  assert.deepEqual(snapshot.agents.map((a) => a.id), ["elen"]);
   assert.deepEqual(snapshot.errors, []);
 });
 

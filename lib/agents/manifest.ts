@@ -3,12 +3,13 @@
  *
  * 设计约束：
  * - 顶层**不 import 任何 `node:*`**，客户端组件与 jiti 自测都能直接加载（同 lib/tool-presets.ts 的做法）。
- * - 平台开源、具体 Agent 私有：内置只保留平台自带的编码 Agent（Justin，Pi 内核）。
+ * - 平台开源、具体 Agent 私有：内置只保留平台自带的编码 Agent（Elen，Pi 内核）。
  *   其余 Agent 以「应用包」形式放在用户目录（默认 `~/.elenva/agents/<id>/manifest.json`），
  *   各自独立版本化、可私有、可分发，**不随本仓库开源**。
  */
 
 import { parsePanels, type AgentPanel } from "./panels";
+import { parseViews, type AgentView } from "./workspace";
 
 export type AgentRuntime = "pi" | "hermes";
 
@@ -28,6 +29,11 @@ export interface AgentManifest {
   version?: string;
   /** 声明式面板：字符串或对象都接受，解析规则见 lib/agents/panels.ts */
   panels?: AgentPanel[];
+  /**
+   * 声明式工作台：导航项（view）→ 元件（block）。缺省时由 panels 推一个「概览」视图。
+   * 解析规则见 lib/agents/workspace.ts。
+   */
+  views?: AgentView[];
   /** 平台面板开关（growth / subagents / observatory …，P0 只透传） */
   capabilities?: Record<string, boolean>;
   /** 数据目录（相对应用包目录；P1 起用于面板读取） */
@@ -40,7 +46,7 @@ export interface AgentRecord extends AgentManifest {
   dir: string | null;
 }
 
-export const BUILTIN_AGENT_ID = "justin";
+export const BUILTIN_AGENT_ID = "elen";
 
 /** id 规则：小写字母 / 数字开头，可含连字符，≤64 */
 export const AGENT_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
@@ -52,7 +58,7 @@ export function builtinAgents(): AgentRecord[] {
   return [
     {
       id: BUILTIN_AGENT_ID,
-      name: "Justin",
+      name: "Elen",
       description: "编码 Agent —— 平台自带工作台（Pi 内核，进程内）",
       icon: "⌘",
       runtime: "pi",
@@ -100,6 +106,7 @@ export function parseAgentManifest(raw: unknown, dirName: string): ManifestParse
   }
 
   const panels = parsePanels(obj.panels);
+  const views = parseViews(obj.views, panels);
 
   let capabilities: Record<string, boolean> | undefined;
   if (typeof obj.capabilities === "object" && obj.capabilities !== null && !Array.isArray(obj.capabilities)) {
@@ -119,6 +126,7 @@ export function parseAgentManifest(raw: unknown, dirName: string): ManifestParse
       profile: trimmedString(obj.profile) ?? undefined,
       version: trimmedString(obj.version) ?? undefined,
       panels,
+      views,
       capabilities,
       dataDir: trimmedString(obj.dataDir) ?? undefined,
     },
