@@ -31,17 +31,27 @@ export function AgentSwitcher({
       <div className="flex flex-col gap-0.5">
         {agents.map((agent) => {
           const active = agent.id === activeId;
+          // P0 预检：runtime=hermes 且未安装 → 名册层直接置灰 + 安装提示，不点进去才报错
+          const unavailable = agent.runtime === "hermes" && agent.runtimeAvailable === false;
           return (
             <button
               key={agent.id}
               type="button"
+              disabled={unavailable}
               onClick={() => onSelect(agent.id)}
               aria-pressed={active}
-              title={agent.description ? `${agent.name} · ${agent.description}` : agent.name}
+              title={
+                unavailable
+                  ? `${agent.name} · 这台机器没有安装 Hermes（需要 hermes 在 PATH 里），安装后可用`
+                  : agent.description
+                    ? `${agent.name} · ${agent.description}`
+                    : agent.name
+              }
               className={cn(
-                "flex h-8 w-full cursor-pointer items-center gap-2 rounded-lg text-left t-fast",
+                "flex h-8 w-full items-center gap-2 rounded-lg text-left t-fast",
                 collapsed ? "justify-center" : "px-2",
                 active ? "bg-hover text-fg" : "text-dim hover:bg-hover hover:text-fg",
+                unavailable && "cursor-not-allowed opacity-50 hover:bg-transparent hover:text-dim",
               )}
             >
               <span
@@ -56,8 +66,13 @@ export function AgentSwitcher({
                 <>
                   <span className="min-w-0 flex-1 truncate text-[12px]">{agent.name}</span>
                   {agent.runtime !== "pi" && (
-                    <span className="shrink-0 rounded-sm border border-line px-1 text-[10px] text-dim/80">
-                      {agent.runtime}
+                    <span
+                      className={cn(
+                        "shrink-0 rounded-sm border px-1 text-[10px]",
+                        unavailable ? "border-line text-dim/60" : "border-line text-dim/80",
+                      )}
+                    >
+                      {unavailable ? "未安装" : agent.runtime}
                     </span>
                   )}
                 </>

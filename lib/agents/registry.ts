@@ -7,7 +7,9 @@
  * 读盘失败一律降级为「少一个 Agent + 一条 errors」，不抛给调用方 ——
  * 一个坏包不该让整个工作台打不开。
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import fs from "node:fs";
+import path from "node:path";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -15,6 +17,26 @@ import {
   parseAgentManifest,
   type AgentRecord,
 } from "./manifest";
+
+/**
+ * Hermes 运行时可用性（P0 预检，读盘层）。
+ *
+ * Hermes 是 PATH 上的外部命令，不是 npm 依赖 —— 机器上没装时，Agent 包本身没坏，
+ * 只是运行时不可用。这里用 PATH 目录扫描探测（lib/ 内零 spawn，硬约束），
+ * 与 bin/acp-host.cjs 的 spawn 级预检各挡一道；两处不一致时，真正起进程的仍是宿主。
+ */
+export function isHermesInstalled(): boolean {
+  const dirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  for (const dir of dirs) {
+    try {
+      const candidate = join(dir, "hermes");
+      if (existsSync(candidate) && statSync(candidate).isFile()) return true;
+    } catch {
+      /* 目录不可读，跳过 */
+    }
+  }
+  return false;
+}
 
 export interface AgentRegistrySnapshot {
   agents: AgentRecord[];
@@ -66,5 +88,10 @@ export function listAgents(): AgentRegistrySnapshot {
   }
 
   const { agents, conflicts } = mergeAgentRecords(packages);
+  // P0 预检：hermes 不可用只影响对应 Agent 的可用性，不算坏包（不进 errors）
+  const hermesReady = isHermesInstalled();
+  for (const agent of agents) {
+    if (agent.runtime === "hermes") agent.runtimeAvailable = hermesReady;
+  }
   return { agents, dir, errors: [...errors, ...conflicts] };
 }

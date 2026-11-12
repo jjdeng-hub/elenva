@@ -44,6 +44,12 @@ export interface AgentRecord extends AgentManifest {
   source: "builtin" | "package";
   /** 应用包绝对路径；内置 Agent 为 null */
   dir: string | null;
+  /**
+   * 运行时可用性（P0 预检）：仅 runtime=hermes 的 Agent 会有这个字段 ——
+   * PATH 上找不到 hermes 时为 false，界面据此在名册层置灰并给安装提示。
+   * 没装运行时的 Agent 不是坏包，只是不可用；不会进注册表的 errors。
+   */
+  runtimeAvailable?: boolean;
 }
 
 export const BUILTIN_AGENT_ID = "elen";

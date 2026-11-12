@@ -47,6 +47,47 @@ function emitEvent(agentId, event) {
   }
 }
 
+/**
+ * 运行时预检（P0）：Hermes 不在 npm 依赖里，是 PATH 上的外部命令。
+ * 没装时 spawn 会抛 ENOENT —— 在启动前先探一次，明确拒绝而不是等子进程崩。
+ * 结果按 PATH 缓存（路径变了才重探）；探测失败视为未安装。
+ */
+const PREFLIGHT_TIMEOUT_MS = Number(process.env.ELENVA_ACP_PREFLIGHT_MS || 5000);
+// 初始 path 用哨兵值，绝不与真实 PATH 相等 —— 否则首次调用会直接命中「未探测」的 false 缓存
+let preflightCache = { path: "__unprobed__", installed: false };
+
+function probeHermes() {
+  return new Promise((resolve) => {
+    const proc = spawn("hermes", ["--version"], { stdio: "ignore" });
+    let settled = false;
+    const done = (installed) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { proc.kill(); } catch { /* ignore */ }
+      resolve(installed);
+    };
+    const timer = setTimeout(() => done(false), PREFLIGHT_TIMEOUT_MS);
+    proc.on("error", () => done(false)); // ENOENT / EACCES 等
+    proc.on("exit", (code) => done(code === 0));
+  });
+}
+
+async function hermesInstalled() {
+  if (preflightCache.path === (process.env.PATH ?? "")) return preflightCache.installed;
+  const installed = await probeHermes();
+  preflightCache = { path: process.env.PATH ?? "", installed };
+  return installed;
+}
+
+const HERMES_NOT_INSTALLED = "HERMES_NOT_INSTALLED";
+
+function notInstalledError() {
+  const error = new Error("这台机器没有安装 Hermes —— Agent 启动被拒绝。安装后重试（需要 hermes 在 PATH 里）。参考：https://github.com/jjdeng-hub/elenva");
+  error.code = HERMES_NOT_INSTALLED;
+  return error;
+}
+
 function log(...args) {
   process.stdout.write(`[acp-host] ${args.join(" ")}\n`);
 }
@@ -121,6 +162,8 @@ class AgentProc {
 
   async start(resumeSessionId = null) {
     this.error = null;
+    // 预检失败：明确拒绝，不让 ENOENT 走到子进程层
+    if (!(await hermesInstalled())) throw notInstalledError();
     this.proc = spawn("hermes", ["-p", this.profile, "acp"], {
       cwd: this.cwd,
       stdio: ["pipe", "pipe", "pipe"],
@@ -133,6 +176,17 @@ class AgentProc {
       const text = String(chunk);
       // Hermes 启动时会刷一串插件注册日志；只在出错时留一行上下文
       if (/\b(ERROR|Traceback|CRITICAL)\b/.test(text)) this.error = text.slice(-500);
+    });
+    // spawn 失败（ENOENT / EACCES）不会触发 exit，只会发 error 事件：不兜住就是 unhandled，把宿主打挂
+    this.proc.on("error", (error) => {
+      this.state = "dead";
+      this.error = error.code === "ENOENT"
+        ? "这台机器没有安装 Hermes"
+        : `Hermes 启动失败（${error.code || String(error)}）`;
+      for (const { reject } of this.pending.values()) reject(new Error(this.error));
+      this.pending.clear();
+      this.emit({ type: "error", message: this.error });
+      log(this.agentId, "spawn error", error.code || String(error));
     });
     this.proc.on("exit", (code, signal) => {
       this.state = "dead";
@@ -339,7 +393,15 @@ async function ensureAgent(agentId, profile, cwd, resumeSessionId = null) {
   }
   const agent = new AgentProc(agentId, profile, cwd || process.cwd());
   agents.set(agentId, agent);
-  await agent.start(resumeSessionId);
+  try {
+    await agent.start(resumeSessionId);
+  } catch (error) {
+    // 预检拒绝/初始化失败：进程没起来也把状态落成 dead + error ——
+    // health 不再卡在 starting，SSE 晚订阅者也能补到这条错误
+    agent.state = "dead";
+    agent.error = agent.error || String(error.message || error);
+    throw error;
+  }
   return agent;
 }
 
