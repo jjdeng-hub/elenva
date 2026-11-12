@@ -360,6 +360,12 @@ export interface SessionInfo {
   /** True while the runtime session exists only in memory and its JSONL file
    *  has not been created yet. Disk-backed actions must wait until this clears. */
   transient?: boolean;
+  /** 统一会话索引（P2）：这条会话属于哪个运行时。缺省 = pi（老数据兼容）。 */
+  runtime?: "pi" | "hermes";
+  /** 统一会话索引：来源标识。pi = 会话文件路径；hermes = `state.db:<sessionId>`。 */
+  source?: string;
+  /** 统一会话索引：运行时侧这条会话是否正在跑一轮。 */
+  running?: boolean;
 }
 
 export interface SessionContext {

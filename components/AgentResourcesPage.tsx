@@ -5,7 +5,6 @@ import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/components/lib/utils";
 import type { AgentRecord } from "@/lib/agents/manifest";
 import { formatTokens } from "@/lib/format";
-import { HermesChat } from "@/components/HermesChat";
 
 /**
  * 应用包 Agent（Hermes 运行时）的只读资源页：会话 / 记忆 / 技能。
@@ -165,101 +164,6 @@ export function AgentResourcesPage({ agent, kind }: { agent: AgentRecord; kind: 
     [agent.id, openSession],
   );
 
-  if (kind === "sessions") {
-    const filtered = query.trim()
-      ? sessions.filter((session) => session.title.toLowerCase().includes(query.trim().toLowerCase()))
-      : sessions;
-    const now = new Date();
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const startOfYesterday = startOfToday - 24 * 3600 * 1000;
-    const startOfWeek = startOfToday - 6 * 24 * 3600 * 1000;
-    const buckets: { label: string; items: typeof sessions }[] = [
-      { label: "今天", items: [] },
-      { label: "昨天", items: [] },
-      { label: "本周", items: [] },
-      { label: "更早", items: [] },
-    ];
-    for (const session of filtered) {
-      const at = new Date(session.lastActivityAt).getTime();
-      if (Number.isNaN(at)) buckets[3].items.push(session);
-      else if (at >= startOfToday) buckets[0].items.push(session);
-      else if (at >= startOfYesterday) buckets[1].items.push(session);
-      else if (at >= startOfWeek) buckets[2].items.push(session);
-      else buckets[3].items.push(session);
-    }
-    const grouped = buckets.filter((bucket) => bucket.items.length > 0);
-
-    return (
-      <div className="flex min-h-0 flex-1" data-testid="agent-resources">
-        {/* 左：历史会话 */}
-        <aside className="flex w-full shrink-0 flex-col border-b border-line bg-panel min-[900px]:h-full min-[900px]:w-64 min-[900px]:border-b-0 min-[900px]:border-r">
-          <div className="flex shrink-0 items-center gap-2 border-b border-line-soft px-3 py-2">
-            <span className="text-[10px] tracking-wide text-dim">
-              会话 · {agent.name}
-              {sessions.length > 0 && <span className="ml-1 tabular-nums text-dim/60">{filtered.length}/{sessions.length}</span>}
-            </span>
-            <button type="button" className="btn btn-sm btn-subtle ml-auto" onClick={() => setResumeId(null)}>
-              新会话
-            </button>
-          </div>
-          <div className="shrink-0 px-2 py-1.5">
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="搜标题…"
-              className="h-7 w-full rounded-md border border-line bg-panel-2 px-2 text-[12px] text-fg outline-none placeholder:text-dim focus:border-accent"
-            />
-          </div>
-          <div className="min-h-0 flex-1 overflow-y-auto max-[899px]:max-h-40 max-[899px]:flex max-[899px]:flex-row max-[899px]:gap-1 max-[899px]:overflow-x-auto max-[899px]:overflow-y-hidden max-[899px]:px-2 max-[899px]:pb-2">
-            {loading ? (
-              <div className="px-1 py-2 text-[11px] text-dim">读取中…</div>
-            ) : grouped.length === 0 ? (
-              <div className="px-1 py-2 text-[11px] text-dim">{query ? "没有匹配的会话" : "还没有会话。"}</div>
-            ) : (
-              grouped.map((group) => (
-                <div key={group.label} className="max-[899px]:flex max-[899px]:items-center max-[899px]:gap-1">
-                  <div className="px-1 pb-1 pt-2 text-[10px] tracking-wide text-dim/70 max-[899px]:hidden">{group.label}</div>
-                  {group.items.map((session) => (
-                    <button
-                      key={session.id}
-                      type="button"
-                      className={cn(
-                        "flex w-full flex-col gap-0.5 border-b border-line-soft px-2 py-1.5 text-left t-fast max-[899px]:w-40 max-[899px]:shrink-0 max-[899px]:rounded-md max-[899px]:border",
-                        resumeId === session.id ? "bg-accent-soft" : "hover:bg-hover",
-                      )}
-                      onClick={() => setResumeId(session.id)}
-                    >
-                      <span className={cn("truncate text-[12px]", resumeId === session.id ? "font-semibold text-accent" : "text-fg")}>
-                        {session.title}
-                      </span>
-                      <span className="text-[10px] text-dim">
-                        {SOURCE_LABEL[session.source] ? `${SOURCE_LABEL[session.source]} · ` : ""}
-                        {fmt(session.lastActivityAt)} · {session.messageCount} 条
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ))
-            )}
-          </div>
-        </aside>
-
-        {/* 右：对话（全宽，不要观测栏） */}
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="agent-session-chat">
-          <HermesChat
-            key={resumeId ?? "new"}
-            agentId={agent.id}
-            profile={agent.profile ?? agent.id}
-            variant="pane"
-            resumeSessionId={resumeId}
-            // 没选历史会话时，从 Hermes state.db（单一真源）读回最近一段对话（刷新不丢）；
-            // 选了历史会话则由 ACP 的 session/load 重放，避免两份记录缠在一起
-            history={!resumeId}
-          />
-        </div>
-      </div>
-    );
-  }
 
   const saveSoul = async () => {
     setSoulState("saving");

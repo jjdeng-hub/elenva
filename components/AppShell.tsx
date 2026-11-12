@@ -176,12 +176,14 @@ export function AppShell() {
 
   const refreshSessions = useCallback(async (): Promise<SessionInfo[]> => {
     try {
-      const res = await fetch("/api/sessions", { cache: "no-store" });
+      // P2：统一会话索引 —— Pi 会话文件与 Hermes state.db 投影成同一 SessionInfo，
+      // 侧栏/搜索/分组只吃这里；不再各自读存储。
+      const res = await fetch("/api/session-index", { cache: "no-store" });
       const data = (await res.json()) as SessionsResponse;
       setSessions(data.sessions || []);
       const running = new Set(data.runningSessionIds || []);
       setRunningIds(running);
-      // 记录会话列表版本，供轻量轮询判断“是否需要全量刷新”
+      // 记录会话列表版本，供轻量轮询判断“是否需要全量刷新”（Hermes 索引无版本号，仅 Pi 有）
       if (typeof data.sessionListVersion === "number") listVersionRef.current = data.sessionListVersion;
       return data.sessions || [];
     } catch {
@@ -226,6 +228,11 @@ export function AppShell() {
         const next = new Set(snap.runningSessionIds ?? []);
         const finished = [...prevRunningRef.current].filter((id) => !next.has(id));
         prevRunningRef.current = next;
+        // P2：/api/agent/running 只报 Pi 的运行中会话；Hermes 的 running 标记来自
+        // 统一索引（refreshSessions 里写入），这里合并保留，否则每 3s 被抹掉。
+        for (const id of sessions.filter((s) => s.runtime === "hermes" && s.running).map((s) => s.id)) {
+          next.add(id);
+        }
         setRunningIds(next);
 
         const versionChanged =
@@ -803,8 +810,9 @@ export function AppShell() {
   const activeAgentRecord: AgentRecord = findAgent(agents, activeAgent) ?? agents[0] ?? builtinAgents()[0];
   /** 应用包 Agent：P0 只有首页，平台面板（观测/审查/成长）暂不适用 */
   const isPackageAgent = activeAgentRecord.source === "package";
-  /** 应用包 Agent 的 Agent 级视图还没接数据：进得去，但显示「数据在哪」的空态页 */
-  const agentScoped = isPackageAgent && AGENT_SCOPED_VIEWS.has(view) && view !== "home";
+  /** 应用包 Agent 的 Agent 级视图还没接数据：进得去，但显示「数据在哪」的空态页。
+   *  P2：Hermes 的 chat 走统一 ChatView（chat 视图不再算 agent 级资源页）。 */
+  const agentScoped = isPackageAgent && view !== "chat" && AGENT_SCOPED_VIEWS.has(view) && view !== "home";
 
   /** 切换 Agent = 换一套 workspace：视图回到首页、清掉当前会话，hash 由同步 effect 写回 */
   const selectAgent = (id: string) => {
@@ -835,7 +843,8 @@ export function AppShell() {
         onViewChange={(v) => {
           // 不再静默拦截：Agent 级视图进得去，渲染空态页说明数据在哪；
           // 平台级视图本来就共用，照常进。
-          if (v === "chat" && !isPackageAgent) openChatView();
+          // P2：Hermes 应用包的 chat 也走统一 ChatView（useAcpSession 适配器）
+          if (v === "chat" && (!isPackageAgent || activeAgentRecord.runtime === "hermes")) openChatView();
           else {
             if (v !== "code") {
               setCodeFile(null);
@@ -963,11 +972,16 @@ export function AppShell() {
         {view === "settings" && <SettingsPage projects={memoryProjects} defaultCwd={defaultCwd} />}
         {view === "chat" && (
           <ChatView
-            key={selected?.id ?? "new"}
+            /* key 带 agent id：注册表未加载时先按内置 Agent 渲染，加载后换 runtime，
+               必须重挂载 —— 同一实例内 hook 分发（useSessionRuntime）不允许翻转 */
+            key={`${selected?.id ?? "new"}:${activeAgentRecord.id ?? ""}`}
             session={selected}
             newSessionCwd={newChatWorkspace ?? defaultCwd}
             sessions={sessions}
             runningIds={runningIds}
+            runtime={activeAgentRecord.runtime === "hermes" ? "hermes" : undefined}
+            hermesAgentId={activeAgentRecord.runtime === "hermes" ? activeAgentRecord.id : undefined}
+            hermesProfile={activeAgentRecord.runtime === "hermes" ? activeAgentRecord.profile ?? activeAgentRecord.id : undefined}
             unreadIds={unreadIds}
             sideSessionId={sideSessionId}
             onSelectSide={setSideSessionId}

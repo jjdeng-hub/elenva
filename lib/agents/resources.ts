@@ -27,6 +27,27 @@ export interface HermesSession {
   lastActivityAt: string;
   messageCount: number;
   model?: string;
+  /** 会话工作目录（P2 统一索引用）；state.db 里可为 null，调用方自行兑底 */
+  cwd?: string | null;
+  /** 累计用量（state.db 的 sessions 表；观测栏 sessionStats 的真源） */
+  inputTokens?: number;
+  outputTokens?: number;
+  toolCallCount?: number;
+}
+
+export interface HermesSessionStats {
+  sessionId: string;
+  title?: string;
+  cwd?: string | null;
+  startedAt?: string;
+  messageCount: number;
+  toolCallCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  /** 估算成本（USD，state.db 的 estimated_cost_usd；没有就是 0，不编） */
+  costUsd: number;
 }
 
 export interface HermesToolCall {
@@ -99,7 +120,8 @@ export async function listHermesSessions(profile: string, limit = 40): Promise<H
     db = new DatabaseSync(dbPath, { readOnly: true });
     const rows = db
       .prepare(
-        `select id, title, source, started_at, last_activity_at, message_count, model
+        `select id, title, source, cwd, started_at, last_activity_at, message_count, model,
+                input_tokens, output_tokens, tool_call_count
            from sessions
           where coalesce(archived, 0) = 0
             and coalesce(message_count, 0) > 0
@@ -115,6 +137,10 @@ export async function listHermesSessions(profile: string, limit = 40): Promise<H
       lastActivityAt: isoFromUnix(row.last_activity_at ?? row.started_at),
       messageCount: Number(row.message_count ?? 0),
       model: row.model ? String(row.model) : undefined,
+      cwd: row.cwd ? String(row.cwd) : null,
+      inputTokens: Number(row.input_tokens ?? 0),
+      outputTokens: Number(row.output_tokens ?? 0),
+      toolCallCount: Number(row.tool_call_count ?? 0),
     }));
   } catch {
     return [];
@@ -167,6 +193,54 @@ export async function findLatestHermesSessionByCwd(
       lastActivityAt: isoFromUnix(row.last_activity_at ?? row.started_at),
       messageCount: Number(row.message_count ?? 0),
       model: row.model ? String(row.model) : undefined,
+    };
+  } catch {
+    return null;
+  } finally {
+    try {
+      db?.close();
+    } catch {
+      /* 关不掉不影响读取结果 */
+    }
+  }
+}
+
+/**
+ * 单会话统计（P2 观测栏真源）：state.db 的 sessions 表一行 —— token / 工具次数 / 开始时间。
+ * 找不到会话（id 不存在 / db 缺失）返回 null，不编造。
+ */
+export async function readHermesSessionStats(profile: string, sessionId: string): Promise<HermesSessionStats | null> {
+  if (!sessionId) return null;
+  const dir = hermesProfileDir(profile);
+  if (!dir) return null;
+  const dbPath = join(dir, "state.db");
+  if (!existsSync(dbPath)) return null;
+  const { DatabaseSync } = await loadSqlite();
+  let db: import("node:sqlite").DatabaseSync | null = null;
+  try {
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const row = db
+      .prepare(
+        `select id, title, cwd, started_at, message_count, tool_call_count,
+                input_tokens, output_tokens, cache_read_tokens, cache_write_tokens,
+                estimated_cost_usd
+           from sessions
+          where id = ?`,
+      )
+      .get(sessionId) as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      sessionId: String(row.id ?? sessionId),
+      title: row.title ? String(row.title) : undefined,
+      cwd: row.cwd ? String(row.cwd) : null,
+      startedAt: isoFromUnix(row.started_at) || undefined,
+      messageCount: Number(row.message_count ?? 0),
+      toolCallCount: Number(row.tool_call_count ?? 0),
+      inputTokens: Number(row.input_tokens ?? 0),
+      outputTokens: Number(row.output_tokens ?? 0),
+      cacheReadTokens: Number(row.cache_read_tokens ?? 0),
+      cacheWriteTokens: Number(row.cache_write_tokens ?? 0),
+      costUsd: Number(row.estimated_cost_usd ?? 0),
     };
   } catch {
     return null;
