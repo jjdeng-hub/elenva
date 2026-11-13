@@ -84,12 +84,22 @@ function errorMessage(data: unknown, fallback: string): string {
   return fallback;
 }
 
-async function hermesFetch<T>(path: string, init?: RequestInit & { confirm?: boolean }): Promise<T> {
+/**
+ * profile：应用包 Agent 有自己的 profile（Tom=default、内容创作=content…），
+ * cron 的读与写都必须落在**这个 profile 的 cron** 上，不能落到 serve 的跨 profile
+ * 默认视角（?profile=all）或别的 profile 的 store。缺省（内置 Elen / 平台级）不带参数。
+ */
+async function hermesFetch<T>(
+  path: string,
+  init?: RequestInit & { confirm?: boolean },
+  profile?: string,
+): Promise<T> {
   const { confirm, ...rest } = init ?? {};
   const headers = new Headers(rest.headers);
   if (confirm) headers.set("X-Elenva-Confirm", "1");
   if (rest.body) headers.set("Content-Type", "application/json");
-  const res = await fetch(`/api/hermes/${path}`, { ...rest, headers, cache: "no-store" });
+  const suffix = profile ? `${path.includes("?") ? "&" : "?"}profile=${encodeURIComponent(profile)}` : "";
+  const res = await fetch(`/api/hermes/${path}${suffix}`, { ...rest, headers, cache: "no-store" });
   const data = (await res.json().catch(() => null)) as unknown;
   if (!res.ok) throw new Error(errorMessage(data, `Hermes 返回 ${res.status}`));
   return data as T;
@@ -258,7 +268,7 @@ function payloadFromForm(form: FormState): Record<string, unknown> {
 // 页面
 // ============================================================================
 
-export function RhythmPage() {
+export function RhythmPage({ profile }: { profile?: string } = {}) {
   const [jobs, setJobs] = useState<HermesJob[]>([]);
   const [targets, setTargets] = useState<DeliveryTarget[]>([]);
   const [backendDown, setBackendDown] = useState(false);
@@ -273,7 +283,7 @@ export function RhythmPage() {
 
   const load = useCallback(async () => {
     try {
-      const data = await hermesFetch<HermesJob[]>("cron/jobs");
+      const data = await hermesFetch<HermesJob[]>("cron/jobs", undefined, profile);
       setJobs(data ?? []);
       setBackendDown(false);
     } catch (error) {
@@ -283,16 +293,16 @@ export function RhythmPage() {
     } finally {
       setLoading(false);
     }
-  }, [loading]);
+  }, [loading, profile]);
 
   const loadTargets = useCallback(async () => {
     try {
-      const data = await hermesFetch<{ targets?: DeliveryTarget[] }>("cron/delivery-targets");
+      const data = await hermesFetch<{ targets?: DeliveryTarget[] }>("cron/delivery-targets", undefined, profile);
       setTargets(data.targets ?? []);
     } catch {
       setTargets([]);
     }
-  }, []);
+  }, [profile]);
 
   useEffect(() => {
     void load();
@@ -324,13 +334,13 @@ export function RhythmPage() {
 
   const loadRuns = useCallback(async (jobId: string) => {
     try {
-      const data = await hermesFetch<{ runs?: HermesRun[] }>(`cron/jobs/${jobId}/runs?limit=5`);
+      const data = await hermesFetch<{ runs?: HermesRun[] }>(`cron/jobs/${jobId}/runs?limit=5`, undefined, profile);
       setRuns((prev) => ({ ...prev, [jobId]: data.runs ?? [] }));
     } catch (error) {
       setRuns((prev) => ({ ...prev, [jobId]: [] }));
       toast(error instanceof Error ? error.message : String(error));
     }
-  }, []);
+  }, [profile]);
 
   const targetName = useCallback(
     (id: string | null | undefined) => targets.find((t) => t.id === id)?.name ?? id ?? "—",
@@ -342,11 +352,11 @@ export function RhythmPage() {
     const paused = job.state === "paused" || !!job.paused;
     setBusyId(job.id);
     try {
-      await hermesFetch(`cron/jobs/${job.id}/${paused ? "resume" : "pause"}`, {
-        method: "POST",
-        confirm: true,
-        body: JSON.stringify({ confirm: true }),
-      });
+      await hermesFetch(
+        `cron/jobs/${job.id}/${paused ? "resume" : "pause"}`,
+        { method: "POST", confirm: true, body: JSON.stringify({ confirm: true }) },
+        profile,
+      );
       toast(paused ? "已恢复" : "已暂停");
       await load();
     } catch (error) {
@@ -359,11 +369,11 @@ export function RhythmPage() {
   const trigger = async (job: HermesJob) => {
     setRunningId(job.id);
     try {
-      await hermesFetch(`cron/jobs/${job.id}/trigger`, {
-        method: "POST",
-        confirm: true,
-        body: JSON.stringify({ confirm: true }),
-      });
+      await hermesFetch(
+        `cron/jobs/${job.id}/trigger`,
+        { method: "POST", confirm: true, body: JSON.stringify({ confirm: true }) },
+        profile,
+      );
       toast("运行结束");
       await load();
       if (expanded.has(job.id)) await loadRuns(job.id);
@@ -384,7 +394,7 @@ export function RhythmPage() {
     if (!ok) return;
     setBusyId(job.id);
     try {
-      await hermesFetch(`cron/jobs/${job.id}`, { method: "DELETE", confirm: true });
+      await hermesFetch(`cron/jobs/${job.id}`, { method: "DELETE", confirm: true }, profile);
       toast("已删除");
       await load();
     } catch (error) {
@@ -406,18 +416,18 @@ export function RhythmPage() {
     try {
       if (form.id) {
         const { confirm, ...updates } = payloadFromForm(form);
-        await hermesFetch(`cron/jobs/${form.id}`, {
-          method: "PUT",
-          confirm: true,
-          body: JSON.stringify({ updates, confirm }),
-        });
+        await hermesFetch(
+          `cron/jobs/${form.id}`,
+          { method: "PUT", confirm: true, body: JSON.stringify({ updates, confirm }) },
+          profile,
+        );
         toast("已保存");
       } else {
-        await hermesFetch("cron/jobs", {
-          method: "POST",
-          confirm: true,
-          body: JSON.stringify(payloadFromForm(form)),
-        });
+        await hermesFetch(
+          "cron/jobs",
+          { method: "POST", confirm: true, body: JSON.stringify(payloadFromForm(form)) },
+          profile,
+        );
         toast("已创建");
       }
       setForm(null);

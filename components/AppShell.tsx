@@ -826,6 +826,8 @@ export function AppShell() {
   /** 应用包 Agent 的 Agent 级视图还没接数据：进得去，但显示「数据在哪」的空态页。
    *  P2：Hermes 的 chat 走统一 ChatView（chat 视图不再算 agent 级资源页）。 */
   const agentScoped = isPackageAgent && view !== "chat" && AGENT_SCOPED_VIEWS.has(view) && view !== "home";
+  /** rhythm 是可写页：hermes Agent（含应用包）都要进 RhythmPage，读写落到该 Agent 自己 profile 的 cron */
+  const rhythmProfile = activeAgentRecord.runtime === "hermes" ? activeAgentRecord.profile ?? activeAgentRecord.id : undefined;
 
   /** 切换 Agent = 换一套 workspace：视图回到首页、清掉当前会话，hash 由同步 effect 写回 */
   const selectAgent = (id: string) => {
@@ -931,7 +933,10 @@ export function AppShell() {
 
         {/* 视图内容 */}
         {agentScoped ? (
-          AGENT_RESOURCE_KINDS[view] ? (
+          // P4c：rhythm 不走只读投影 —— hermes Agent 的节律页用可写 RhythmPage（带该 Agent 的 profile）
+          view === "rhythm" ? (
+            <RhythmPage profile={rhythmProfile} />
+          ) : AGENT_RESOURCE_KINDS[view] ? (
             <AgentResourcesPage agent={activeAgentRecord} kind={AGENT_RESOURCE_KINDS[view]} />
           ) : (
             <AgentScopePlaceholder agent={activeAgentRecord} view={view} />
@@ -965,7 +970,7 @@ export function AppShell() {
           />
         )}
         {view === "skills" && <SkillsPage defaultCwd={defaultCwd} />}
-        {view === "rhythm" && <RhythmPage />}
+        {view === "rhythm" && <RhythmPage profile={rhythmProfile} />}
         {view === "growth" && <GrowthPage />}
         {view === "approvals" && <ApprovalHistoryPage onOpenSession={openSessionById} />}
         {view === "memory" && <MemoryPage projects={memoryProjects} />}

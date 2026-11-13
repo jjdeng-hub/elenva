@@ -1150,6 +1150,9 @@ export function ChatView({
         unreadIds={unreadIds}
         selectedId={session?.id ?? null}
         onSelect={onOpenSession}
+        // P4c：内容搜索范围跟当前 Agent 走 —— Elen（pi）搜 jsonl，Hermes Agent 搜自己 profile 的 state.db
+        searchRuntime={runtime ?? "pi"}
+        searchProfile={runtime === "hermes" ? hermesProfile ?? hermesAgentId : undefined}
             onNewChat={onNewChat}
             onCreateInProject={onCreateInProject}
             onCreateProject={onCreateProject}
