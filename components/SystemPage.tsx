@@ -78,6 +78,75 @@ function formatUptime(seconds: number): string {
 }
 
 const okDot = <span className="inline-block size-1.5 rounded-full bg-success align-middle" />;
+const downDot = <span className="inline-block size-1.5 rounded-full bg-danger align-middle" />;
+
+/* ---------------- Hermes 后端 ---------------- */
+
+interface HermesBackendState {
+  online: boolean;
+  version?: string;
+  cronCount?: number;
+}
+
+/** Hermes 后端卡：在线状态 / 版本 / cron 任务数；不可用时不白屏，给重试。 */
+function HermesBackendCard({ onRefreshTick }: { onRefreshTick: number }) {
+  const [state, setState] = useState<HermesBackendState | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const healthRes = await fetch("/api/hermes/health", { cache: "no-store" });
+      if (!healthRes.ok) throw new Error(`HTTP ${healthRes.status}`);
+      const health = (await healthRes.json()) as { version?: string };
+      let cronCount: number | undefined;
+      const cronRes = await fetch("/api/hermes/cron/jobs?profile=default", { cache: "no-store" });
+      if (cronRes.ok) {
+        const jobs = (await cronRes.json()) as unknown;
+        if (Array.isArray(jobs)) cronCount = jobs.length;
+      }
+      setState({ online: true, version: health.version, cronCount });
+    } catch {
+      setState({ online: false });
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load, onRefreshTick]);
+
+  const chip = state === null || loading
+    ? <span className="text-dim">检查中…</span>
+    : state.online
+      ? <span className="text-success">{okDot} 在线</span>
+      : <span className="text-danger">{downDot} 未就绪</span>;
+
+  return (
+    <Card
+      icon={<Gauge size={14} />}
+      title="Hermes 后端"
+      chip={chip}
+      hint="hermes serve（127.0.0.1:9119，systemd user：hermes-serve）· ELENVA 受控代理访问，令牌不下发浏览器。"
+    >
+      {state?.online ? (
+        <>
+          <Row label="版本" mono>{state.version ?? "—"}</Row>
+          <Row label="cron 任务">{state.cronCount ?? "—"}</Row>
+          <Row label="代理">GET 白名单 · 写方法一律 428</Row>
+        </>
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-warn">Hermes 后端未就绪</span>
+          <button onClick={() => void load()} disabled={loading} className="btn btn-ghost">
+            <RefreshCw size={12} className={loading ? "anim-spin" : undefined} /> 重试
+          </button>
+        </div>
+      )}
+    </Card>
+  );
+}
 
 /* ---------------- 页面 ---------------- */
 
@@ -91,6 +160,7 @@ export function SystemPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [port, setPort] = useState("");
+  const [hermesTick, setHermesTick] = useState(0);
 
   useEffect(() => {
     setPort(window.location.port);
@@ -104,6 +174,7 @@ export function SystemPage() {
       const payload = (await res.json()) as SystemStatus & { error?: string };
       if (!res.ok) throw new Error(payload.error || `读取失败（HTTP ${res.status}）`);
       setData(payload);
+      setHermesTick((t) => t + 1);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
@@ -221,6 +292,8 @@ export function SystemPage() {
             </Card>
 
             {/* 资源 */}
+            <HermesBackendCard onRefreshTick={hermesTick} />
+
             <Card icon={<Gauge size={14} />} title="资源">
               <div>
                 <Row label="磁盘" title={`剩余 ${formatSize(data.resources.disk.avail)}`}>
