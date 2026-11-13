@@ -965,7 +965,7 @@ export function AppShell() {
           />
         )}
         {view === "skills" && <SkillsPage defaultCwd={defaultCwd} />}
-        {view === "rhythm" && <RhythmPage defaultCwd={defaultCwd} onOpenSession={openSessionById} />}
+        {view === "rhythm" && <RhythmPage />}
         {view === "growth" && <GrowthPage />}
         {view === "approvals" && <ApprovalHistoryPage onOpenSession={openSessionById} />}
         {view === "memory" && <MemoryPage projects={memoryProjects} />}
