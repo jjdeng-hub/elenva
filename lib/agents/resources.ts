@@ -11,8 +11,9 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join, relative, resolve } from "node:path";
+import { hermesHome } from "../hermes-home";
+import { sessionActivityExpr, tableColumns } from "../hermes-db";
 import { isInsideDir } from "./data-store";
 
 const PROFILE_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
@@ -95,7 +96,7 @@ async function loadSqlite(): Promise<typeof import("node:sqlite")> {
 
 export function hermesProfileDir(profile: string): string | null {
   if (!PROFILE_RE.test(profile)) return null;
-  const root = join(homedir(), ".hermes");
+  const root = hermesHome();
   // default 不是 profiles/ 下的子目录，它就在 ~/.hermes 根上（SOUL/memories/skills/state.db 都在那）
   const dir = profile === "default" ? resolve(root) : resolve(root, "profiles", profile);
   return existsSync(dir) ? dir : null;
@@ -118,14 +119,16 @@ export async function listHermesSessions(profile: string, limit = 40): Promise<H
   let db: import("node:sqlite").DatabaseSync | null = null;
   try {
     db = new DatabaseSync(dbPath, { readOnly: true });
+    // Hermes v0.19 起 sessions 表没有 last_activity_at —— 表达式按实际列名选（lib/hermes-db.ts）
+    const activity = sessionActivityExpr(tableColumns(db, "sessions"));
     const rows = db
       .prepare(
-        `select id, title, source, cwd, started_at, last_activity_at, message_count, model,
+        `select id, title, source, cwd, started_at, ${activity} as last_activity_at, message_count, model,
                 input_tokens, output_tokens, tool_call_count
            from sessions
           where coalesce(archived, 0) = 0
             and coalesce(message_count, 0) > 0
-          order by coalesce(last_activity_at, started_at) desc
+          order by ${activity} desc
           limit ?`,
       )
       .all(limit) as Record<string, unknown>[];
@@ -172,14 +175,15 @@ export async function findLatestHermesSessionByCwd(
   let db: import("node:sqlite").DatabaseSync | null = null;
   try {
     db = new DatabaseSync(dbPath, { readOnly: true });
+    const activity = sessionActivityExpr(tableColumns(db, "sessions"));
     const rows = db
       .prepare(
-        `select id, title, source, started_at, last_activity_at, message_count, model
+        `select id, title, source, started_at, ${activity} as last_activity_at, message_count, model
            from sessions
           where cwd = ?
             and coalesce(archived, 0) = 0
             and coalesce(message_count, 0) > 0
-          order by coalesce(last_activity_at, started_at) desc
+          order by ${activity} desc
           limit 1`,
       )
       .all(cwd) as Record<string, unknown>[];
@@ -491,7 +495,7 @@ export interface CronJob {
 
 /** 节律：Hermes 的 cron 任务表（全局一份，按 profile 字段标注归属）。 */
 export function readRhythm(profile: string): CronJob[] {
-  const file = resolve(join(homedir(), ".hermes", "cron", "jobs.json"));
+  const file = resolve(join(hermesHome(), "cron", "jobs.json"));
   if (!existsSync(file)) return [];
   try {
     const raw = JSON.parse(readFileSync(file, "utf8")) as unknown;

@@ -18,6 +18,7 @@ import { createInterface } from "node:readline";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { hermesProfileDir } from "@/lib/agents/resources";
+import { sessionActivityExpr, tableColumns } from "@/lib/hermes-db";
 
 export type ContentHit = {
   /** 命中片段：关键词前后的上下文（前后各 40 字，换行折成空格） */
@@ -229,9 +230,11 @@ async function searchHermesSessions(
     let titleOf = new Map<string, string | null>();
     let lastActivityOf = new Map<string, string>();
     if (ids.length > 0) {
+      // Hermes v0.19 的 sessions 表没有 last_activity_at —— 用兼容表达式（lib/hermes-db.ts）
+      const activity = sessionActivityExpr(tableColumns(db, "sessions"));
       const sessRows = db
         .prepare(
-          `select id, title, last_activity_at from sessions
+          `select id, title, ${activity} as last_activity_at from sessions
             where id in (${ids.map(() => "?").join(",")})`,
         )
         .all(...ids) as { id: string; title: string | null; last_activity_at: string | number | null }[];

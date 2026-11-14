@@ -8,12 +8,12 @@
  * - 审计：每次写操作一行 ~/.elenva/audit.jsonl
  */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { load as parseYaml, dump as dumpYaml } from "js-yaml";
 import { agentsRoot } from "./agents/registry";
+import { hermesHome } from "./hermes-home";
 import {
   appendAudit,
   discoverProfiles,
@@ -27,7 +27,8 @@ const execFileAsync = promisify(execFile);
 const HERMES_TIMEOUT_MS = 120_000;
 
 export function hermesRoot(): string {
-  return process.env.HERMES_HOME?.trim() || path.join(os.homedir(), ".hermes");
+  // 与发现层同源：HERMES_HOME → 平台默认（Windows 是 %LOCALAPPDATA%\hermes）→ ~/.hermes
+  return hermesHome();
 }
 
 function profileDir(profileId: string): string {

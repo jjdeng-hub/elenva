@@ -2,13 +2,14 @@ import { promises as fsp } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { NextResponse, type NextRequest } from "next/server";
+import { hermesHome } from "@/lib/hermes-home";
 
 export const dynamic = "force-dynamic";
 
 /* ---------------- 常量 ---------------- */
 
 const HERMES_BASE = "http://127.0.0.1:9119/api";
-const TOKEN_FILE = path.join(os.homedir(), ".hermes", ".elenva-serve-token");
+const TOKEN_FILE = path.join(hermesHome(), ".elenva-serve-token");
 const AUDIT_FILE = path.join(os.homedir(), ".elenva", "audit.jsonl");
 const READ_TIMEOUT_MS = 8_000;
 const WRITE_TIMEOUT_MS = 30_000;

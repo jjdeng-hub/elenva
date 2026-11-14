@@ -13,6 +13,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { agentsRoot, listAgents } from "./agents/registry";
+import { hermesHome } from "./hermes-home";
+import { sessionActivityExpr, tableColumns } from "./hermes-db";
 
 export const PROFILE_ID_RE = /^[a-z][a-z0-9-]{1,30}$/;
 const CACHE_TTL_MS = 5_000;
@@ -41,8 +43,8 @@ interface Cache {
 let cache: Cache | null = null;
 
 function hermesRoot(): string {
-  const override = process.env.HERMES_HOME?.trim();
-  return override || path.join(os.homedir(), ".hermes");
+  // Windows 上 Hermes 家在 %LOCALAPPDATA%\hermes，不是 ~/.hermes（见 lib/hermes-home.ts）
+  return hermesHome();
 }
 
 function elenvaAgentsRoot(): string {
@@ -51,7 +53,8 @@ function elenvaAgentsRoot(): string {
 
 /** SOUL.md 首个标题里取名字：「# SOUL - Rig (Builder)」→「Rig」。 */
 function nameFromSoulHeader(line: string): string | null {
-  const match = /^#\s*SOUL\s*(?:[-—–]+\s*)?(.+)$/.exec(line.trim());
+  // 标题有「# SOUL - Rig (Builder)」「# SOUL.md — Tom」两种写法，后缀 .md 要吃掉
+  const match = /^#\s*SOUL(?:\.md)?\s*(?:[-—–]+\s*)?(.+)$/.exec(line.trim());
   if (!match) return null;
   // 去掉末尾括号补充（中英文括号都算）
   const name = match[1].replace(/[(（][^)）]*[)）]\s*$/, "").trim();
@@ -83,9 +86,10 @@ async function sessionStats(dbPath: string): Promise<{ sessionCount: number | nu
     const { DatabaseSync } = (await import(/* webpackIgnore: true */ "node:sqlite")) as typeof import("node:sqlite");
     const db = new DatabaseSync(dbPath, { readOnly: true });
     try {
-      const row = db.prepare("select count(*) as n, max(coalesce(last_activity_at, started_at)) as m from sessions").get() as
-        | { n: number | bigint; m: number | null }
-        | undefined;
+      const activity = sessionActivityExpr(tableColumns(db, "sessions"));
+      const row = db
+        .prepare(`select count(*) as n, max(${activity}) as m from sessions`)
+        .get() as { n: number | bigint; m: number | null } | undefined;
       return {
         sessionCount: row ? Number(row.n) : null,
         lastActiveAt: row && row.m != null ? Number(row.m) : null,

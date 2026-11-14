@@ -15,6 +15,7 @@ import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
+import { hermesHome } from "./hermes-home";
 
 const execFileAsync = promisify(execFile);
 
@@ -110,7 +111,7 @@ export async function getSystemStatus(): Promise<SystemStatus> {
     ),
     fs.readFile(path.join(repo, "docs/pi-upgrade.md"), "utf8").catch(() => ""),
     readJson<{ last_checked?: string; last_result?: string; when?: string }>(
-      path.join(home, ".hermes/elenva-gates-state.json"),
+      path.join(hermesHome(), "elenva-gates-state.json"),
     ),
     fs.readdir(path.join(home, "backups")).catch(() => [] as string[]),
     gitInfo(repo),

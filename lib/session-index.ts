@@ -10,6 +10,7 @@
  */
 
 import type { SessionInfo } from "@/lib/types";
+import { hermesHome } from "@/lib/hermes-home";
 import { listAgents } from "@/lib/agents/registry";
 import { findAgent, type AgentRecord } from "@/lib/agents/manifest";
 import { listHermesSessions } from "@/lib/agents/resources";
@@ -41,7 +42,7 @@ export function hermesSessionToInfo(
 ): SessionInfo {
   // cwd 兑底：state.db 里可为 null（webhook/feishu 来源），用应用包目录顶上，
   // 保证 SessionInfo.cwd 非空 —— 侧栏分组/展示都依赖它。
-  const cwd = row.cwd || agent.dir || `~/.hermes/profiles/${agent.profile ?? agent.id}`;
+  const cwd = row.cwd || agent.dir || `${hermesHome()}/profiles/${agent.profile ?? agent.id}`;
   return {
     path: `state.db:${row.id}`,
     id: `${HERMES_ID_PREFIX}:${agent.profile ?? agent.id}:${row.id}`,
