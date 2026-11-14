@@ -137,6 +137,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     running,
     disabled,
     placeholder,
+    agentName,
     slashCommands,
     cwd,
     modelPicker,
@@ -832,8 +833,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 placeholder={
                   placeholder ||
                   (running
-                    ? "Elen 工作中：Enter 插话纠偏 · Alt+Enter 排队跟发"
-                    : "让 Elen 做点什么…（/ 命令 · @ 文件 · ! shell · Enter 发送）")
+                    ? `${agentName ?? "Elen"} 工作中：Enter 插话纠偏 · Alt+Enter 排队跟发`
+                    : `让 ${agentName ?? "Elen"} 做点什么…（/ 命令 · @ 文件 · ! shell · Enter 发送）`)
                 }
                 className="max-h-[220px] w-full resize-none bg-transparent py-0.5 text-[13px] leading-relaxed text-fg outline-none placeholder:text-dim"
               />
@@ -1008,6 +1009,8 @@ interface ChatInputProps {
   running: boolean;
   disabled?: boolean;
   placeholder?: string;
+  /** 当前 Agent 名：缺省文案里用（Hermes Agent 不该写着「让 Elen…」） */
+  agentName?: string;
   slashCommands: SlashCommandInfo[];
   cwd: string | null;
   modelPicker?: ReactNode;

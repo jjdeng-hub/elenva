@@ -132,6 +132,9 @@ export function AgentWorkspace({ agent, onOpenSession }: { agent: AgentRecord; o
   useEffect(() => {
     if (agent.runtime !== "hermes") return;
     let alive = true;
+    // 偶发一次请求失败（dev 重编译 / 宿主瞬时忙）不该立刻喊「离线」——
+    // 连续 3 次（约 15s）都拿不到才算真的断了
+    let failures = 0;
     const tick = async () => {
       try {
         const res = await fetch(`/api/agents/pending?id=${encodeURIComponent(agent.id)}`, { cache: "no-store" });
@@ -141,11 +144,14 @@ export function AgentWorkspace({ agent, onOpenSession }: { agent: AgentRecord; o
           state?: string;
         };
         if (alive) {
+          failures = 0;
           setPending(Array.isArray(data.pending) ? data.pending : []);
           setAcp({ state: data.state ?? "unknown", queued: data.queued ?? 0 });
         }
       } catch {
-        if (alive) {
+        if (!alive) return;
+        failures += 1;
+        if (failures >= 3) {
           setPending([]);
           setAcp({ state: "offline", queued: 0 });
         }
@@ -319,10 +325,12 @@ export function AgentWorkspace({ agent, onOpenSession }: { agent: AgentRecord; o
                       ? "在跑"
                       : acp.state === "ready"
                         ? "就绪"
-                        : // 空闲回收后子进程不在，下一条消息会把它拉起来 —— 这不是故障，别写「离线」吓人
-                          acp.state === "idle" || acp.state === "unknown"
-                          ? "待唤醒"
-                          : "离线"}
+                        : // starting 是进程正在拉起来（几秒），不是故障；idle/unknown = 已回收，下一条消息会唤醒
+                          acp.state === "starting"
+                          ? "启动中"
+                          : acp.state === "idle" || acp.state === "unknown"
+                            ? "待唤醒"
+                            : "离线"}
                   </span>
                 )}
               </div>

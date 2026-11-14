@@ -98,6 +98,7 @@ export function ChatView({
   runtime,
   hermesAgentId,
   hermesProfile,
+  agentName,
 }: {
   session: SessionInfo | null;
   newSessionCwd: string | null;
@@ -145,6 +146,8 @@ export function ChatView({
   /** runtime=hermes 时的 ACP agent id 与 profile（侧栏/观测栏数据源用） */
   hermesAgentId?: string;
   hermesProfile?: string;
+  /** 当前 Agent 名：只用于输入框文案（Hermes Agent 不写 Elen） */
+  agentName?: string;
 }) {
   const chatInputRef = useRef<ChatInputHandle | null>(null);
   /** 当前会话可用工具全集（get_tools 回读，供自定义工具选择 UI 分组展示） */
@@ -1080,6 +1083,7 @@ export function ChatView({
       running={agentRunning || bashRunning}
       disabled={loading || trustBlocked}
       placeholder={undefined}
+      agentName={agentName}
       slashCommands={slashCommands}
       cwd={cwd || null}
       draftKey={draftKey}

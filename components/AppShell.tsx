@@ -627,8 +627,17 @@ export function AppShell() {
     openChatWith(found);
   }, [pendingSessionId, sessions]);
 
-  // 侧栏「会话」导航：无选中会话时自动打开最近会话；没有任何会话则弹目录选择器
+  // 侧栏「会话」导航：pi 落到上次/最近会话；Hermes Agent 落到自己的新会话
+  // （历史在侧栏按 profile 过滤，不该把切 Agent 前选中的 pi 会话开进 Tom 的壳里）
   const openChatView = useCallback(() => {
+    const current = findAgent(agents, activeAgent) ?? agents[0];
+    if (current?.runtime === "hermes") {
+      setSelected(null);
+      setSideSessionId(null);
+      setNewSessionCwd(newChatWorkspace ?? defaultCwd);
+      setView("chat");
+      return;
+    }
     if (selected) {
       setView("chat");
       return;
@@ -641,7 +650,7 @@ export function AppShell() {
     } else {
       setDirPickerOpen(true);
     }
-  }, [selected, sessions]);
+  }, [selected, sessions, agents, activeAgent, newChatWorkspace, defaultCwd]);
 
   /* ---------------- 会话内容搜索（后端全文） ---------------- */
   const [contentResults, setContentResults] = useState<
@@ -972,7 +981,7 @@ export function AppShell() {
         ) : (
           <>
         {view === "home" && (isPackageAgent ? (
-          <AgentHome agent={activeAgentRecord} onOpenSession={() => setView("chat")} />
+          <AgentHome agent={activeAgentRecord} onOpenSession={openChatView} />
         ) : (
           <HomeDashboard
             sessions={filteredHomeSessions}
@@ -1029,6 +1038,7 @@ export function AppShell() {
             runtime={activeAgentRecord.runtime === "hermes" ? "hermes" : undefined}
             hermesAgentId={activeAgentRecord.runtime === "hermes" ? activeAgentRecord.id : undefined}
             hermesProfile={activeAgentRecord.runtime === "hermes" ? activeAgentRecord.profile ?? activeAgentRecord.id : undefined}
+            agentName={activeAgentRecord.name}
             unreadIds={unreadIds}
             sideSessionId={sideSessionId}
             onSelectSide={setSideSessionId}
