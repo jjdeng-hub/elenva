@@ -642,7 +642,7 @@ export function AppShell() {
 
   /* ---------------- 会话内容搜索（后端全文） ---------------- */
   const [contentResults, setContentResults] = useState<
-    { session: SessionInfo; before: string; match: string; after: string }[]
+    { session: SessionInfo; before: string; match: string; after: string; count: number }[]
   >([]);
   const [contentSearching, setContentSearching] = useState(false);
   const [contentTruncated, setContentTruncated] = useState(false);
@@ -657,10 +657,28 @@ export function AppShell() {
       setContentSearching(true);
       fetch(`/api/sessions/search?q=${encodeURIComponent(q)}`, { cache: "no-store" })
         .then((r) => r.json())
-        .then((d: { results?: typeof contentResults; truncated?: boolean }) => {
-          setContentResults(d.results ?? []);
-          setContentTruncated(Boolean(d.truncated));
-        })
+        .then(
+          (d: {
+            results?: { sessionId: string; count: number; hits: { text: string }[] }[];
+            truncated?: boolean;
+          }) => {
+            // P4d：API 返回 sessionId+命中片段；映射到会话列表里的 SessionInfo，
+            // 片段按关键词拆成 before/match/after（界面高亮中部）。列表里没有的丢弃。
+            const lower = q.toLowerCase();
+            const mapped = (d.results ?? []).flatMap((res) => {
+              const session = sessions.find((s) => s.id === res.sessionId);
+              if (!session) return [];
+              const text = res.hits[0]?.text ?? "";
+              const idx = text.toLowerCase().indexOf(lower);
+              const before = idx >= 0 ? text.slice(0, idx) : "";
+              const match = idx >= 0 ? text.slice(idx, idx + q.length) : text;
+              const after = idx >= 0 ? text.slice(idx + q.length) : "";
+              return [{ session, before, match, after, count: res.count }];
+            });
+            setContentResults(mapped);
+            setContentTruncated(Boolean(d.truncated));
+          },
+        )
         .catch(() => {})
         .finally(() => setContentSearching(false));
     }, 350);

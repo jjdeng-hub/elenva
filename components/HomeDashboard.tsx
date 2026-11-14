@@ -134,7 +134,7 @@ export function HomeDashboard({
   onViewAll: () => void;
   onOpenSystem: () => void;
   defaultCwd?: string | null;
-  contentResults?: { session: SessionInfo; before: string; match: string; after: string }[];
+  contentResults?: { session: SessionInfo; before: string; match: string; after: string; count?: number }[];
   contentSearching?: boolean;
   contentTruncated?: boolean;
 }) {
@@ -473,17 +473,22 @@ export function HomeDashboard({
           </div>
         )}
 
-        {/* 内容搜索结果 */}
-        {(contentSearching || (contentResults && contentResults.length > 0)) && (
+        {/* 内容搜索结果（P4d：三态 —— 有结果 / 真没找到 / 未搜完，不再把「没搜完」当「没找到」） */}
+        {(contentSearching || contentTruncated || (contentResults && contentResults.length > 0)) && (
           <div className="card mt-4 overflow-hidden">
             <div className="flex items-center gap-2 px-4 pt-3.5 pb-2">
               <h2 className="text-[14px] font-semibold">内容匹配</h2>
               {contentSearching && <Loader2 size={12} className="anim-spin text-accent" />}
-              {contentTruncated && <span className="text-[11px] text-dim">（结果已截断）</span>}
+              {contentTruncated && (
+                <span className="text-[11px] text-warn">搜索超时，已显示部分结果，请缩小范围或加关键词</span>
+              )}
             </div>
             <div className="max-h-72 overflow-y-auto pb-2">
               {contentSearching && (!contentResults || contentResults.length === 0) && (
                 <div className="px-4 py-4 text-[12px] text-dim">正在搜索消息内容…</div>
+              )}
+              {!contentSearching && !contentTruncated && contentResults?.length === 0 && (
+                <div className="px-4 py-4 text-[12px] text-dim">没有找到</div>
               )}
               {contentResults?.map((r, i) => (
                 <button
@@ -494,6 +499,7 @@ export function HomeDashboard({
                   <Avatar session={r.session} running={runningIds.has(r.session.id)} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[12px] font-semibold">{displayTitle(r.session)}</div>
+                    <span className="chip chip-mono ml-1.5 shrink-0 text-[10px]">命中 {r.count} 处</span>
                     <div className="mt-0.5 truncate text-[12px] text-muted">
                       …{r.before}
                       <mark className="rounded-sm bg-accent-soft px-0.5 text-accent">{r.match}</mark>

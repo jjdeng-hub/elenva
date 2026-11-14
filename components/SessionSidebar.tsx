@@ -175,11 +175,18 @@ export function SessionSidebar({
   /** 内容搜索结果（P4c）：sessionId → 命中片段/条数。搜的是消息内容，不只是标题 */
   const [contentHits, setContentHits] = useState<Record<string, SessionContentHit>>({});
   const [contentSearching, setContentSearching] = useState(false);
+  /** P4d：truncated = 未搜完（索引未追上 / 超时截断）——跟「真没找到」区分开 */
+  const [contentTruncated, setContentTruncated] = useState(false);
+  /** 重建索引进行中（显式动作， POST /api/sessions/search/reindex） */
+  const [reindexing, setReindexing] = useState(false);
+  /** 重建完成后 +1 触发搜索重跑 */
+  const [reindexNonce, setReindexNonce] = useState(0);
   useEffect(() => {
     const q = query.trim();
     if (!q) {
       setContentHits({});
       setContentSearching(false);
+      setContentTruncated(false);
       return;
     }
     setContentSearching(true);
@@ -190,11 +197,12 @@ export function SessionSidebar({
       let alive = true;
       fetch(`/api/sessions/search?${params.toString()}`, { cache: "no-store" })
         .then((res) => (res.ok ? res.json() : null))
-        .then((data: { results?: SessionContentHit[] } | null) => {
+        .then((data: { results?: SessionContentHit[]; truncated?: boolean } | null) => {
           if (!alive) return;
           const next: Record<string, SessionContentHit> = {};
           for (const hit of data?.results ?? []) next[hit.sessionId] = hit;
           setContentHits(next);
+          setContentTruncated(Boolean(data?.truncated));
         })
         .catch(() => {
           /* 搜索故障不拖垮侧栏 */
@@ -207,7 +215,20 @@ export function SessionSidebar({
       };
     }, CONTENT_SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [query, searchRuntime, searchProfile]);
+  }, [query, searchRuntime, searchProfile, reindexNonce]);
+
+  /** 重建索引：清掉该 profile 的行 → FTS rebuild → 全量重同步，完成后重跑当前搜索 */
+  const handleReindex = () => {
+    if (reindexing) return;
+    setReindexing(true);
+    const profile = searchProfile && /^[a-z0-9][a-z0-9-]{0,63}$/.test(searchProfile) ? searchProfile : "default";
+    fetch(`/api/sessions/search/reindex?profile=${encodeURIComponent(profile)}`, { method: "POST" })
+      .catch(() => undefined)
+      .finally(() => {
+        setReindexing(false);
+        setReindexNonce((n) => n + 1);
+      });
+  };
 
   // 折叠状态：用户手动操作过的组以 localStorage 为准；没操作过的走默认规则
   // （默认会话组展开；项目组里只有最近活跃的一个展开，其余收起）。
@@ -859,6 +880,20 @@ export function SessionSidebar({
             className="w-full bg-transparent text-[12px] text-fg outline-none placeholder:text-dim"
           />
         </div>
+        {/* 未搜完 ≠ 没找到（P4d）：索引未追上或超时截断时明说，并给重建索引入口（仅 Hermes 侧） */}
+        {query.trim() && !contentSearching && contentTruncated && (
+          <div className="mt-1 flex items-center gap-1.5 px-1 text-[10px] leading-relaxed text-warn">
+            <span className="min-w-0">搜索超时，已显示部分结果，请缩小范围或加关键词</span>
+            <button
+              onClick={handleReindex}
+              disabled={reindexing}
+              data-testid="reindex-btn"
+              className="shrink-0 cursor-pointer text-accent t-fast hover:underline disabled:text-dim"
+            >
+              {reindexing ? "重建中…" : "重建索引"}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Session list */}
@@ -868,7 +903,13 @@ export function SessionSidebar({
           <>
             {groups.flat.length === 0 && contentHitSessions.length === 0 && (
               <div className="px-3 py-6 text-center text-[12px] text-dim">
-                {contentSearching ? "正在搜索…" : filterActive ? "没有匹配的会话" : "无匹配结果"}
+                {contentSearching
+                  ? "正在搜索…"
+                  : contentTruncated
+                    ? "没有找到（搜索未完成，可缩小范围重试）"
+                    : filterActive
+                      ? "没有匹配的会话"
+                      : "没有找到"}
               </div>
             )}
             {groups.flat.map(renderSession)}
