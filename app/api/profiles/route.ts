@@ -8,6 +8,7 @@ import {
   PROFILE_ID_RE,
 } from "@/lib/profiles";
 import { ApiError, startCreateProfile } from "@/lib/profiles-mutate";
+import { agentsRoot } from "@/lib/agents/registry";
 
 export const dynamic = "force-dynamic";
 
@@ -87,7 +88,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: `profile 不存在：${id}` }, { status: 404 });
   }
 
-  const agentsRootDir = path.join(process.env.HOME ?? "", ".elenva", "agents");
+  // 与发现层同源（agentsRoot()）：不能用 process.env.HOME —— Windows 上它常为空，
+  // 空串会让接入写到相对目录 .elenva/agents，注册表永远看不到这个包
+  const agentsRootDir = agentsRoot();
   const packageDir = path.join(agentsRootDir, id);
 
   if (action === "connect") {

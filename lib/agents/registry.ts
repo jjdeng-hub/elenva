@@ -27,12 +27,17 @@ import {
  */
 export function isHermesInstalled(): boolean {
   const dirs = (process.env.PATH ?? "").split(path.delimiter).filter(Boolean);
+  // Windows 上装出来的是 hermes.exe（uv/pip 的用户脚本目录不会有裸名 hermes），
+  // 只探 `hermes` 会把「已安装」误判成「没装」，界面直接把 Agent 置灰 —— 所以按平台带上扩展名。
+  const names = process.platform === "win32" ? ["hermes.exe", "hermes.cmd", "hermes.bat", "hermes"] : ["hermes"];
   for (const dir of dirs) {
-    try {
-      const candidate = join(dir, "hermes");
-      if (existsSync(candidate) && statSync(candidate).isFile()) return true;
-    } catch {
-      /* 目录不可读，跳过 */
+    for (const name of names) {
+      try {
+        const candidate = join(dir, name);
+        if (existsSync(candidate) && statSync(candidate).isFile()) return true;
+      } catch {
+        /* 目录不可读，跳过 */
+      }
     }
   }
   return false;
