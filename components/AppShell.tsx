@@ -655,7 +655,14 @@ export function AppShell() {
     }
     const t = setTimeout(() => {
       setContentSearching(true);
-      fetch(`/api/sessions/search?q=${encodeURIComponent(q)}`, { cache: "no-store" })
+      // 搜索范围跟当前 Agent 走：Hermes Agent 必须带 runtime+profile，否则路由走 pi 分支，
+      // 返回的裸 session id 永远匹配不上侧栏的 `hermes:<profile>:` 形态（首页搜索曾因此在 Hermes 下全空）。
+      const params = new URLSearchParams({ q });
+      if (activeAgentRecord.runtime === "hermes") {
+        params.set("runtime", "hermes");
+        params.set("profile", activeAgentRecord.profile ?? activeAgentRecord.id);
+      }
+      fetch(`/api/sessions/search?${params.toString()}`, { cache: "no-store" })
         .then((r) => r.json())
         .then(
           (d: {
