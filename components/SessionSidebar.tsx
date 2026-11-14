@@ -649,8 +649,14 @@ export function SessionSidebar({
         ) : unreadIds?.has(s.id) ? (
           <span className="size-1.5 shrink-0 rounded-full bg-success" title="已完成（未查看）" />
         ) : null}
-        <span className={cn("min-w-0 flex-1 truncate text-[12px]", active ? "text-fg" : "text-fg/85")}>
-          {title}
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className={cn("truncate text-[12px]", active ? "text-fg" : "text-fg/85")}>{title}</span>
+          {/* 内容命中（P4e）：标题下带一段命中片段（含高亮），让「为什么命中」可见 */}
+          {hit && (
+            <span className="truncate text-[10px] text-dim" title={hit.hits.map((h) => h.text).join(" / ")}>
+              {hit.hits[0] && <HitText text={hit.hits[0].text} q={qTrim} />}
+            </span>
+          )}
         </span>
         {/* 已收藏：★ 恒显在标题右侧（再往右才是标签、时间）。
             放这里而不是 hover 集群里，是因为集群绝对定位在右端、hover 时会把它盖住，

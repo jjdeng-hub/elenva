@@ -36,9 +36,13 @@ export async function GET(request: NextRequest) {
     if (runtime === "hermes" || profile) {
       const prof = profile && /^[a-z0-9][a-z0-9-]{0,63}$/.test(profile) ? profile : "default";
       const outcome = await searchViaIndex({ q, profile: prof, deadlineMs: started + SEARCH_DEADLINE_MS });
+      // 索引里存的是 state.db 的裸 session id；界面（侧栏 / 首页搜索）统一用
+      // lib/session-index.ts 投影出的带前缀 id（hermes:<profile>:<裸id>）。
+      // 在这里补前缀是**单点对齐**：两个消费方都按 SessionInfo.id 匹配，别在消费方再各修一遍。
+      const prefixed = outcome.results.map((r) => ({ ...r, sessionId: `hermes:${prof}:${r.sessionId}` }));
       return NextResponse.json(
         {
-          results: outcome.results,
+          results: prefixed,
           truncated: outcome.truncated,
           elapsedMs: Date.now() - started,
           terminated: outcome.terminated ?? false,
