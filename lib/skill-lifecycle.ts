@@ -6,17 +6,22 @@ import { aggregateSkillUsage } from "./skill-usage";
 import type { SkillInfo } from "./api-types";
 
 /**
- * 技能生命周期 —— 「装了但没用过」的能力得有个去处。
- *
- * 借鉴 Hermes Agent 的 curator，但刻意只抄一半：
- *  · 抄：状态分层（active / stale / unused）、**永不删除只归档**、可恢复；
- *  · 不抄：空闲时自动改写用户文件。没人会去审计一个后台写手，
- *    自动归档一个他上周刚装的技能只会变成「我的技能不见了」。
- *    所以状态是自动算的，动作（归档 / 恢复）由人点。
- *
- * 归档去向刻意放在 skills 根目录**之外**（`<agentDir>/elenva-skill-archive/`）：
- * 放在 `<skillsRoot>/.archive/` 里，pi 的资源加载器照样会扫到它，归档就等于没归。
- */
+  /**
+   * 技能生命周期 —— 「装了但没用过」的能力得有个去处。
+   *
+   * 借鉴 Hermes Agent 的 curator，但刻意只抄一半：
+   *  · 抄：状态分层（active / stale / unused）、**永不删除只归档**、可恢复；
+   *  · 不抄：空闲时自动改写用户文件。没人会去审计一个后台写手，
+   *    自动归档一个他上周刚装的技能只会变成「我的技能不见了」。
+   *    所以状态是自动算的，动作（归档 / 恢复）由人点。
+   *
+   * 2026-10-18（模块 4 R2）：`useCount` 取 aggregateSkillUsage 的**会话级激活数**，
+   * 同时覆盖 `/skill:` 命令与读 SKILL.md 两条路径（维护性读取已被否决、不计入）。
+   * 否则宽限期过后会把正在被读的技能判成 unused 并建议归档。
+   *
+   * 归档去向刻意放在 skills 根目录**之外**（`<agentDir>/elenva-skill-archive/`）：
+   * 放在 `<skillsRoot>/.archive/` 里，pi 的资源加载器照样会扫到它，归档就等于没归。
+   */
 
 export type SkillState = "active" | "stale" | "unused";
 
@@ -26,6 +31,7 @@ export interface SkillLifecycleEntry {
   baseDir: string;
   source: string;
   scope: string;
+  /** 会话级激活次数（/skill: 命令 + read 载入；维护性读取已否决） */
   useCount: number;
   lastUsedAt: string | null;
   /** 技能文件最后修改时间（用来判断「刚装还没机会用」） */

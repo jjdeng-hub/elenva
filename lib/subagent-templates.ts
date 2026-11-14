@@ -160,7 +160,12 @@ function templateDefaults(template: SubagentTemplate): SubagentTemplateProfile {
 }
 
 /**
- * 模板 → profile：覆盖合并（overrides 里的字段优先；显式 `undefined` 视为未覆盖）。
+ * 模板 → profile：覆盖合并（overrides 里的字段优先）。
+ *
+ * **未覆盖语义（`undefined` 与 `null` 等价）**：本函数用 `??` 判覆盖，因此 `undefined`
+ * **和 `null` 都表示「未覆盖、继承模板」**（而不是「清空」）。`tools` 用 `[...(overrides.tools ?? base.tools)]`
+ * 同理：传 `null` 等于不传。要表达「显式清空」需要另开一个专门的字段（例如 tools 的 `[]`
+ * 是空数组本身、不是 null），**不要用 `null` 去表达清空**——它会被当成继承。
  * 返回的 `tools` 总是新数组，调用方修改不会污染模板常量。
  */
 export function toProfile(

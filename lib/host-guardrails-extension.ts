@@ -298,7 +298,7 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
           const readOnlyBash = toolName === "bash" || toolName === "powershell"
             ? isReadOnlyShellCommand(bashCommand)
             : false;
-          if (isPlanModeBlocked(toolName) && !readOnlyBash) {
+          if (isPlanModeBlocked(toolName, input) && !readOnlyBash) {
             return {
               block: true,
               reason: `[计划模式] ${toolName} 会在获得批准前改动环境。请先只读勘察，然后调用 present_plan 提交计划。`,
@@ -358,7 +358,7 @@ export function createGuardrailsExtension(runtime: GuardrailsRuntime): InlineExt
             const readOnlyBash = toolName === "bash" || toolName === "powershell"
               ? isReadOnlyShellCommand(bashCommand)
               : false;
-            if (isPlanModeBlocked(toolName) && !readOnlyBash) {
+            if (isPlanModeBlocked(toolName, input) && !readOnlyBash) {
               return {
                 block: true,
                 reason:

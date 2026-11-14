@@ -1,0 +1,20 @@
+{
+  "id": "hello-agent",
+  "name": "示例 Agent",
+  "description": "应用包模板：复制这个目录到 ~/.elenva/agents/<你的 id>/ 后修改",
+  "icon": "◇",
+  "runtime": "pi",
+  "version": "0.0.1",
+  "panels": [
+    {
+      "id": "overview",
+      "title": "概览",
+      "type": "cards",
+      "source": "data/overview.json"
+    }
+  ],
+  "capabilities": {
+    "growth": false
+  },
+  "dataDir": "data"
+}

@@ -121,6 +121,8 @@ const SHELL_RULES: ShellRule[] = [
   shellRule(/^rm\b[^|;&]*\s-[a-z]*[rf]/i, "递归或强制删除文件", "bash:rm-force", "delete"),
   shellRule(/\b(del|erase)\s+(\/[a-z]\s+)*\/[fs]/i, "强制删除文件", "bash:rm-force", "delete"),
   shellRule(/\brmdir\s+(\/[a-z]\s+)*\/s/i, "递归删除目录", "bash:rm-force", "delete"),
+  // PowerShell 的删除等价物，规则与 web 侧 `lib/tool-risk.ts` 逐字同源（在那里有详细注释）。
+  shellRule(/^(?:remove-item|ri|rm)\b[^|;&]*\s-(?:recurse|force)\b/i, "递归或强制删除文件（PowerShell）", "bash:rm-force", "delete"),
   shellRule(/\bgit\s+reset\s+--hard\b/i, "丢弃工作区与暂存区的全部未提交改动", "bash:git-reset-hard", "delete"),
   shellRule(/\bgit\s+clean\b[^|;&]*\s-[a-z]*[fdx]/i, "删除未跟踪文件/目录", "bash:git-clean", "delete"),
   shellRule(/\bgit\s+(checkout|restore)\s+(--\s+)?\.[\s|;&]*$/i, "用 HEAD 覆盖工作区全部改动", "bash:git-restore-all", "delete"),
@@ -161,13 +163,35 @@ const RAW_COMMAND_RULES: ShellRule[] = [
   shellRule(/\b(curl|wget|iwr|invoke-webrequest)\b[^|;&]*\|\s*(sudo\s+)?(ba|z|)sh\b/i, "把网上下载的脚本直接喂给 shell 执行", "bash:pipe-shell", "system"),
 ];
 
+/**
+ * PowerShell 宿主包装的内层脚本（与 web 侧 `lib/tool-risk.ts:unwrapPowerShellCommand` 同源）。
+ * 只在片段以 powershell / pwsh 打头时解包，只剥一层成对引号。
+ */
+function unwrapPowerShellCommand(segment: string): string | null {
+  const match = segment.match(/^(?:powershell|pwsh)(?:\.exe)?\b[^|;&]*?\s-(?:command|c)\b\s*([\s\S]+)$/i);
+  if (!match) return null;
+  let payload = match[1].trim();
+  const quote = payload[0];
+  if ((quote === "'" || quote === '"') && payload.length >= 2 && payload.endsWith(quote)) {
+    payload = payload.slice(1, -1).trim();
+  }
+  return payload.length > 0 ? payload : null;
+}
+
 /** 命中返回规则，否则 null。destructive 优先（与 web 的「命中即返回」一致）。 */
 export function classifyShellCommand(command: string): HostGuardRisk | null {
   for (const rule of RAW_COMMAND_RULES) {
     if (!rule.test.test(command)) continue;
     return { level: "block", reason: rule.reason, ruleKey: rule.ruleKey, family: rule.family };
   }
-  for (const segment of splitShellSegments(command)) {
+  const segments = splitShellSegments(command);
+  // PowerShell 宿主包装展开成独立片段（见 unwrapPowerShellCommand）
+  const scanned = [...segments];
+  for (const segment of segments) {
+    const inner = unwrapPowerShellCommand(segment);
+    if (inner) scanned.push(...splitShellSegments(inner));
+  }
+  for (const segment of scanned) {
     for (const rule of SHELL_RULES) {
       if (!rule.test.test(segment)) continue;
       return { level: "block", reason: rule.reason, ruleKey: rule.ruleKey, family: rule.family };

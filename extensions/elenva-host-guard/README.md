@@ -26,6 +26,13 @@ web 的审批闸门长在 ELENVA 进程内（`lib/host-guardrails-extension.ts`�
 判定面与 web `needsApproval(risk, "risky")` 同源：删除类 / 强推 / 装依赖 / 改凭据 /
 越界写入，另加 web 里其余不可逆操作（提权 / 关机 / 格式化 / `curl | sh` 等）。
 分类表逐条抄自 `lib/tool-risk.ts`，**改那边时回来对齐**（`classify.ts` 顶部有同步点注释）。
+现在这条「对齐」有自动差分门兜底：`tools/host-guard-parity-selftest.mjs` 用同一组命令
+（覆盖两份表的全部 `ruleKey`，各带命中样例 + 近似反例）在两侧各跑一遍，断言级别映射一致、
+`ruleKey` 逐字相同；改坏任一单侧即变红。
+
+> PowerShell 的删除等价物（`Remove-Item` / `ri`，带 `-Recurse` / `-Force`，含
+> `powershell -Command '…'` 包装）两侧同源覆盖，`ruleKey` 与 POSIX 的 `bash:rm-force`
+> 同族 —— 免确认规则与拒绝记忆跨宿主复用同一段历史。
 
 ## 宿主判别（防 web 双闸）
 
@@ -56,4 +63,6 @@ node extensions/elenva-host-guard/install.mjs --uninstall
 
 ```bash
 node extensions/elenva-host-guard/selftest.mjs
+# 与 web 侧的双实现判级一致差分门（跨实现映射 + ruleKey 一致）
+node tools/host-guard-parity-selftest.mjs
 ```

@@ -117,6 +117,9 @@ export async function POST(req: Request) {
     try {
       ({ session, realSessionId: reviewSessionId } = await startNewAgentSession(cwd, {
         initialModel: model,
+        /* 复核是服务端自动起的会话，用户只在观测栏为「这一次复核」挑模型
+           （那一处 ModelPicker 特意 hideDefaultAction）——绝不能顺手改全局启动默认。 */
+        persistStartupPreferences: false,
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

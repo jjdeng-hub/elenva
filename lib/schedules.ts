@@ -51,6 +51,30 @@ export interface ScheduleLastRun {
   note?: string;
   /** 本轮运行时长（ms）；additive，旧记录 / 取不到时省略 */
   durationMs?: number;
+  /**
+   * 本轮执行链的可观测信号（additive，模块 3 安全修复 C）。
+   *
+   * 存在的理由：`result: "ok"` 只表示「会话正常跑完」，**不等于任务验收通过** ——
+   * 工具报错、被护栏拦下、压根没跑检查，都可能是一轮「正常结束」。
+   * 这里把这三类信号分开存，界面显示「执行结束」而不是「成功」。
+   */
+  evidence?: ScheduleRunEvidence;
+}
+
+/** 执行链证据：只记**观测到的事实**，绝不推断「通过」 */
+export interface ScheduleRunEvidence {
+  /** 工具调用出错次数（可恢复错误也计入，不把整轮判成失败） */
+  toolErrors: number;
+  /** 被护栏拦下的调用次数（只读档 / 审批入队 / 计划模式） */
+  blocked: number;
+  /** 本轮出现过的「检查类命令」次数（出现 ≠ 通过） */
+  checksRan: number;
+  /** 其中失败的次数 */
+  checksFailed: number;
+  /** 最近一次检查类命令是否成功；没跑过任何检查则为 null */
+  lastCheckOk: boolean | null;
+  /** 工具错误摘要样例（≤3 条） */
+  sample?: string[];
 }
 
 /** 运行历史条目：与 lastRun 同形（UI 逐条展示） */
@@ -365,6 +389,26 @@ function normalizeLastRun(value: unknown): ScheduleLastRun | undefined {
     result,
     ...(typeof raw.note === "string" && raw.note ? { note: raw.note } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
+    ...(normalizeRunEvidence(raw.evidence) ? { evidence: normalizeRunEvidence(raw.evidence) } : {}),
+  };
+}
+
+/** 证据容错归一：字段缺失 / 类型不对就保守归零，坏数据不能把整条记录带垮 */
+function normalizeRunEvidence(value: unknown): ScheduleRunEvidence | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const raw = value as Record<string, unknown>;
+  const count = (input: unknown): number =>
+    typeof input === "number" && Number.isFinite(input) && input >= 0 ? Math.round(input) : 0;
+  const sample = Array.isArray(raw.sample)
+    ? raw.sample.filter((item): item is string => typeof item === "string" && item.length > 0).slice(0, 3)
+    : [];
+  return {
+    toolErrors: count(raw.toolErrors),
+    blocked: count(raw.blocked),
+    checksRan: count(raw.checksRan),
+    checksFailed: count(raw.checksFailed),
+    lastCheckOk: typeof raw.lastCheckOk === "boolean" ? raw.lastCheckOk : null,
+    ...(sample.length > 0 ? { sample } : {}),
   };
 }
 

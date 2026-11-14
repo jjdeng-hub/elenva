@@ -271,6 +271,38 @@ check("未来时间戳（下一周）不计入窗口", () => {
   eq(r.totals.turns, 0, "未来轮次不计");
 });
 
+/* ---------------- 6b. 周环比时间窗对齐（聚合层） ---------------- */
+
+check("周环比对齐：上周只取「已过同等时段」，不是整个上周", () => {
+  resetSessions();
+  // NOW = 10-16T12:00（周五）→ 本周一 10-12，已过 4.5 天 → 上周对齐窗口 = 10-05T00:00 ~ 10-09T12:00
+  const monEarly = Date.parse("2026-10-05T08:00:00.000Z"); // 上周一（窗口内）
+  const friMorning = Date.parse("2026-10-09T08:00:00.000Z"); // 上周五上午（窗口内，≤ 10-09T12:00）
+  const friEvening = Date.parse("2026-10-09T18:00:00.000Z"); // 上周五晚（超出窗口，仍在整周内）
+  const sat = Date.parse("2026-10-10T08:00:00.000Z"); // 上周六（超出窗口）
+  writeSession("proj-align", "a.jsonl", [
+    header("salign", "/srv/work/align"),
+    user(monEarly),
+    assistant(monEarly + HOUR, {}),
+    user(friMorning),
+    assistant(friMorning + HOUR, {}),
+    user(friEvening),
+    assistant(friEvening + HOUR, {}),
+    user(sat),
+    assistant(sat + HOUR, {}),
+    user(CUR),
+    assistant(CUR + HOUR, {}),
+  ]);
+  const r = aggregateGrowth(NOW);
+  eq(prevWeek(r).turns, 4, "整周桶仍是 4 轮（展示用绝对量）");
+  eq(r.comparison.previous.turns, 2, "对齐后的上周同期只含窗口内 2 轮");
+  eq(r.comparison.current.turns, 1, "本周至今 1 轮");
+  eq(r.comparison.aligned, true, "本周未完整 → 已对齐");
+  eq(r.comparison.minTurns, 20, "门槛透出");
+  eq(r.comparison.sufficient, false, "样本不足");
+  eq(r.headline.verdict, "insufficient", "不给环比结论");
+});
+
 /* ---------------- 7. 缓存 ---------------- */
 
 check("60s 缓存命中；显式清缓存后重扫", () => {
@@ -300,30 +332,70 @@ const wk = (weekStart, { turns, failedTurns = 0, sessions = turns, toolCalls = 0
   toolCallsPerSession: sessions > 0 ? toolCalls / sessions : 0,
 });
 
+/** 构造对齐比较窗口（供 summarizeGrowth 单测）：默认用给的桶，门槛可覆写 */
+const cmp = ({ prev, cur, aligned = false, minTurns = 1, elapsedMs = 0, sufficient } = {}) => ({
+  current: cur,
+  previous: prev,
+  aligned,
+  elapsedMs,
+  minTurns,
+  sufficient: sufficient ?? (cur.turns >= minTurns && prev.turns >= minTurns),
+  currentWeekStart: "2026-10-12",
+  previousWeekStart: "2026-10-05",
+});
+
 check("读图：失败率下降 → 变顺；文案含 ↓ 与百分点", () => {
-  const h = summarizeGrowth([wk("2026-10-05", { turns: 10, failedTurns: 1 }), wk("2026-10-12", { turns: 10, failedTurns: 0, isCurrent: true })]);
+  const prev = wk("2026-10-05", { turns: 10, failedTurns: 1 });
+  const cur = wk("2026-10-12", { turns: 10, failedTurns: 0, isCurrent: true });
+  const h = summarizeGrowth([prev, cur], cmp({ prev, cur }));
   eq(h.verdict, "smoother", "变顺");
   assert(/↓ 10\.0 个百分点/.test(h.text), `文案含下降幅度：${h.text}`);
 });
 
 check("读图：失败率上升 → 变钝", () => {
-  const h = summarizeGrowth([wk("2026-10-05", { turns: 10, failedTurns: 1 }), wk("2026-10-12", { turns: 10, failedTurns: 3, isCurrent: true })]);
+  const prev = wk("2026-10-05", { turns: 10, failedTurns: 1 });
+  const cur = wk("2026-10-12", { turns: 10, failedTurns: 3, isCurrent: true });
+  const h = summarizeGrowth([prev, cur], cmp({ prev, cur }));
   eq(h.verdict, "blunter", "变钝");
   assert(/↑ 20\.0 个百分点/.test(h.text), `文案含上升幅度：${h.text}`);
 });
 
 check("读图：变化 <1 个百分点 → 持平", () => {
-  const h = summarizeGrowth([wk("2026-10-05", { turns: 100, failedTurns: 10 }), wk("2026-10-12", { turns: 100, failedTurns: 11, isCurrent: true })]);
+  const prev = wk("2026-10-05", { turns: 100, failedTurns: 10 });
+  const cur = wk("2026-10-12", { turns: 100, failedTurns: 11, isCurrent: true });
+  const h = summarizeGrowth([prev, cur], cmp({ prev, cur }));
   eq(h.verdict, "flat", "持平");
   assert(/持平/.test(h.text), `文案含持平：${h.text}`);
 });
 
 check("读图：本周无轮次 → 数据不足；上周无记录 → 首周", () => {
-  const empty = summarizeGrowth([wk("2026-10-05", { turns: 0, sessions: 0 }), wk("2026-10-12", { turns: 0, sessions: 0, isCurrent: true })]);
+  const emptyPrev = wk("2026-10-05", { turns: 0, sessions: 0 });
+  const emptyCur = wk("2026-10-12", { turns: 0, sessions: 0, isCurrent: true });
+  const empty = summarizeGrowth([emptyPrev, emptyCur], cmp({ prev: emptyPrev, cur: emptyCur }));
   eq(empty.verdict, "empty", "无数据");
-  const fresh = summarizeGrowth([wk("2026-10-05", { turns: 0, sessions: 0 }), wk("2026-10-12", { turns: 4, failedTurns: 0, isCurrent: true })]);
+  const freshCur = wk("2026-10-12", { turns: 4, failedTurns: 0, isCurrent: true });
+  const fresh = summarizeGrowth([emptyPrev, freshCur], cmp({ prev: emptyPrev, cur: freshCur }));
   eq(fresh.verdict, "new", "首周");
   assert(/上周无记录/.test(fresh.text), `首周文案：${fresh.text}`);
+});
+
+check("读图：本周 1 天 vs 上周 7 天 → 样本不足，不给环比结论（对齐后同样不足）", () => {
+  const fullPrev = wk("2026-10-05", { turns: 7, failedTurns: 1 }); // 完整上周 7 天
+  const alignedPrev = wk("2026-10-05", { turns: 1, failedTurns: 0 }); // 对齐后只剩 1 天
+  const cur = wk("2026-10-12", { turns: 1, failedTurns: 1, isCurrent: true }); // 本周只过了 1 天
+  const h = summarizeGrowth([fullPrev, cur], cmp({ prev: alignedPrev, cur, aligned: true, minTurns: 20, elapsedMs: DAY }));
+  eq(h.verdict, "insufficient", "样本不足");
+  assert(!/[↑↓]/.test(h.text), `不得出现涨跌结论：${h.text}`);
+  assert(/数据不足/.test(h.text) && /暂不判断趋势/.test(h.text), `应明说数据不足：${h.text}`);
+});
+
+check("读图：对齐且样本达标 → 环比文案写「上周同期」并带窗口", () => {
+  const prev = wk("2026-10-05", { turns: 40, failedTurns: 8 });
+  const cur = wk("2026-10-12", { turns: 40, failedTurns: 4, isCurrent: true });
+  const h = summarizeGrowth([prev, cur], cmp({ prev, cur, aligned: true, minTurns: 20, elapsedMs: 2 * DAY }));
+  eq(h.verdict, "smoother", "变顺");
+  assert(/上周同期/.test(h.text), `文案应写上周同期：${h.text}`);
+  assert(/↓ 10\.0 个百分点/.test(h.text), `应带幅度：${h.text}`);
 });
 
 /* ---------------- 9. 路由层 ---------------- */
@@ -345,6 +417,8 @@ check("GET /api/growth 返回报告契约", async () => {
   eq(data.totals.turns, 1, "路由与扫描器同源");
   eq(typeof data.headline.text, "string", "透出一句话读图");
   eq(data.projects[0].label, "route", "项目粗分组透出");
+  eq(typeof data.comparison?.minTurns, "number", "透出周环比比较窗口（时间窗对齐 + 样本门槛）");
+  eq(data.comparison.sufficient, false, "单轮样本应判不足");
 });
 
 /* ---------------- 10. 调用点静态核对 ---------------- */
@@ -367,6 +441,8 @@ check("成长页：周趋势 + 一句话 + 项目表 + 口径说明", () => {
   assert(/按项目 · 近 8 周/.test(source), "应有项目粗分组表");
   assert(/任务类型/.test(source), "应说明「任务类型」取舍");
   assert(/aborted 不计/.test(source), "应说明失败口径");
+  assert(/样本不足/.test(source), "应展示「样本不足」结论档");
+  assert(/上周同期/.test(source) && /对齐/.test(source), "口径说明应写明对齐与样本门槛");
   assert(!/dark:/.test(source), "不应写 dark: 前缀（深色走变量）");
 });
 

@@ -52,6 +52,18 @@ writeFileSync(join(extDemo, "README.md"), "# demo —— 演示扩展\n\n正文�
 writeFileSync(join(extDemo, "selftest.mjs"), "// 不该被装进去\n");
 
 const skillsRoot = join(repo, "skills");
+
+// 带 vendor 的扩展夹具（vendor/ 是 2026-10-19 事故的致因）。
+// `install.mjs` 只是为了让枚举认得它 —— lib 不执行脚本，一致性另有真实脚本用例。
+const vendorExt = join(repo, "extensions", "demo-vendor");
+mkdirSync(join(vendorExt, "vendor", "pkg", "lib"), { recursive: true });
+writeFileSync(join(vendorExt, "install.mjs"), "// 夹具：仅为让枚举认得这个扩展\n");
+writeFileSync(join(vendorExt, "index.ts"), 'export { default } from "./vendor/pkg/index.js";\n');
+writeFileSync(join(vendorExt, "README.md"), "# demo-vendor —— 带 vendor 的演示扩展\n");
+writeFileSync(join(vendorExt, "selftest.mjs"), "// 不该被装进去\n");
+writeFileSync(join(vendorExt, "vendor", "pkg", "index.ts"), "export default 1;\n");
+writeFileSync(join(vendorExt, "vendor", "pkg", "lib", "deep.ts"), "export const deep = 2;\n");
+const vendorExtName = "demo-vendor";
 mkdirSync(join(skillsRoot, "alpha"), { recursive: true });
 cpSync(join(REPO, "skills", "install.mjs"), join(skillsRoot, "install.mjs"));
 writeFileSync(join(skillsRoot, "alpha", "SKILL.md"), "# alpha\n\n正文\n");
@@ -62,6 +74,7 @@ writeFileSync(join(skillsRoot, "beta", "SKILL.md"), "# beta\n");
 const agentA = join(root, "agent-install-mjs"); // 走真实脚本
 const agentB = join(root, "agent-lib"); // 走 lib
 const agentC = join(root, "agent-status"); // 只用来测状态迁移
+const agentV = join(root, "agent-vendor"); // vendor 安装/比对/清理
 
 // 两个目标目录都预置「幽灵文件」：扩展侧脚本会删、技能侧脚本不删 —— 两条语义都要对上
 for (const agent of [agentA, agentB]) {
@@ -83,6 +96,10 @@ check("复制滤镜只认 *.ts 与 README.md", () => {
   assert.equal(lib.isRuntimeExtensionFile("README.md"), true);
   assert.equal(lib.isRuntimeExtensionFile("selftest.mjs"), false);
   assert.equal(lib.isRuntimeExtensionFile("tidy-cli.mjs"), false);
+});
+
+check("附带目录名固定为 vendor（与 install.mjs 的 if (name === \"vendor\") 同源）", () => {
+  assert.equal(lib.RUNTIME_EXTENSION_VENDOR, "vendor");
 });
 
 check("逐文件差异：缺失 / 不同 / 多余分别归位", () => {
@@ -135,17 +152,21 @@ console.log("IO 层：");
 
 await checkAsync("枚举仓库：扩展逐项 + 技能整体一项，说明取自 README 首行", async () => {
   const { items } = await lib.computeBuiltinCatalog(repo, agentC);
-  assert.deepEqual(items.map((i) => i.path), [`extensions/${EXT_NAME}`, "skills"]);
-  const demo = items[0];
+  assert.deepEqual(
+    items.map((i) => i.path),
+    [`extensions/${vendorExtName}`, `extensions/${EXT_NAME}`, "skills"],
+  );
+  const demo = items.find((i) => i.path === `extensions/${EXT_NAME}`);
   assert.equal(demo.kind, "extension");
   assert.equal(demo.description, "演示扩展");
   assert.equal(demo.status, "missing"); // 还没装
   assert.equal(demo.restartRequired, true);
   assert.equal(demo.installCommand, `node extensions/${EXT_NAME}/install.mjs`);
-  assert.equal(items[1].kind, "skills");
-  assert.equal(items[1].status, "missing");
-  assert.equal(items[1].restartRequired, false);
-  assert.equal(items[1].installCommand, "node skills/install.mjs");
+  const skills = items.find((i) => i.path === "skills");
+  assert.equal(skills.kind, "skills");
+  assert.equal(skills.status, "missing");
+  assert.equal(skills.restartRequired, false);
+  assert.equal(skills.installCommand, "node skills/install.mjs");
 });
 
 await checkAsync("白名单：越界路径与不存在的项都被拒", async () => {
@@ -207,6 +228,57 @@ await checkAsync("依赖提示：elenva-memory 依赖 pi-hermes-memory（未装 
   rmSync(memDir, { recursive: true, force: true });
 });
 
+// ---------------------------------------------------------------- vendor：安装 / 比对 / 清理
+console.log("vendor（安装 / 三态比对 / 幽灵清理）：");
+
+const VENDOR_PATH = `extensions/${vendorExtName}`;
+const vendorStatus = async () =>
+  (await lib.computeBuiltinCatalog(repo, agentV)).items.find((i) => i.path === VENDOR_PATH).status;
+
+await checkAsync("装带 vendor 的扩展：vendor 整棵递归落盘（逐文件）+ 顶层幽灵 / selftest 被清", async () => {
+  mkdirSync(join(agentV, "extensions", vendorExtName, "vendor", "stale"), { recursive: true });
+  writeFileSync(join(agentV, "extensions", vendorExtName, "ghost.ts"), "stale\n");
+  writeFileSync(join(agentV, "extensions", vendorExtName, "vendor", "stale", "old.ts"), "stale\n");
+  const r = await lib.installBuiltin(repo, VENDOR_PATH, agentV);
+  assert.equal(r.ok, true);
+  assert.equal(r.item.status, "installed");
+  const tree = await lib.snapshotTree(join(agentV, "extensions", vendorExtName));
+  assert.deepEqual(Object.keys(tree).sort(), [
+    "README.md",
+    "index.ts",
+    "vendor/pkg/index.ts",
+    "vendor/pkg/lib/deep.ts",
+  ]);
+  assert.equal(tree["ghost.ts"], undefined, "顶层幽灵被清");
+  assert.equal(tree["selftest.mjs"], undefined, "selftest 不装");
+  assert.equal(tree["vendor/stale/old.ts"], undefined, "旧 vendor 子目录一并清掉");
+  assert.equal(tree["vendor/pkg/lib/deep.ts"], "export const deep = 2;\n", "vendor 深层文件逐字节一致");
+});
+
+await checkAsync("删一个 vendor 文件 → outdated；重装 → installed（事故的直接复现点）", async () => {
+  assert.equal(await vendorStatus(), "installed");
+  rmSync(join(agentV, "extensions", vendorExtName, "vendor", "pkg", "lib", "deep.ts"));
+  assert.equal(await vendorStatus(), "outdated", "vendor 缺文件必须报 outdated（修前恒为 installed）");
+  const r = await lib.installBuiltin(repo, VENDOR_PATH, agentV);
+  assert.equal(r.ok, true);
+  assert.equal(r.item.status, "installed");
+  assert.equal(
+    readFileSync(join(agentV, "extensions", vendorExtName, "vendor", "pkg", "lib", "deep.ts"), "utf8"),
+    "export const deep = 2;\n",
+  );
+});
+
+await checkAsync("vendor 文件内容不同 → outdated；目标侧多出的 vendor 文件也算 outdated", async () => {
+  writeFileSync(join(agentV, "extensions", vendorExtName, "vendor", "pkg", "index.ts"), "export default 9;\n");
+  assert.equal(await vendorStatus(), "outdated", "内容不一致应报 outdated");
+  writeFileSync(join(agentV, "extensions", vendorExtName, "vendor", "extra.ts"), "extra\n");
+  assert.equal(await vendorStatus(), "outdated", "多余 vendor 文件应报 outdated");
+  await lib.installBuiltin(repo, VENDOR_PATH, agentV);
+  assert.equal(await vendorStatus(), "installed");
+  const tree = await lib.snapshotTree(join(agentV, "extensions", vendorExtName));
+  assert.equal(tree["vendor/extra.ts"], undefined, "重装后多余的 vendor 文件被清");
+});
+
 // ---------------------------------------------------------------- 一致性：lib vs 真实 install.mjs
 console.log("与 install.mjs 的一致性：");
 
@@ -236,6 +308,38 @@ await checkAsync("技能：lib 复制结果 == install.mjs 复制结果（含多
 
 await checkAsync("默认 agent 根目录尊重 PI_CODING_AGENT_DIR（与 install.mjs 同口径）", async () => {
   assert.equal(await lib.resolveAgentRoot(), agentB);
+});
+
+// 真实扩展的一致性：elenva-memory（带真实 vendor/pi-hermes-memory 底座）
+// 一边跑真实的 install.mjs，一边走 lib，两边结果必须逐文件一致 —— 这是「从界面安装
+// 不会再弄坏 elenva-memory」在文件层的证据（真机加载证据见本轮报告）。
+const agentRealA = join(root, "agent-real-install-mjs");
+const agentRealB = join(root, "agent-real-lib");
+const REAL_MEM = "extensions/elenva-memory";
+
+execFileSync(process.execPath, [join(REPO, REAL_MEM, "install.mjs")], {
+  env: { ...process.env, PI_CODING_AGENT_DIR: agentRealA },
+});
+await lib.installBuiltin(REPO, REAL_MEM, agentRealB);
+
+await checkAsync("elenva-memory：lib 复制结果 == 真实 install.mjs，且 vendor 底座完整", async () => {
+  const a = await lib.snapshotTree(join(agentRealA, REAL_MEM));
+  const b = await lib.snapshotTree(join(agentRealB, REAL_MEM));
+  assert.deepEqual(b, a);
+  const vendorFiles = Object.keys(a).filter((rel) => rel.startsWith("vendor/"));
+  assert.ok(vendorFiles.length >= 50, `vendor 应有数十个文件，实际 ${vendorFiles.length}`);
+  assert.ok(a["vendor/pi-hermes-memory/src/index.ts"], "入口依赖的底座入口必须在");
+  const status = (await lib.computeBuiltinCatalog(REPO, agentRealB)).items.find(
+    (i) => i.path === REAL_MEM,
+  ).status;
+  assert.equal(status, "installed");
+  // 事故复现点：删掉 vendor 里的任意一个文件 → 必须是 outdated（修前恒为 installed）
+  const victim = vendorFiles[vendorFiles.length - 1];
+  rmSync(join(agentRealB, REAL_MEM, victim));
+  const after = (await lib.computeBuiltinCatalog(REPO, agentRealB)).items.find(
+    (i) => i.path === REAL_MEM,
+  ).status;
+  assert.equal(after, "outdated", `删掉 ${victim} 后必须报 outdated`);
 });
 
 // ---------------------------------------------------------------- 收尾

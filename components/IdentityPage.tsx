@@ -174,7 +174,7 @@ export function IdentityPage() {
       savedRef.current = JSON.stringify(sections);
       setRevision(d.revision ?? revision);
       if (d.history) setData((prev) => (prev ? { ...prev, history: d.history!, chars: draftChars, source: "file", error: undefined } : prev));
-      toast("已保存 · 新建会话生效");
+      toast("已保存 · 两端新建会话生效");
     } catch (error) {
       toast(`保存失败：${error instanceof Error ? error.message : String(error)}`);
     } finally {
@@ -282,6 +282,13 @@ export function IdentityPage() {
                         文件损坏，当前显示内置默认；保存会以默认值修复文件（损坏内容已进历史）。
                       </span>
                     )}
+                  </p>
+                  <p className="text-[12px] leading-relaxed text-dim" data-testid="identity-scope">
+                    <span className="text-muted">影响范围：</span>此编辑对 <span className="text-fg">Web 端</span>与{" "}
+                    <span className="text-fg">CLI / 飞书侧</span>都生效 —— 两端读<span className="text-fg">同一份</span>{" "}
+                    <span className="font-mono text-muted">{data?.path}</span>
+                    （CLI / 飞书侧由扩展 <span className="font-mono text-muted">elenva-host-guard</span> 在会话启动时装配，与 Web 侧同源）。
+                    <span className="text-fg">新建会话生效，已开会话不回溯</span>；恢复旧版也两端一致。
                   </p>
 
                   <div className="flex flex-col gap-3" data-testid="identity-sections">

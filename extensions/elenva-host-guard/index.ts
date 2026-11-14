@@ -27,7 +27,14 @@
  * | `ELENVA_HOST_GUARD_DISABLE=1` | 人工全局关（本扩展不注册任何行为） |
  *
  * 安装：`node extensions/elenva-host-guard/install.mjs`
- * （同时把身份段同步进 `<agentDir>/APPEND_SYSTEM.md` 的受管段）
+ * （同时把身份段种子同步进 `<agentDir>/APPEND_SYSTEM.md` 的受管段）
+ *
+ * ## 身份段（模块 7 修复轮）
+ *
+ * 除护栏外，本扩展还负责 CLI / 飞书侧的**身份段同源注入**：`before_agent_start` 时读
+ * `<agentDir>/elenva-identity.json`（与 Web 侧 `lib/host-prompt.ts` 同一份文件），
+ * 就地替换 `APPEND_SYSTEM.md` 受管段的内容；文件缺失 / 损坏时不动提示词，
+ * 保留安装期种子兜底。详见 `identity.ts`。
  */
 import {
   getAgentDir,
@@ -35,6 +42,7 @@ import {
   type ExtensionContext,
 } from "@earendil-works/pi-coding-agent";
 import { classifyHostToolCall, toolTargetPath } from "./classify.js";
+import { injectIdentitySection, readIdentityText } from "./identity.js";
 import { enqueueHostApproval } from "./queue.js";
 import { decideHostGuard } from "./host.js";
 
@@ -102,6 +110,21 @@ export default function elenvaHostGuard(pi: ExtensionAPI): void {
   // 宿主判别先于一切：web 进程里本扩展等于不存在（零 handler、零开销、零双闸）。
   if (decideHostGuard() !== "guard") return;
   const agentDir = getAgentDir();
+
+  // 身份段同源注入（模块 7 修复轮）：与 Web 侧读同一份 elenva-identity.json。
+  // 每次 agent 启动前现场读——身份页改完，CLI / 飞书侧下次新建会话即生效（无需重跑 install）。
+  pi.on("before_agent_start", (event) => {
+    try {
+      const identityText = readIdentityText(agentDir);
+      if (!identityText) return; // 文件缺失 / 损坏：不动提示词，保留安装期种子兜底
+      const next = injectIdentitySection(event.systemPrompt, identityText);
+      if (next !== event.systemPrompt) return { systemPrompt: next };
+    } catch (error) {
+      // 身份注入是旁路：失败不阻断会话（只记录，便于排查）
+      console.error("[elenva-host-guard] 身份段注入失败：", error instanceof Error ? error.message : String(error));
+    }
+    return undefined;
+  });
 
   pi.on("tool_call", async (event, ctx) => {
     const input = event.input as Record<string, unknown> | undefined;

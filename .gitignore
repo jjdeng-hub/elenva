@@ -57,15 +57,36 @@ tools/*.mjs
 !tools/subagent-templates-selftest.mjs
 !tools/model-review-selftest.mjs
 !tools/model-health-selftest.mjs
+!tools/model-page-selftest.mjs
 !tools/auth-profiles-selftest.mjs
 !tools/skill-advisor-selftest.mjs
+!tools/skill-usage-selftest.mjs
 !tools/model-notes-selftest.mjs
 !tools/models-config-selftest.mjs
+!tools/extension-integrity-check.mjs
+!tools/extension-integrity-selftest.mjs
 !tools/tool-risk-bash-selftest.mjs
+!tools/host-guard-parity-selftest.mjs
+!tools/m7-fix-cli-identity-e2e.mjs
+!tools/pi-surface-runtime-check.mjs
+!tools/readonly-classifier-selftest.mjs
+!tools/subagent-readonly-guard-selftest.mjs
+!tools/gates-isolated.mjs
+!tools/gates-isolated-selftest.mjs
+!tools/scheduler-runs-selftest.mjs
 !tools/mcp-annotations-selftest.mjs
 !tools/mcp-probe-selftest.mjs
+!tools/model-default-persist-selftest.mjs
 !tools/identity-selftest.mjs
+!tools/diagnostics-selftest.mjs
+!tools/git-selftest.mjs
 tools/*.log
 tools/rev/
 # 临时截图：可能拍到记忆全文等私有内容
 public/_shots/
+!tools/agent-workspace-selftest.mjs
+!tools/acp-host-selftest.mjs
+
+# 设计静态稿（本机资产，不进仓库）
+.preview/
+!tools/agent-doc-selftest.mjs

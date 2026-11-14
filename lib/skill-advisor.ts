@@ -1,5 +1,5 @@
 import type { SkillLifecycleEntry, SkillLifecycleReport } from "./skill-lifecycle";
-import type { SkillUsageReport } from "./skill-usage";
+import type { SkillScope, SkillUsageReport } from "./skill-usage";
 
 /**
  * 技能用量顾问 —— 「该归档谁」的读数与建议。
@@ -34,6 +34,16 @@ export interface SkillAdvisorOverview {
 /** 高频榜条目 */
 export interface SkillHotItem {
   name: string;
+  /**
+   * 2026-10-18 增（模块 4 尾巴轮 · 归因）：归因键，additive。
+   * `global:<名>` / `workspace:<名>` / `project:<项目>:<名>` / `unknown:<名>` ——
+   * 全局与项目同名时靠它区分，不会把读数混在一起。老数据缺此字段。
+   */
+  key?: string;
+  /** additive：来源域；缺省表示老数据（只按名字归并、未归因） */
+  scope?: SkillScope;
+  /** additive：scope === "project" 时的项目标识（`projects-memory/<项目>` 的 `<项目>`） */
+  project?: string;
   /** 历史总调用次数 */
   count: number;
   /** 近 7 天调用次数 */
@@ -82,7 +92,7 @@ function windowCalls(
 
 export function buildSkillAdvisorReport(
   lifecycle: Pick<SkillLifecycleReport, "entries">,
-  usage: Pick<SkillUsageReport, "total" | "recent">,
+  usage: Pick<SkillUsageReport, "total" | "recent"> & Partial<Pick<SkillUsageReport, "entries">>,
 ): SkillAdvisorReport {
   const entries = lifecycle.entries;
 
@@ -95,21 +105,40 @@ export function buildSkillAdvisorReport(
     else if (entry.state === "unused") unused += 1;
   }
 
-  // 高频榜只看当前装着的技能——历史里调过但已归档/删除的不上榜
-  const hot = entries
-    .filter((entry) => entry.useCount > 0)
-    .sort((a, b) => b.useCount - a.useCount)
-    .slice(0, HOT_LIMIT)
-    .map((entry) => {
-      const win = windowCalls(entry.name, usage);
-      return {
-        name: entry.name,
-        count: entry.useCount,
-        count7: win.c7,
-        count30: win.c30,
-        lastUsedAt: entry.lastUsedAt,
-      };
-    });
+  // 高频榜：优先用**与 total 同口径**的 usage.entries（按 (scope,name) 拆分），
+  // 这样项目技能（不在已安装技能分层的枚举里）也能上榜；entries 缺省时（老数据 /
+  // 老路由）退回「只从当前装着的技能里取」的历史口径。
+  //
+  // 注：新口径下，历史里调过但当前已归档/删除的技能也会上榜（entries 是使用记录，
+  // 不是安装清单）—— 符合「高频榜 = 读数」的定位；归档按钮只在 idle 清单里出现。
+  const hot: SkillHotItem[] = usage.entries && usage.entries.length > 0
+    ? [...usage.entries]
+        .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key))
+        .slice(0, HOT_LIMIT)
+        .map((entry) => ({
+          name: entry.name,
+          key: entry.key,
+          scope: entry.scope,
+          ...(entry.project !== undefined ? { project: entry.project } : {}),
+          count: entry.count,
+          count7: entry.count7,
+          count30: entry.count30,
+          lastUsedAt: entry.lastUsedAt,
+        }))
+    : entries
+        .filter((entry) => entry.useCount > 0)
+        .sort((a, b) => b.useCount - a.useCount)
+        .slice(0, HOT_LIMIT)
+        .map((entry) => {
+          const win = windowCalls(entry.name, usage);
+          return {
+            name: entry.name,
+            count: entry.useCount,
+            count7: win.c7,
+            count30: win.c30,
+            lastUsedAt: entry.lastUsedAt,
+          };
+        });
 
   const idle: SkillIdleItem[] = entries
     .filter((entry): entry is SkillLifecycleEntry & { state: "stale" | "unused" } => entry.state !== "active")

@@ -309,7 +309,10 @@ check("路由只读：导出 GET，无写入方法", () => {
 check("模型页：健康节渲染 + 状态 chip + 设为默认走既有设置链", () => {
   const source = readSource("components/ModelsPage.tsx");
   assert(/function ModelHealthSection\(/.test(source), "应有健康节组件");
-  assert(/<ModelHealthSection \/>/.test(source), "页面应渲染健康节");
+  // 变体 C 后健康节常态折叠（数据下沉到模型行），但组件仍必须挂在页面上、
+  // 仍要按状态条那套口径拿故障数（failingCount），不能变成没人渲染的死代码。
+  assert(/<ModelHealthSection[\s\S]{0,240}failingCount=\{library\.failing\}/.test(source), "页面应渲染健康节并传入故障数");
+  assert(/故障已标在对应模型行/.test(source), "折叠态应说明故障标去哪了");
   assert(/健康 · 近 14 天/.test(source), "应有标题");
   assert(/fetch\("\/api\/model-health"/.test(source), "应取 /api/model-health");
   assert(/chip-success/.test(source) && /chip-warn/.test(source) && /chip-danger/.test(source), "三档状态 chip");

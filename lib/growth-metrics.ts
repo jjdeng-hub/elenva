@@ -31,8 +31,21 @@ import { getAgentDir } from "@earendil-works/pi-coding-agent";
 export const GROWTH_WINDOW_WEEKS = 8;
 /** 失败率变化 <1 个百分点视为「持平」（避免把噪声读成趋势） */
 export const GROWTH_FLAT_THRESHOLD = 0.01;
+/**
+ * 周环比的**每侧最小轮数门槛**：任一侧低于它就绝不产出「变好 / 变钝」结论。
+ *
+ * 理由：失败是稀有事件（本机真实口径 ≈9%），单次失败就会把该侧失败率抬高
+ * `1/n`。取 n=20 时，一次失败 = ≥5 个百分点，已高于 ±1 个百分点的「持平」带；
+ * 再往下（如本周周一只有 1–13 轮）失败率完全由整数粒度支配，把这种数读成
+ * 「变钝 / 变顺」是噪声。20 也正好卡在本机已有整周量级（22 / 23 / 141）的下沿，
+ * 既能挡住「一天 vs 七天」这类不完整样本，又不会把有量的整周全部判为不足。
+ */
+export const GROWTH_MIN_TURNS_FOR_TREND = 20;
 
-export type GrowthVerdict = "smoother" | "blunter" | "flat" | "new" | "empty";
+/** 一周的毫秒数（本地周一为起点） */
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+export type GrowthVerdict = "smoother" | "blunter" | "flat" | "new" | "empty" | "insufficient";
 
 /** 一组指标（周桶 / 项目合计共用） */
 export interface GrowthBucket {
@@ -70,6 +83,29 @@ export interface GrowthProject {
   totals: GrowthBucket;
 }
 
+/**
+ * 周环比用的**对齐后比较窗口**（本周可能只过了一两天）。
+ *
+ * `current` = 本周「至今」（只含 ≤ 统计时刻的轮次）；
+ * `previous` = 上周「已过同等时段」（上周一 00:00 → 上周一 + 本周已过时长），
+ * 而不是整个上周。这样两个分母的观察时长相等，才谈得上比失败率。
+ */
+export interface GrowthComparison {
+  current: GrowthBucket;
+  previous: GrowthBucket;
+  /** 本周是否未完整（未完整 → 做了时间窗对齐，文案会标注「至今 / 同期」） */
+  aligned: boolean;
+  /** 本周从周一 00:00 起已过的毫秒数（已夹到 [0, 一周]） */
+  elapsedMs: number;
+  /** 每侧轮数门槛 */
+  minTurns: number;
+  /** 两侧样本是否都达门槛（false → 不给趋势结论） */
+  sufficient: boolean;
+  /** 本周一 / 上周一（YYYY-MM-DD） */
+  currentWeekStart: string;
+  previousWeekStart: string;
+}
+
 export interface GrowthHeadline {
   verdict: GrowthVerdict;
   /** 规则生成的一句话读图（不上模型） */
@@ -85,6 +121,8 @@ export interface GrowthReport {
   totals: GrowthBucket;
   /** 按轮次降序（粗粒度，展示层取 Top N） */
   projects: GrowthProject[];
+  /** 周环比的比较窗口（时间窗对齐 + 样本门槛都在这里） */
+  comparison: GrowthComparison;
   headline: GrowthHeadline;
 }
 
@@ -288,40 +326,63 @@ export function formatWeekLabel(weekStart: string): string {
 /**
  * 规则生成的一句话读图（纯函数，可单测；不上模型）。
  *
- * 判据只看**失败率**的环比：↓ ≥1pt → 变顺，↑ ≥1pt → 变钝，其余持平。
- * 本周可能不完整（周一就只剩一两天），故文案里明写「本周」并在口径说明里提示。
+ * 判据只看**失败率**的环比，但比较的是 `comparison` 给出的**对齐窗口**：
+ * 本周未完整时，上周只取「已过同等时段」那一截（不是整个上周），两边的观察
+ * 时长相等才可比。任一侧轮数低于 `comparison.minTurns` 时**不给趋势结论**
+ * （verdict = "insufficient"），只说「数据不足」并列出两侧的绝对量。
+ *
+ * 文案纪律：任何「变好 / 变钝」都写成「较上周同期 ±X 个百分点」，且必须带上
+ * 两侧的轮数与失败率 —— 结论永远能追到具体数字与窗口。
  */
-export function summarizeGrowth(weeks: GrowthWeek[]): GrowthHeadline {
+export function summarizeGrowth(weeks: GrowthWeek[], comparison: GrowthComparison): GrowthHeadline {
   if (weeks.length === 0) return { verdict: "empty", text: "还没有可读的会话记录。" };
-  const cur = weeks[weeks.length - 1];
-  const prev = weeks.length >= 2 ? weeks[weeks.length - 2] : undefined;
+  const curFull = weeks[weeks.length - 1];
+  const prevFull = weeks.length >= 2 ? weeks[weeks.length - 2] : undefined;
+  const cur = comparison.current;
+  const prev = comparison.previous;
+  const aligned = comparison.aligned;
 
   const load = (b: GrowthBucket) =>
     `每任务均 ${b.turnsPerSession.toFixed(1)} 轮、${b.toolCallsPerSession.toFixed(1)} 次工具调用`;
   const pct = (rate: number) => `${(rate * 100).toFixed(1)}%`;
+  const windowLabel = `${(comparison.elapsedMs / (24 * 60 * 60 * 1000)).toFixed(1)} 天`;
 
-  if (cur.turns === 0) {
-    if (!prev || prev.turns === 0) return { verdict: "empty", text: "近 8 周还没有可读的会话记录。" };
+  if (curFull.turns === 0) {
+    if (!prevFull || prevFull.turns === 0) return { verdict: "empty", text: "近 8 周还没有可读的会话记录。" };
     return {
       verdict: "empty",
-      text: `本周还没有会话记录（上周 ${prev.sessions} 个任务 / ${prev.turns} 轮，失败率 ${pct(prev.failureRate)}）。`,
+      text: `本周还没有会话记录（上周 ${prevFull.sessions} 个任务 / ${prevFull.turns} 轮，失败率 ${pct(prevFull.failureRate)}）。`,
     };
   }
 
-  if (!prev || prev.turns === 0) {
+  if (prev.turns === 0) {
     return {
       verdict: "new",
-      text: `本周 ${cur.sessions} 个任务 / ${cur.turns} 轮，失败率 ${pct(cur.failureRate)}；上周无记录，暂无可比；${load(cur)}。`,
+      text: aligned
+        ? `本周至今 ${cur.sessions} 个任务 / ${cur.turns} 轮，失败率 ${pct(cur.failureRate)}；上周同期（已过 ${windowLabel}）无记录，暂无可比；${load(cur)}。`
+        : `本周 ${cur.sessions} 个任务 / ${cur.turns} 轮，失败率 ${pct(cur.failureRate)}；上周无记录，暂无可比；${load(cur)}。`,
+    };
+  }
+
+  if (!comparison.sufficient) {
+    return {
+      verdict: "insufficient",
+      text: aligned
+        ? `本周数据不足（本周至今 ${cur.turns} 轮 / 上周同期 ${prev.turns} 轮，任一侧低于 ${comparison.minTurns} 轮门槛），暂不判断趋势；本周至今失败率 ${pct(cur.failureRate)}，上周同期 ${pct(prev.failureRate)}。`
+        : `本周数据不足（${cur.turns} 轮，低于 ${comparison.minTurns} 轮门槛），暂不判断趋势；本周失败率 ${pct(cur.failureRate)}，上周 ${pct(prev.failureRate)}。`,
     };
   }
 
   const deltaPt = (cur.failureRate - prev.failureRate) * 100;
   const verdict: GrowthVerdict =
     deltaPt <= -GROWTH_FLAT_THRESHOLD * 100 ? "smoother" : deltaPt >= GROWTH_FLAT_THRESHOLD * 100 ? "blunter" : "flat";
-  const move = verdict === "flat" ? "与上周持平" : `较上周 ${deltaPt < 0 ? "↓" : "↑"} ${Math.abs(deltaPt).toFixed(1)} 个百分点`;
+  const baseline = aligned ? "上周同期" : "上周";
+  const move = verdict === "flat" ? `与${baseline}持平` : `较${baseline} ${deltaPt < 0 ? "↓" : "↑"} ${Math.abs(deltaPt).toFixed(1)} 个百分点`;
   return {
     verdict,
-    text: `本周 ${cur.sessions} 个任务 / ${cur.turns} 轮，失败率 ${pct(cur.failureRate)}（${move}，上周 ${pct(prev.failureRate)}）；${load(cur)}。`,
+    text: aligned
+      ? `本周至今 ${cur.sessions} 个任务 / ${cur.turns} 轮（已过 ${windowLabel}），失败率 ${pct(cur.failureRate)}；${baseline} ${prev.sessions} 个任务 / ${prev.turns} 轮，失败率 ${pct(prev.failureRate)}（${move}）；${load(cur)}。`
+      : `本周 ${cur.sessions} 个任务 / ${cur.turns} 轮，失败率 ${pct(cur.failureRate)}（${move}，上周 ${pct(prev.failureRate)}）；${load(cur)}。`,
   };
 }
 
@@ -340,6 +401,14 @@ export function aggregateGrowth(nowMs = Date.now()): GrowthReport {
   const weekIndex = new Map<string, number>();
   weekStarts.forEach((ms, i) => weekIndex.set(localYmd(ms), i));
   const windowStartMs = weekStarts[0];
+
+  // 周环比的对齐窗口：本周至今（≤ now）vs 上周已过同等时段。
+  const currentStartMs = weekStarts[weekStarts.length - 1];
+  const previousStartMs = weekStarts[weekStarts.length - 2];
+  const elapsedMs = Math.max(0, Math.min(nowMs - currentStartMs, WEEK_MS));
+  const alignedPreviousEndMs = previousStartMs + elapsedMs;
+  const currentUpToNow = emptyAcc();
+  const previousAligned = emptyAcc();
 
   const overall = weekStarts.map(() => emptyAcc());
   const byProject = new Map<string, Acc[]>();
@@ -367,13 +436,27 @@ export function aggregateGrowth(nowMs = Date.now()): GrowthReport {
     }
 
     for (const turn of scan.turns) {
-      const idx = weekIndex.get(localYmd(weekStartOf(turn.atMs)));
+      const turnWeekStartMs = weekStartOf(turn.atMs);
+      const idx = weekIndex.get(localYmd(turnWeekStartMs));
       if (idx === undefined) continue; // 窗口外（或未来时间戳）：不丢账，只是不进这 8 周
       for (const acc of [overall[idx], projectWeeks[idx]]) {
         acc.sessions.add(id);
         acc.turns += 1;
         acc.toolCalls += turn.toolCalls;
         if (turn.failed) acc.failedTurns += 1;
+      }
+      // 对齐窗口：本周至今 / 上周同期（只对总览，不按项目拆）
+      if (turn.atMs <= nowMs && turnWeekStartMs === currentStartMs) {
+        currentUpToNow.sessions.add(id);
+        currentUpToNow.turns += 1;
+        currentUpToNow.toolCalls += turn.toolCalls;
+        if (turn.failed) currentUpToNow.failedTurns += 1;
+      }
+      if (turn.atMs >= previousStartMs && turn.atMs <= alignedPreviousEndMs) {
+        previousAligned.sessions.add(id);
+        previousAligned.turns += 1;
+        previousAligned.toolCalls += turn.toolCalls;
+        if (turn.failed) previousAligned.failedTurns += 1;
       }
     }
   }
@@ -395,13 +478,24 @@ export function aggregateGrowth(nowMs = Date.now()): GrowthReport {
     .sort((a, b) => b.totals.turns - a.totals.turns || a.project.localeCompare(b.project));
 
   const weeks = toWeeks(overall);
+  const comparison: GrowthComparison = {
+    current: finishBucket(currentUpToNow),
+    previous: finishBucket(previousAligned),
+    aligned: elapsedMs < WEEK_MS - 1,
+    elapsedMs,
+    minTurns: GROWTH_MIN_TURNS_FOR_TREND,
+    sufficient: currentUpToNow.turns >= GROWTH_MIN_TURNS_FOR_TREND && previousAligned.turns >= GROWTH_MIN_TURNS_FOR_TREND,
+    currentWeekStart: localYmd(currentStartMs),
+    previousWeekStart: localYmd(previousStartMs),
+  };
   const value: GrowthReport = {
     at: new Date(nowMs).toISOString(),
     windowWeeks: GROWTH_WINDOW_WEEKS,
     weeks,
     totals: finishBucket(mergeAccs(overall)),
     projects,
-    headline: summarizeGrowth(weeks),
+    comparison,
+    headline: summarizeGrowth(weeks, comparison),
   };
   cache = { at: nowMs, value };
   return value;

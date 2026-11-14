@@ -3,7 +3,7 @@
 import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, Cpu, Gauge, KeyRound, Loader2, Play, ShieldAlert } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
-import { basename, formatCost, formatTokens, relTime, timeLabel } from "@/lib/format";
+import { basename, formatCost, formatTokens, greeting, relTime, timeLabel } from "@/lib/format";
 import type { UsageReport } from "@/lib/usage-aggregate";
 import type { AttentionItem, RecentCompletion } from "@/lib/attention";
 import type { PendingApproval, QueuedApproval } from "@/lib/pending-approvals";
@@ -85,14 +85,6 @@ function SnapRow({ label, value, tone }: { label: string; value: ReactNode; tone
 }
 
 /** 问候语随小时切换；入参用调用方的时间，避免与首屏渲染不一致。 */
-function greeting(now: Date): string {
-  const h = now.getHours();
-  if (h < 6) return "凌晨好";
-  if (h < 12) return "早上好";
-  if (h < 14) return "中午好";
-  if (h < 18) return "下午好";
-  return "晚上好";
-}
 
 /** 会话名首字母头像 */
 function Avatar({ session, running }: { session: SessionInfo; running: boolean }) {
@@ -143,7 +135,7 @@ export function HomeDashboard({
   onViewAll: () => void;
   onOpenSystem: () => void;
   defaultCwd?: string | null;
-  contentResults?: { session: SessionInfo; before: string; match: string; after: string }[];
+  contentResults?: { session: SessionInfo; before: string; match: string; after: string; count?: number }[];
   contentSearching?: boolean;
   contentTruncated?: boolean;
   /** 首页重新进入或 Agent 回合结束时递增，用于刷新会话衍生数据。 */
@@ -514,17 +506,22 @@ export function HomeDashboard({
           </div>
         )}
 
-        {/* 内容搜索结果 */}
-        {(contentSearching || (contentResults && contentResults.length > 0)) && (
+        {/* 内容搜索结果（P4d：三态 —— 有结果 / 真没找到 / 未搜完，不再把「没搜完」当「没找到」） */}
+        {(contentSearching || contentTruncated || (contentResults && contentResults.length > 0)) && (
           <div className="card mt-4 overflow-hidden">
             <div className="flex items-center gap-2 px-4 pt-3.5 pb-2">
               <h2 className="text-[14px] font-semibold">内容匹配</h2>
               {contentSearching && <Loader2 size={12} className="anim-spin text-accent" />}
-              {contentTruncated && <span className="text-[11px] text-dim">（结果已截断）</span>}
+              {contentTruncated && (
+                <span className="text-[11px] text-warn">搜索超时，已显示部分结果，请缩小范围或加关键词</span>
+              )}
             </div>
             <div className="max-h-72 overflow-y-auto pb-2">
               {contentSearching && (!contentResults || contentResults.length === 0) && (
                 <div className="px-4 py-4 text-[12px] text-dim">正在搜索消息内容…</div>
+              )}
+              {!contentSearching && !contentTruncated && contentResults?.length === 0 && (
+                <div className="px-4 py-4 text-[12px] text-dim">没有找到</div>
               )}
               {contentResults?.map((r, i) => (
                 <button
@@ -535,6 +532,7 @@ export function HomeDashboard({
                   <Avatar session={r.session} running={runningIds.has(r.session.id)} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-[12px] font-semibold">{displayTitle(r.session)}</div>
+                    <span className="chip chip-mono ml-1.5 shrink-0 text-[10px]">命中 {r.count} 处</span>
                     <div className="mt-0.5 truncate text-[12px] text-muted">
                       …{r.before}
                       <mark className="rounded-sm bg-accent-soft px-0.5 text-accent">{r.match}</mark>

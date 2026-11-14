@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { writePrivateFileAtomicSync } from "./atomic-file";
 import { invalidateModelsCache } from "./models-cache";
+import { backupSettingsFile } from "./settings-backup";
 
 /**
  * Pi 用户级 settings.json（~/.pi/agent/settings.json）的受管读写。
@@ -86,8 +87,18 @@ export function readManagedSettings(settingsPath = getPiSettingsPath()): {
   };
 }
 
-/** 校验待写入的子集；非法内容直接抛错，不产生半写状态 */
-export function validateManagedPatch(patch: unknown): Partial<PiManagedSettings> {
+/** 写入前先备份的键：改变「新会话默认用哪个模型 / 多强推理」的那些。 */
+export const STARTUP_DEFAULT_KEYS = ["defaultProvider", "defaultModel", "defaultThinkingLevel"] as const;
+
+/** 校验待写入的子集；非法内容直接抛错，不产生半写状态。
+ *
+ * `options.knownProviders` 传入时，`defaultProvider` 必须落在已配置的 provider
+ * 列表内（模块 6 修复轮收紧：此前任何字符串都收，连不存在的 provider 也收，
+ * 结果是坏默认被新会话原样选中）。纯形状校验的部分不放松——只收窄。 */
+export function validateManagedPatch(
+  patch: unknown,
+  options: { knownProviders?: ReadonlySet<string> } = {},
+): Partial<PiManagedSettings> {
   if (patch === null || typeof patch !== "object" || Array.isArray(patch)) {
     throw new Error("Invalid settings payload: expected object");
   }
@@ -169,6 +180,9 @@ export function validateManagedPatch(patch: unknown): Partial<PiManagedSettings>
     if (v === null) {
       out[key] = undefined;
     } else if (typeof v === "string" && v.length > 0 && v.length <= 200 && !/[\s/\\]/.test(v)) {
+      if (key === "defaultProvider" && options.knownProviders && !options.knownProviders.has(v)) {
+        throw new Error(`defaultProvider "${v}" 不在已配置的 provider 列表里`);
+      }
       out[key] = v;
     } else {
       throw new Error(`${key} 必须是不含空白与路径分隔符的字符串`);
@@ -206,6 +220,10 @@ const MODEL_AFFECTING_KEYS = new Set([
 
 /** 将受管子集合并写入 settings.json（其余键保留） */
 export function writeManagedSettings(patch: Partial<PiManagedSettings>, settingsPath = getPiSettingsPath()): void {
+  // 「写启动默认」是全自动的破坏面最大的写入：写前留一份带时间的可回滚副本（B1）。
+  if (STARTUP_DEFAULT_KEYS.some((key) => key in patch)) {
+    backupSettingsFile(settingsPath, "default");
+  }
   let raw: Record<string, unknown> = {};
   if (existsSync(settingsPath)) {
     const parsed: unknown = JSON.parse(readFileSync(settingsPath, "utf8"));

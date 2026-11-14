@@ -7,9 +7,43 @@ import { cn } from "@/components/lib/utils";
 import { toast } from "@/components/ui/dialog";
 import { SlowHint } from "@/components/ui/bits";
 import { useModelNotes } from "@/hooks/useModelNotes";
+import { failingModelNote, useModelHealth } from "@/hooks/useModelHealth";
+import { failingBadgeText, lookupModelHealth } from "@/lib/model-health-match";
 
 /** 与 lib/model-notes.ts 的 MAX_NOTE_LENGTH 一致（客户端不能运行时导入该文件——下半有 node:fs）。 */
 const NOTE_MAX = 200;
+
+/**
+ * 模型库向页面状态条汇报的选型侧摘要。
+ *
+ * 为什么由这里汇报而不是页面自己再拉一次：`/api/models` 会 `createAgentSessionServices`
+ * （真正加载模型注册表 + 项目扩展），是全页最重的一次取数；模型库已经在拉了，
+ * 页面再拉一遍既慢又会出现「状态条与列表不是同一份数据」的漂移。
+ */
+export type ModelScopeSummary = {
+  loading: boolean;
+  error: string | null;
+  /** 库里的全部模型数 */
+  total: number;
+  /** 已勾选数（未收窄白名单时 = total，与列表口径一致） */
+  selected: number;
+  /** 是否收窄过白名单（`enabledModels` 非空） */
+  scoped: boolean;
+  /** 库内被标为「有故障」的模型数；健康记录匹配不上库内任何模型的不计（见 lib/model-health-match.ts） */
+  failing: number;
+  /** 默认模型 ref（`provider/id`），未知为 null */
+  defaultRef: string | null;
+};
+
+type Props = {
+  /** 只看有故障的模型（状态条那颗「有故障 N 个」点开后置真） */
+  onlyFailing?: boolean;
+  onSummary?: (summary: ModelScopeSummary) => void;
+  /** 外部（健康面板「设为默认」）改过默认模型时，用来同步行上的「默认」标记 */
+  defaultRefOverride?: string | null;
+  /** 自定义厂商保存后递增：重拉模型库（白名单 + 新模型），避免旧白名单覆盖同步结果 */
+  refreshKey?: number;
+};
 
 type ModelEntry = { id: string; name: string; provider: string };
 type ModelsPayload = {
@@ -64,7 +98,7 @@ function formatAgo(ms: number | undefined): string {
  * 实现上，勾选集合就是 pi 的 `enabledModels` 白名单（glob 模式；pi 没有黑名单）。
  * 未做选择时全部可用；保存过选择后，厂商上新模型默认留在库里，勾选后才进选择器。
  */
-export function ModelScopeEditor({ refreshKey = 0 }: { refreshKey?: number }) {
+export function ModelScopeEditor({ refreshKey = 0, onlyFailing = false, onSummary, defaultRefOverride = null }: Props = {}) {
   const [models, setModels] = useState<ModelEntry[]>([]);
   const [patterns, setPatterns] = useState<string[]>([]);
   const [defaultRef, setDefaultRef] = useState<string | null>(null);
@@ -81,6 +115,8 @@ export function ModelScopeEditor({ refreshKey = 0 }: { refreshKey?: number }) {
 
   /* 模型备注：每模型一条自由文本（擅长什么 / 贵不贵），行内展示 + 小铅笔内联编辑。 */
   const { notes, save: saveNote } = useModelNotes();
+  /* 健康度：模型库里也要能看见「这个模型近期有故障」，而不是勾了才发现（模块 6 修复轮 C）。 */
+  const { health } = useModelHealth();
   const [editingRef, setEditingRef] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [savingNote, setSavingNote] = useState(false);
@@ -148,6 +184,9 @@ export function ModelScopeEditor({ refreshKey = 0 }: { refreshKey?: number }) {
 
   const globPatterns = useMemo(() => patterns.filter(isGlobPattern), [patterns]);
 
+  /** 默认模型的显示取值：健康面板改过默认就以后者为准（库只在加载时读一次 settings） */
+  const shownDefaultRef = defaultRefOverride ?? defaultRef;
+
   /**
    * 未启用白名单时（patterns 为空）内核会展示**全部**模型，所以勾选态必须是"全选"——
    * 否则"显示全部"会长成"一个都没选"的样子，而用户的直觉是"取消勾选 = 删掉这个模型"。
@@ -166,13 +205,39 @@ export function ModelScopeEditor({ refreshKey = 0 }: { refreshKey?: number }) {
 
   const scoped = patterns.length > 0;
 
+  /**
+   * 库内被健康数据标为「有故障」的行。匹配走 `lookupModelHealth`（同 provider + 同 id，
+   * 大小写不敏感且唯一才认）——健康侧 id 与模型库 id 来源不同，匹配不上一律**不标**。
+   */
+  const failingRefs = useMemo(() => {
+    const set = new Set<string>();
+    for (const m of models) {
+      if (lookupModelHealth(health, m.provider, m.id)?.status === "failing") set.add(refOf(m));
+    }
+    return set;
+  }, [models, health]);
+
   const filtered = useMemo(() => {
+    const base = onlyFailing ? models.filter((m) => failingRefs.has(refOf(m))) : models;
     const q = query.trim().toLowerCase();
-    if (!q) return models;
-    return models.filter(
+    if (!q) return base;
+    return base.filter(
       (m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q) || m.provider.toLowerCase().includes(q),
     );
-  }, [models, query]);
+  }, [models, query, onlyFailing, failingRefs]);
+
+  /* 状态条要的那点数，由这里汇报（页面不再重复请求 /api/models） */
+  useEffect(() => {
+    onSummary?.({
+      loading,
+      error: loadError,
+      total: models.length,
+      selected: selectedRefs.size,
+      scoped,
+      failing: failingRefs.size,
+      defaultRef: shownDefaultRef,
+    });
+  }, [onSummary, loading, loadError, models, selectedRefs, scoped, failingRefs, shownDefaultRef]);
 
   const groups = useMemo(() => {
     const map = new Map<string, ModelEntry[]>();
@@ -325,6 +390,8 @@ export function ModelScopeEditor({ refreshKey = 0 }: { refreshKey?: number }) {
               </div>
             ) : models.length === 0 ? (
               "没有可用模型，请先在下方配置厂商密钥。"
+            ) : onlyFailing ? (
+              "没有标出故障的模型——再看全部请关掉「只看有故障」。"
             ) : (
               "没有匹配的模型"
             )}
@@ -336,7 +403,7 @@ export function ModelScopeEditor({ refreshKey = 0 }: { refreshKey?: number }) {
               <div className="flex items-center gap-2 py-1">
                 <span className="label-micro uppercase text-dim">{provider}</span>
                 <span className="text-[11px] text-dim">
-                  {list.filter((m) => selectedRefs.has(refOf(m))).length}/{list.length}
+                  {list.filter((m) => selectedRefs.has(refOf(m))).length}/{list.length} 可选
                 </span>
                 <button
                   onClick={() => {
@@ -358,9 +425,17 @@ export function ModelScopeEditor({ refreshKey = 0 }: { refreshKey?: number }) {
                 const on = selectedRefs.has(ref);
                 const isDefault = ref === defaultRef;
                 const note = notes[ref]?.note;
+                /* 行内故障标：健康数据下沉到模型行（变体 C 的核心），不再靠页底的独立面板 */
+                const failingSummary = lookupModelHealth(health, m.provider, m.id);
+                const failing = failingSummary?.status === "failing";
                 const editing = editingRef === ref;
                 return (
-                  <div key={ref} className="group rounded-md t-fast hover:bg-hover">
+                  <div
+                    key={ref}
+                    data-testid="model-row"
+                    data-failing={failing ? "true" : "false"}
+                    className="group rounded-md t-fast hover:bg-hover"
+                  >
                     <div className="flex w-full items-center gap-2 px-2 py-1.5">
                       <button
                         onClick={() => toggle(m)}
@@ -386,6 +461,15 @@ export function ModelScopeEditor({ refreshKey = 0 }: { refreshKey?: number }) {
                             </span>
                           )}
                         </span>
+                        {failing && failingSummary && (
+                          <span
+                            data-testid="model-failing-badge"
+                            className="chip chip-danger shrink-0"
+                            title={`近期有故障：${failingModelNote(failingSummary)}`}
+                          >
+                            {failingBadgeText(failingSummary)}
+                          </span>
+                        )}
                         {isDefault && <span className="chip chip-accent shrink-0">默认</span>}
                         <span className="shrink-0 font-mono text-[11px] text-dim">{m.id}</span>
                       </button>
@@ -453,9 +537,9 @@ export function ModelScopeEditor({ refreshKey = 0 }: { refreshKey?: number }) {
       </div>
 
       <div className="space-y-2 border-t border-line-soft px-4 py-3">
-        {scoped && defaultRef && !selectedRefs.has(defaultRef) && (
+        {scoped && shownDefaultRef && !selectedRefs.has(shownDefaultRef) && (
           <div className="rounded-md bg-danger/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-danger">
-            当前默认模型（{defaultRef}）不在已选模型里，新会话会落到已选模型中的第一个。
+            当前默认模型（{shownDefaultRef}）不在已选模型里，新会话会落到已选模型中的第一个。
           </div>
         )}
 

@@ -1,11 +1,12 @@
 "use client";
 
-import { Eye, GitBranch, Loader2, RefreshCw } from "lucide-react";
+import { Eye, GitBranch, History, Loader2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { Resizer, usePersistedWidth } from "@/components/ui/Resizer";
 import { CommitBar } from "@/components/code/CommitBar";
 import { FileTree, pathKey } from "@/components/code/FileTree";
+import { HistoryPanel } from "@/components/code/HistoryPanel";
 import { FileViewer } from "@/components/code/FileViewer";
 import type { GitStatusResponse } from "@/lib/git-types";
 
@@ -55,6 +56,7 @@ export function CodeView({
   const [commitSelection, setCommitSelection] = useState<Set<string>>(new Set());
   const [diff, setDiff] = useState<{ path: string; patch?: string; supported?: boolean } | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   /* initialCwd 变化（从会话跳进来）时跟随 */
   useEffect(() => {
@@ -214,6 +216,14 @@ export function CodeView({
 
         <div className="ml-auto flex shrink-0 items-center gap-1.5">
           <button
+            onClick={() => setHistoryOpen((v) => !v)}
+            data-testid="toggle-history"
+            title="查看提交历史（可把单个文件恢复到历史版本）"
+            className={cn("btn btn-sm", historyOpen ? "btn-primary" : "btn-ghost")}
+          >
+            <History size={12} /> 提交历史
+          </button>
+          <button
             onClick={() => setOnlyChanged((v) => !v)}
             data-testid="only-changed"
             title="只显示含变更的文件"
@@ -234,6 +244,9 @@ export function CodeView({
         </div>
       </div>
 
+      {historyOpen ? (
+        <HistoryPanel cwd={cwd} onClose={() => setHistoryOpen(false)} onRestored={() => void load(cwd)} />
+      ) : (
       <div className="flex min-h-0 flex-1">
         {/* 左：文件树（含改动徽标与提交勾选） */}
         <div className="flex shrink-0 flex-col border-r border-line bg-panel" style={{ width: treeWidth }}>
@@ -263,6 +276,7 @@ export function CodeView({
           diffUnsupported={diff?.path === selectedFile ? diff?.supported === false : false}
         />
       </div>
+      )}
 
       {/* 底：提交条 */}
       <CommitBar

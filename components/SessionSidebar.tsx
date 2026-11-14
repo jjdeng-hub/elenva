@@ -1,13 +1,48 @@
 "use client";
 
 import { Check, ChevronDown, FileUp, Folder, FolderPlus, Hash, Loader2, MessageSquarePlus, Pencil, Plus, Search, Star, Trash2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
 import { Resizer, usePersistedWidth } from "@/components/ui/Resizer";
 import { basename, relTime, timeLabel } from "@/lib/format";
 import { dialogPrompt, toast } from "@/components/ui/dialog";
 import type { SessionMeta } from "@/lib/session-meta";
 import type { SessionInfo } from "@/lib/types";
+
+/** /api/sessions/search 返回的单会话结果（P4c：从只搜标题升级到搜消息内容） */
+type SessionContentHit = {
+  sessionId: string;
+  title: string | null;
+  count: number;
+  hits: { text: string }[];
+};
+
+/** 内容搜索的去抖间隔（输入还在打时不打后端） */
+const CONTENT_SEARCH_DEBOUNCE_MS = 300;
+
+/** 命中片段里高亮关键词（大小写不敏感；语义色 text-accent，不写死原生色） */
+function HitText({ text, q }: { text: string; q: string }) {
+  const parts: ReactNode[] = [];
+  const lowerText = text.toLowerCase();
+  const lowerQ = q.toLowerCase();
+  let from = 0;
+  let guard = 0;
+  while (guard++ < 50) {
+    const idx = lowerText.indexOf(lowerQ, from);
+    if (idx < 0) {
+      parts.push(text.slice(from));
+      break;
+    }
+    parts.push(text.slice(from, idx));
+    parts.push(
+      <span key={idx} className="font-semibold text-accent">
+        {text.slice(idx, idx + q.length)}
+      </span>,
+    );
+    from = idx + q.length;
+  }
+  return <>{parts}</>;
+}
 
 const GROUP_PREVIEW_COUNT = 5;
 /** 行内标签最多显示几个（多出的折成 +N） */
@@ -107,9 +142,14 @@ export function SessionSidebar({
   onCreateInProject,
   onCreateProject,
   defaultCwd,
+  searchRuntime,
+  searchProfile,
   collapsed,
 }: {
   sessions: SessionInfo[];
+  /** 内容搜索范围（P4c）：切换 Agent 时跟着变 —— pi 搜 jsonl，hermes 搜该 profile 的 state.db */
+  searchRuntime?: "pi" | "hermes";
+  searchProfile?: string;
   runningIds: Set<string>;
   /** 已完成但用户未查看的会话（显示为绿点） */
   unreadIds?: Set<string>;
@@ -131,6 +171,64 @@ export function SessionSidebar({
   const [query, setQuery] = useState("");
   const [importing, setImporting] = useState(false);
   const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  /** 内容搜索结果（P4c）：sessionId → 命中片段/条数。搜的是消息内容，不只是标题 */
+  const [contentHits, setContentHits] = useState<Record<string, SessionContentHit>>({});
+  const [contentSearching, setContentSearching] = useState(false);
+  /** P4d：truncated = 未搜完（索引未追上 / 超时截断）——跟「真没找到」区分开 */
+  const [contentTruncated, setContentTruncated] = useState(false);
+  /** 重建索引进行中（显式动作， POST /api/sessions/search/reindex） */
+  const [reindexing, setReindexing] = useState(false);
+  /** 重建完成后 +1 触发搜索重跑 */
+  const [reindexNonce, setReindexNonce] = useState(0);
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setContentHits({});
+      setContentSearching(false);
+      setContentTruncated(false);
+      return;
+    }
+    setContentSearching(true);
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams({ q });
+      if (searchRuntime) params.set("runtime", searchRuntime);
+      if (searchProfile) params.set("profile", searchProfile);
+      let alive = true;
+      fetch(`/api/sessions/search?${params.toString()}`, { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { results?: SessionContentHit[]; truncated?: boolean } | null) => {
+          if (!alive) return;
+          const next: Record<string, SessionContentHit> = {};
+          for (const hit of data?.results ?? []) next[hit.sessionId] = hit;
+          setContentHits(next);
+          setContentTruncated(Boolean(data?.truncated));
+        })
+        .catch(() => {
+          /* 搜索故障不拖垮侧栏 */
+        })
+        .finally(() => {
+          if (alive) setContentSearching(false);
+        });
+      return () => {
+        alive = false;
+      };
+    }, CONTENT_SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [query, searchRuntime, searchProfile, reindexNonce]);
+
+  /** 重建索引：清掉该 profile 的行 → FTS rebuild → 全量重同步，完成后重跑当前搜索 */
+  const handleReindex = () => {
+    if (reindexing) return;
+    setReindexing(true);
+    const profile = searchProfile && /^[a-z0-9][a-z0-9-]{0,63}$/.test(searchProfile) ? searchProfile : "default";
+    fetch(`/api/sessions/search/reindex?profile=${encodeURIComponent(profile)}`, { method: "POST" })
+      .catch(() => undefined)
+      .finally(() => {
+        setReindexing(false);
+        setReindexNonce((n) => n + 1);
+      });
+  };
 
   // 折叠状态：用户手动操作过的组以 localStorage 为准；没操作过的走默认规则
   // （默认会话组展开；项目组里只有最近活跃的一个展开，其余收起）。
@@ -254,6 +352,22 @@ export function SessionSidebar({
 
     return { defaultGroup, projectGroups, flat: [] };
   }, [sessions, query, meta, filter]);
+
+  /**
+   * 内容命中但标题不匹配的会话（P4c）：标题搜索只命中了名字，消息内容命中的
+   * 会话也要出现在结果里 —— 把它们追加到打平列表的尾部（按命中条数降序）。
+   */
+  const contentHitSessions = useMemo(() => {
+    if (!query.trim()) return [];
+    const known = new Set(groups.flat.map((s) => s.id));
+    const extra: { s: SessionInfo; count: number }[] = [];
+    for (const [id, hit] of Object.entries(contentHits)) {
+      if (known.has(id)) continue;
+      const s = sessions.find((x) => x.id === id);
+      if (s) extra.push({ s, count: hit.count });
+    }
+    return extra.sort((a, b) => b.count - a.count).map((e) => e.s);
+  }, [query, groups.flat, contentHits, sessions]);
 
   /** 最近活跃的项目（其默认展开；其余收起） */
   const latestProjectKey = useMemo(() => groups.projectGroups[0]?.key ?? null, [groups.projectGroups]);
@@ -509,10 +623,17 @@ export function SessionSidebar({
       );
     }
 
+    const hit = query.trim() ? contentHits[s.id] : undefined;
+    const qTrim = query.trim();
+
     return (
+      <Fragment key={s.id}>
       <div
-        key={s.id}
-        onClick={() => onSelect(s)}
+        onClick={() => {
+          onSelect(s);
+          // 内容命中：消息级定位由会话视图接手前，先在会话顶部提示命中数量
+          if (hit) toast(`「${qTrim}」命中 ${hit.count} 处`);
+        }}
         data-testid="session-row"
         className={cn(
           "group relative flex w-full cursor-pointer items-center gap-1.5 rounded-md px-2 py-1.5 text-left t-fast",
@@ -528,8 +649,14 @@ export function SessionSidebar({
         ) : unreadIds?.has(s.id) ? (
           <span className="size-1.5 shrink-0 rounded-full bg-success" title="已完成（未查看）" />
         ) : null}
-        <span className={cn("min-w-0 flex-1 truncate text-[12px]", active ? "text-fg" : "text-fg/85")}>
-          {title}
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className={cn("truncate text-[12px]", active ? "text-fg" : "text-fg/85")}>{title}</span>
+          {/* 内容命中（P4e）：标题下带一段命中片段（含高亮），让「为什么命中」可见 */}
+          {hit && (
+            <span className="truncate text-[10px] text-dim" title={hit.hits.map((h) => h.text).join(" / ")}>
+              {hit.hits[0] && <HitText text={hit.hits[0].text} q={qTrim} />}
+            </span>
+          )}
         </span>
         {/* 已收藏：★ 恒显在标题右侧（再往右才是标签、时间）。
             放这里而不是 hover 集群里，是因为集群绝对定位在右端、hover 时会把它盖住，
@@ -601,6 +728,21 @@ export function SessionSidebar({
           )}
         </span>
       </div>
+      {/* 内容命中的片段（P4c）：标题下方的上下文预览，关键词高亮 */}
+      {hit && hit.hits.length > 0 && (
+        <div className="mb-0.5 ml-6 mr-2 space-y-0.5 border-l-2 border-accent/40 pl-2">
+          {hit.hits.slice(0, 3).map((h, i) => (
+            <div
+              key={i}
+              className="truncate text-[11px] text-dim"
+              title={`${hit.count} 处命中 · 点击打开会话`}
+            >
+              <HitText text={h.text} q={qTrim} />
+            </div>
+          ))}
+        </div>
+      )}
+      </Fragment>
     );
   };
 
@@ -744,6 +886,20 @@ export function SessionSidebar({
             className="w-full bg-transparent text-[12px] text-fg outline-none placeholder:text-dim"
           />
         </div>
+        {/* 未搜完 ≠ 没找到（P4d）：索引未追上或超时截断时明说，并给重建索引入口（仅 Hermes 侧） */}
+        {query.trim() && !contentSearching && contentTruncated && (
+          <div className="mt-1 flex items-center gap-1.5 px-1 text-[10px] leading-relaxed text-warn">
+            <span className="min-w-0">搜索超时，已显示部分结果，请缩小范围或加关键词</span>
+            <button
+              onClick={handleReindex}
+              disabled={reindexing}
+              data-testid="reindex-btn"
+              className="shrink-0 cursor-pointer text-accent t-fast hover:underline disabled:text-dim"
+            >
+              {reindexing ? "重建中…" : "重建索引"}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Session list */}
@@ -751,12 +907,20 @@ export function SessionSidebar({
         {/* 搜索结果 / 过滤结果：打平 */}
         {flatMode && (
           <>
-            {groups.flat.length === 0 && (
+            {groups.flat.length === 0 && contentHitSessions.length === 0 && (
               <div className="px-3 py-6 text-center text-[12px] text-dim">
-                {filterActive ? "没有匹配的会话" : "无匹配结果"}
+                {contentSearching
+                  ? "正在搜索…"
+                  : contentTruncated
+                    ? "没有找到（搜索未完成，可缩小范围重试）"
+                    : filterActive
+                      ? "没有匹配的会话"
+                      : "没有找到"}
               </div>
             )}
             {groups.flat.map(renderSession)}
+            {/* 内容命中但标题不匹配的会话（P4c）追加在尾部，按命中条数降序 */}
+            {contentHitSessions.map(renderSession)}
           </>
         )}
 

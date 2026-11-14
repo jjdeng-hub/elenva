@@ -14,13 +14,14 @@
 |---|---|---|---|
 | pi 基座 | 内核 `core/system-prompt.js` | 所有 pi 会话 | **pi，我们不碰** |
 | **宿主层** | `lib/host-prompt.ts` → `appendSystemPrompt`（身份段 + 环境事实） | Web 工作台打开的**每一个**会话 | 我们 |
+| 项目上下文 | `<cwd>/AGENTS.md` | 该项目 | 用户 / 项目手写 |
+| 技能 | `<name>/SKILL.md` | 按需 read，不占每轮预算 | 按技能 |
 
 **身份段（`## 你是谁`）已是受管数据**（2026-10-16，模块 7 R1）：正文来自 `~/.pi/agent/elenva-identity.json`
 （`lib/identity.ts`；可在网页「身份」页分段编辑、看版本历史、恢复旧版）。`lib/host-prompt.ts` 只保留
 槽位 / 默认文本 / 装配顺序，其余各段（环境事实）仍是代码里的静态字符串。改身份**内容**不必改代码；
-改装配顺序或别的段才改 `lib/host-prompt.ts`。
-| 项目上下文 | `<cwd>/AGENTS.md` | 该项目 | 用户 / 项目手写 |
-| 技能 | `<name>/SKILL.md` | 按需 read，不占每轮预算 | 按技能 |
+改装配顺序或别的段才改 `lib/host-prompt.ts`。CLI / 飞书侧由扩展 `elenva-host-guard` 在会话启动时读**同一份**
+`elenva-identity.json` 装配（见下）。
 
 另外两处**不需要改代码**的插槽（只对 pi 生效，不随产品走）：
 
@@ -64,8 +65,10 @@
       `id`（稳定标识）、`rationale`（**为什么必须存在**）、`relatedTo`（哪个能力，方便回访）。
 - [ ] 是否更适合别处？工具用法 → `promptSnippet`/`promptGuidelines`；项目规则 → `AGENTS.md`；
       流程知识 → 技能；动态状态 → hook 注入消息。
-- [ ] 长度：**身份段 ≤ 700 字符、每条事实 ≤ 120 字符、整层 ≤ 1100**。每轮都注入，
-      按 token × 轮数计费 —— 加东西前先想「删掉哪一句」。
+- [ ] 长度：**身份段预算 ≤ 700 字符**（`docs/host-prompt.md` 的每轮注入建议值，超了会撑大 token 成本）、
+      每条事实 ≤ 120 字符、整层 ≤ 1100。注意区分**预算**与**保存硬上限**：身份编辑器保存的硬闸门是
+      `IDENTITY_TOTAL_LIMIT = 4000`（`lib/identity.ts`，超过直接拒），700 只是给「默认身份（560）+ 留白」的建议线 ——
+      两者含义不同。每轮都注入，按 token × 轮数计费 —— 加东西前先想「删掉哪一句」。
 - [ ] 措辞：命令式、说清「被拦下怎么办」。不要写「你应该」「请注意」这类没有约束力的句式。
 - [ ] 跑 `node ./node_modules/typescript/bin/tsc --noEmit`（这一段是代码，不是文档）。
 - [ ] 跑夹具：`node --experimental-strip-types tools/rev/host-prompt-fixture.mjs`

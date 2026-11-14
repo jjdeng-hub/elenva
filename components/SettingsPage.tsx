@@ -15,11 +15,15 @@ import {
   Settings as SettingsIcon,
   ShieldCheck,
   SunMedium,
+  Volume2 as Volume2Icon,
   Wrench,
 } from "lucide-react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import { AccountProfilesSection } from "@/components/AccountProfilesSection";
+import { ProfilesSection } from "@/components/ProfilesSection";
 import { cn } from "@/components/lib/utils";
+import { useSound } from "@/hooks/useSound";
+import type { SoundLevel, SoundPack } from "@/lib/sound";
 import { toast } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/bits";
 import { getToolNamesForPreset, TOOL_PRESET_VALUES, type ToolPreset } from "@/lib/tool-presets";
@@ -98,6 +102,10 @@ function PiSettingsSection() {
   const [maxRetries, setMaxRetries] = useState(3);
   const [cacheWarming, setCacheWarming] = useState<"off" | "streaming" | "idle">("streaming");
   const [toolSelect, setToolSelect] = useState<ToolPreset | "pi-default">("pi-default");
+  /* 启动默认模型（defaultProvider/defaultModel）：只读展示 + 「重置为自动选择」入口。
+     改选走聊天里的模型选择器 / 模型页；这里只管清掉被粘住的默认。 */
+  const [startupDefault, setStartupDefault] = useState<{ provider?: string; model?: string }>({});
+  const [resettingDefault, setResettingDefault] = useState(false);
 
   useEffect(() => {
     fetch("/api/pi-settings", { cache: "no-store" })
@@ -115,6 +123,10 @@ function PiSettingsSection() {
         setRetryEnabled(d.settings.retry?.enabled ?? true);
         setMaxRetries(d.settings.retry?.maxRetries ?? 3);
         setCacheWarming(d.settings.cacheWarming ?? "streaming");
+        setStartupDefault({
+          provider: d.settings.defaultProvider,
+          model: d.settings.defaultModel,
+        });
         if (d.settings.defaultTools) {
           const names = [...d.settings.defaultTools].sort().join(",");
           const match = TOOL_PRESET_VALUES.find((p) => getToolNamesForPreset(p).sort().join(",") === names);
@@ -124,6 +136,27 @@ function PiSettingsSection() {
       .catch(() => toast("读取 Pi 设置失败"))
       .finally(() => setLoading(false));
   }, []);
+
+  /** 重置为自动选择：删掉 defaultProvider/defaultModel/defaultThinkingLevel 三个键，
+   *  新会话回到「按 enabledModels / 可用性自动挑」——此前只有手工改 settings.json 一条路。 */
+  const resetStartupDefault = async () => {
+    setResettingDefault(true);
+    try {
+      const res = await fetch("/api/pi-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ defaultProvider: null, defaultModel: null, defaultThinkingLevel: null }),
+      });
+      const d = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(d.error || `重置失败（HTTP ${res.status}）`);
+      setStartupDefault({});
+      toast("已重置为自动选择，新会话生效");
+    } catch (e) {
+      toast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setResettingDefault(false);
+    }
+  };
 
   const save = async () => {
     setSaving(true);
@@ -179,6 +212,30 @@ function PiSettingsSection() {
         </div>
       ) : (
         <div className="divide-y divide-line-soft">
+          <Field
+            label="启动默认模型"
+            hint="写入 settings.json 的 defaultProvider/defaultModel，所有新会话的落选；聊天里选模型会更新它。重置后按已启用模型自动挑。"
+          >
+            <div className="flex items-center gap-2">
+              <span className="truncate font-mono text-[12px] text-dim">
+                {startupDefault.provider && startupDefault.model
+                  ? `${startupDefault.provider}/${startupDefault.model}`
+                  : "自动选择"}
+              </span>
+              {(startupDefault.provider || startupDefault.model) && (
+                <button
+                  onClick={() => void resetStartupDefault()}
+                  disabled={resettingDefault}
+                  data-testid="reset-startup-default"
+                  title="删除 defaultProvider/defaultModel/defaultThinkingLevel，新会话回到自动选择"
+                  className="btn btn-sm btn-ghost shrink-0"
+                >
+                  {resettingDefault ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                  重置为自动选择
+                </button>
+              )}
+            </div>
+          </Field>
           <Field label="插话送达模式（steeringMode）" hint="all：当前回合工具结束后一次送达全部；one-at-a-time：每回合一条">
             <select
               value={form.steeringMode}
@@ -539,6 +596,129 @@ const THEME_CHOICES: { id: ThemePreference; label: string; hint: string; icon: R
   { id: "auto", label: "跟随系统", hint: "随系统外观切换", icon: <Monitor size={12} /> },
 ];
 
+/**
+ * UI 音效设置（规格 docs/specs/2026-11-12-ui-sound.md）。
+ * 开关 + 三档音量（静音/轻/标准）+ 音色（minimal/studio/scifi/soft）+ 试听 + 长任务 loop 开关。
+ * 偏好持久化在 lib/sound.ts 单例（localStorage `elenva:sound`）。
+ */
+const SOUND_LEVEL_CHOICES: { id: SoundLevel; label: string; hint: string }[] = [
+  { id: "muted", label: "静音", hint: "完全不出声" },
+  { id: "light", label: "轻", hint: "0.35，只有长任务提醒" },
+  { id: "standard", label: "标准", hint: "0.6，全部事件" },
+];
+const SOUND_PACK_CHOICES: { id: SoundPack; label: string }[] = [
+  { id: "minimal", label: "Minimal" },
+  { id: "studio", label: "Studio" },
+  { id: "scifi", label: "Sci-fi" },
+  { id: "soft", label: "Soft" },
+];
+
+function SoundSection() {
+  const { prefs, setEnabled, setLevel, setPack, setLoop, play, unlocked } = useSound();
+
+  return (
+    <Card data-testid="sound-settings">
+      <CardHeader>
+        <Volume2Icon size={14} className="text-accent" />
+        <CardTitle>声音</CardTitle>
+        <span className="ml-auto text-[11px] text-dim">
+          {prefs.enabled && prefs.level !== "muted" ? (unlocked ? "已解锁（可出声）" : "等待首次点击解锁") : "已静音"}
+        </span>
+      </CardHeader>
+      <div className="px-4 py-4">
+        {/* 开关 */}
+        <button
+          onClick={() => setEnabled(!prefs.enabled)}
+          aria-pressed={prefs.enabled}
+          data-testid="sound-enabled"
+          className={cn(
+            "t-fast flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-[12px]",
+            prefs.enabled ? "border-accent/50 bg-accent-soft text-accent" : "border-line bg-panel-2 text-muted hover:text-fg",
+          )}
+        >
+          {prefs.enabled ? "声音已开" : "声音已关"}
+        </button>
+
+        {/* 三档音量 */}
+        <div className="mt-3 text-[11px] text-dim">音量</div>
+        <div className="mt-1.5 flex flex-wrap gap-2" role="group" aria-label="音量档位">
+          {SOUND_LEVEL_CHOICES.map((c) => {
+            const on = prefs.level === c.id;
+            return (
+              <button
+                key={c.id}
+                onClick={() => {
+                  setLevel(c.id);
+                  if (c.id === "muted") setEnabled(false);
+                  else if (!prefs.enabled) setEnabled(true);
+                }}
+                aria-pressed={on}
+                className={cn(
+                  "t-fast cursor-pointer rounded-md border px-3 py-1.5 text-[12px]",
+                  on ? "border-accent bg-active text-accent" : "border-line bg-panel-2 text-muted hover:border-accent/40 hover:text-fg",
+                )}
+              >
+                {c.label}
+                <span className="ml-1.5 text-[11px] text-dim">{c.hint}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* 音色 */}
+        <div className="mt-4 text-[11px] text-dim">音色</div>
+        <div className="mt-1.5 flex flex-wrap items-center gap-2" role="group" aria-label="音色">
+          {SOUND_PACK_CHOICES.map((c) => {
+            const on = prefs.pack === c.id;
+            return (
+              <button
+                key={c.id}
+                onClick={() => {
+                  setPack(c.id);
+                  play("notification");
+                }}
+                aria-pressed={on}
+                className={cn(
+                  "t-fast cursor-pointer rounded-md border px-3 py-1.5 text-[12px]",
+                  on ? "border-accent bg-active text-accent" : "border-line bg-panel-2 text-muted hover:border-accent/40 hover:text-fg",
+                )}
+              >
+                {c.label}
+              </button>
+            );
+          })}
+          <button
+            onClick={() => play("notification")}
+            data-testid="sound-preview"
+            className="t-fast ml-1 cursor-pointer rounded-md border border-line bg-panel-2 px-3 py-1.5 text-[12px] text-muted hover:border-accent/40 hover:text-fg"
+            title="试听当前音色"
+          >
+            试听
+          </button>
+        </div>
+
+        {/* 长任务 loop（默认关） */}
+        <button
+          onClick={() => setLoop(!prefs.loop)}
+          aria-pressed={prefs.loop}
+          data-testid="sound-loop"
+          className={cn(
+            "t-fast mt-4 flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-[12px]",
+            prefs.loop ? "border-accent/50 bg-accent-soft text-accent" : "border-line bg-panel-2 text-muted hover:text-fg",
+          )}
+          title="任务超过 15 秒后响起循环提示音（音量 0.35），结束时自动停止"
+        >
+          {prefs.loop ? "长任务提示音：开" : "长任务提示音：关"}
+        </button>
+
+        <div className="mt-2.5 text-[11px] text-dim">
+          只在状态真正变化时响：一轮完成 / 失败 / 待审批 / 连接断开。标签页切走时音量升到 1.0，盯着屏幕时降到 0.55。
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function AppearanceSection() {
   const [pref, setPref] = useState<ThemePreference>("auto");
   const [resolved, setResolved] = useState<ResolvedTheme>("light");
@@ -616,6 +796,8 @@ function GuardrailsSection({ projects, defaultCwd }: {
   const [allowByProject, setAllowByProject] = useState<Record<string, string[]>>({});
   /** 项目级档位覆盖；值为空对象表示该项目「全继承」 */
   const [policyByProject, setPolicyByProject] = useState<Record<string, ProjectPolicy>>({});
+  /** 项目策略列表默认收起：大多数项目都是「全继承」，铺开一屏卡片只是占地方 */
+  const [policyOpen, setPolicyOpen] = useState(false);
   /** 全局回落档：界面上只作为「继承（…）」的显示值，改它要动代码（见 GuardrailSettings 注释） */
   const [fallback, setFallback] = useState<"reject" | "queue">("reject");
   const [mcpGlobal, setMcpGlobal] = useState(true);
@@ -772,6 +954,9 @@ function GuardrailsSection({ projects, defaultCwd }: {
     return rows;
   }, [projects, policyByProject]);
 
+  /** 有覆盖的项目数：收起时用它提示「里面有东西」 */
+  const policyOverrideCount = policyRows.filter((row) => Object.keys(row.policy).length > 0).length;
+
   /** 写项目策略：patch 里的 null 表示该键回到继承；patch 为 null 整条清除 */
   const saveProjectPolicy = async (cwd: string, patch: Record<string, unknown> | null) => {
     const data = await post({ action: "setProjectPolicy", cwd, policy: patch });
@@ -840,18 +1025,34 @@ function GuardrailsSection({ projects, defaultCwd }: {
             三个键**各自独立继承** ——「继承」的语义是「这个键跟随全局」，不是「等于默认档」；
             所以「继承」的文案里必须带上当前全局值，否则用户看不出自己在继承什么。 */}
         <div className="mt-4 border-t border-line-soft pt-3">
-          <div className="text-[13px] font-medium text-fg">项目策略</div>
-          <p className="mt-0.5 text-[12px] leading-relaxed text-dim">
-            按项目给不同的审批档位：个人小项目可以放全权，重要目录收严。没选过的键跟随全局
-            ——当前全局：{MODE_LABELS[mode ?? "risky"]} · 无人时{FALLBACK_LABELS[fallback]} · MCP 写确认{mcpGlobal ? "开" : "关"}。
-            免确认规则不受影响。
-          </p>
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-medium text-fg">项目策略</div>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-dim">
+                按项目给不同的审批档位：个人小项目可以放全权，重要目录收严。没选过的键跟随全局
+                ——当前全局：{MODE_LABELS[mode ?? "risky"]} · 无人时{FALLBACK_LABELS[fallback]} · MCP 写确认{mcpGlobal ? "开" : "关"}。
+                免确认规则不受影响。
+              </p>
+            </div>
+            {policyRows.length > 0 && (
+              <button
+                onClick={() => setPolicyOpen((v) => !v)}
+                aria-expanded={policyOpen}
+                className="btn btn-sm btn-ghost shrink-0"
+              >
+                {policyOpen ? "收起" : `展开 ${policyRows.length} 个项目`}
+                {!policyOpen && policyOverrideCount > 0 && (
+                  <span className="text-accent">· {policyOverrideCount} 个已单独设</span>
+                )}
+              </button>
+            )}
+          </div>
 
           {policyRows.length === 0 ? (
             <p className="mt-2 text-[11px] text-dim">
               还没有可配置的项目 —— 打开过会话的项目目录会自动出现在这里。
             </p>
-          ) : (
+          ) : policyOpen ? (
             <div className="mt-2 grid grid-cols-1 gap-2 xl:grid-cols-2">
               {policyRows.map((row) => (
                 <div key={row.cwd} className="rounded-lg border border-line bg-panel-2 px-2.5 py-2">
@@ -929,7 +1130,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
                 </div>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
 
         <div className="mt-4 flex items-center gap-3">
@@ -1245,9 +1446,11 @@ export function SettingsPage({
            所以只能靠搬卡把它与「工具」单放一栏，另一栏用多张小卡填平。 */}
         <div className="flex flex-col gap-5 xl:flex-row xl:items-start">
           <div className="flex min-w-0 flex-1 flex-col gap-5">
+            <ProfilesSection />
             <PiSettingsSection />
             <AccountProfilesSection />
             <AppearanceSection />
+            <SoundSection />
             <AboutSection />
             <HostPromptCard />
           </div>

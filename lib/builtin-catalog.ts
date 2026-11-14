@@ -8,9 +8,16 @@
  *
  * 两条硬边界：
  *  · **install.mjs 是 SOURCE OF TRUTH**：复制滤镜、覆盖、清理旧文件的规则逐条照搬
- *    （`extensions/<name>/install.mjs` 只装 `*.ts` + `README.md` 并删掉目标里多出来的；
- *    `skills/install.mjs` 是整目录递归复制、不删）。改了本模块就要同步改脚本，反之亦然
- *    —— 自测里有一条「lib 复制结果 == 直接跑 install.mjs 的复制结果」的一致性比对兜底。
+ *    （`extensions/<name>/install.mjs` 装**顶层 `*.ts` + `README.md` + `vendor/` 递归**
+ *    并清掉目标里多出来的；`skills/install.mjs` 是整目录递归复制、不删）。改了本模块就要同步改脚本，
+ *    反之亦然 —— 自测里有一条「lib 复制结果 == 直接跑 install.mjs 的复制结果」的一致性比对兜底。
+ *
+ *  **为什么必须带上 vendor（2026-10-19 事故）**：`extensions/elenva-memory` 把底座
+ *  pi-hermes-memory 的源码放在 `vendor/`（59 个文件），入口 `index.ts` 直接
+ *  `import ... from "./vendor/pi-hermes-memory/src/index.js"`。本模块原先只认顶层 `*.ts` +
+ *  README，从插件页安装/更新会把 vendor 整个清掉 → 扩展加载失败（`Cannot find module`）→
+ *  记忆工具面整片消失，而三态判定也只比顶层文件、仍显示「已安装」。现安装、清理、比对
+ *  三处统一含 vendor，并与 install.mjs 对齐。
  *  · **纯函数区与 IO 区分开**：文件顶部（纯函数区）不 `import` 任何 `node:*`，差异比较 /
  *    状态归并 / 白名单都能被自测直载；真正的 fs 操作在 IO 区，用 `await import("node:*")`
  *    按需加载，保证**本模块顶层无 node 专有依赖**——即使哪天被客户端误引也不会把 fs 带进包。
@@ -74,10 +81,18 @@ export const SKILLS_PATH = "skills";
  * 扩展安装脚本的复制滤镜（照抄 extensions/*​/install.mjs）：
  * 只装运行时要用的文件 —— `*.ts` + README，不装 selftest / install 自己（避免递归）。
  * 滤镜是通配的：新增的 .ts 会被自动带上，无需登记。
+ *
+ * 注意：它只管**顶层条目**；`vendor/` 是整体递归复制的附带目录，见 RUNTIME_EXTENSION_VENDOR。
  */
 export function isRuntimeExtensionFile(name: string): boolean {
   return name.endsWith(".ts") || name === "README.md";
 }
+
+/**
+ * 扩展的附带目录：`vendor/` 整棵递归复制（elenva-memory 的 pi-hermes-memory 底座在这里）。
+ * 与 extensions/elenva-memory/install.mjs 的 `if (name === "vendor")` 分支同源。
+ */
+export const RUNTIME_EXTENSION_VENDOR = "vendor";
 
 /** 逐文件比对源与目标；键是**相对路径**（skills 用 `<name>/SKILL.md` 这种） */
 export function diffTree(source: FileMap, target: FileMap): TreeDiff {
@@ -202,6 +217,41 @@ function readRecursiveTarget(fs: NodeFs, path: NodePath, dir: string): FileMap {
   return out;
 }
 
+/**
+ * 扩展源侧要装的**全套运行时文件**：顶层 `*.ts` + `README.md` + `vendor/` 递归。
+ * 键是相对扩展根目录的路径（`index.ts` / `vendor/pi-hermes-memory/src/index.ts`）。
+ */
+function collectRuntimeExtensionFiles(fs: NodeFs, path: NodePath, sourceDir: string): FileMap {
+  const out: FileMap = {};
+  for (const entry of fs.readdirSync(sourceDir, { withFileTypes: true })) {
+    const full = path.join(sourceDir, entry.name);
+    if (entry.isFile() && isRuntimeExtensionFile(entry.name)) {
+      out[entry.name] = fs.readFileSync(full, "utf8");
+    } else if (entry.isDirectory() && entry.name === RUNTIME_EXTENSION_VENDOR) {
+      collectFiles(fs, path, full, RUNTIME_EXTENSION_VENDOR, out);
+    }
+  }
+  return out;
+}
+
+/**
+ * 目标侧（extensions）：顶层读取 + `vendor/` 递归，与源侧同口径。
+ * 文件取内容；顶层目录记为 null（位置被占用），`vendor/` 除外（它要逐文件比对）。
+ * 少了这层递归，vendor 缺失/被换就不在比对范围 —— 事故里界面会一直显示「已安装」。
+ */
+function readExtensionTarget(fs: NodeFs, path: NodePath, dir: string): FileMap {
+  const out: FileMap = {};
+  if (!fs.existsSync(dir)) return out;
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    if (entry.isFile()) out[entry.name] = fs.readFileSync(full, "utf8");
+    else if (entry.isDirectory() && entry.name === RUNTIME_EXTENSION_VENDOR) {
+      collectFiles(fs, path, full, RUNTIME_EXTENSION_VENDOR, out);
+    } else out[entry.name] = null;
+  }
+  return out;
+}
+
 function readDescription(fs: NodeFs, path: NodePath, sourceDir: string, fallback: string): string {
   const readme = path.join(sourceDir, "README.md");
   if (!fs.existsSync(readme)) return fallback;
@@ -228,13 +278,6 @@ function readExtensionSources(
     .sort();
   return names.map((name) => {
     const sourceDir = path.join(root, name);
-    const files = fs
-      .readdirSync(sourceDir, { withFileTypes: true })
-      .filter((e) => e.isFile() && isRuntimeExtensionFile(e.name))
-      .map((e) => e.name)
-      .sort();
-    const map: FileMap = {};
-    for (const file of files) map[file] = fs.readFileSync(path.join(sourceDir, file), "utf8");
     return {
       path: `extensions/${name}`,
       kind: "extension" as const,
@@ -242,7 +285,7 @@ function readExtensionSources(
       description: readDescription(fs, path, sourceDir, name),
       sourceDir,
       targetDir: path.join(agentRoot, "extensions", name),
-      files: map,
+      files: collectRuntimeExtensionFiles(fs, path, sourceDir),
       installCommand: `node extensions/${name}/install.mjs`,
       restartRequired: true,
       childDirs: [],
@@ -300,7 +343,7 @@ function statusForSource(
   const target =
     source.kind === "skills"
       ? readRecursiveTarget(fs, path, source.targetDir)
-      : readFlatTarget(fs, path, source.targetDir);
+      : readExtensionTarget(fs, path, source.targetDir);
   const diff = diffTree(source.files, target);
   return statusFromDiff(diff, {
     targetFileCount: Object.keys(target).length,
@@ -387,7 +430,8 @@ export type InstallBuiltinResult =
 /**
  * 安装 / 更新一个内置项：**与 install.mjs 完全同语义的复制**。
  *
- * extensions：先删掉目标里不在清单中的条目（改名/删文件时不留幽灵模块），再逐文件覆盖写。
+ * extensions：目标目录重建为源侧运行时文件的全集（顶层 `*.ts` + README + `vendor/` 递归），
+ *   改名/删文件/旧 vendor 都不留幽灵；与 install.mjs 的「清掉多余条目再复制」等价。
  * skills：逐技能目录 `cpSync(recursive, force)`——只覆盖、不删除，与脚本一致。
  */
 export async function installBuiltin(
@@ -412,15 +456,13 @@ export async function installBuiltin(
       });
     }
   } else {
-    fs.mkdirSync(source.targetDir, { recursive: true });
-    const keep = new Set(Object.keys(source.files));
-    for (const existing of fs.readdirSync(source.targetDir)) {
-      if (!keep.has(existing)) {
-        fs.rmSync(path.join(source.targetDir, existing), { recursive: true, force: true });
-      }
-    }
+    // 目标目录整体重建：install.mjs 的语义就是「目标 == 源侧运行时文件全集」。
+    // 逐文件写（vendor 带子目录，键含 `/`，要按目录逐级创建）。
+    fs.rmSync(source.targetDir, { recursive: true, force: true });
     for (const [rel, content] of Object.entries(source.files)) {
-      fs.writeFileSync(path.join(source.targetDir, rel), content ?? "", "utf8");
+      const dest = path.join(source.targetDir, rel);
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, content ?? "", "utf8");
     }
   }
 

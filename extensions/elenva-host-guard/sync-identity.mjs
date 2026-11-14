@@ -30,6 +30,14 @@
  * CLI 场景**只取身份骨干 + 一句护栏说明**，不搬运整份宿主提示词（「没有终端交互」
  * 「改动有快照」这些是 Web 宿主事实，对 CLI 不成立甚至误导）。
  *
+ * ## 定位（2026-10-19 修复轮起）：降级为**安装期种子**
+ *
+ * 有效身份源已是身份编辑器维护的 `<agentDir>/elenva-identity.json`：扩展
+ * `elenva-host-guard` 在每次 agent 启动前（`before_agent_start`）读它并就地替换本受管段
+ * （`identity.ts`），与 Web 侧 `lib/host-prompt.ts` 同源。本脚本仍把 `IDENTITY_BLOCK`
+ * 作为**首次安装的种子**写进去，仅当扩展未安装 / 文件缺失时充当兜底 —— 不再是有效身份源，
+ * 所以不随身份页编辑而变化（“同源分叉”已消除：两侧现在读同一份文件）。
+ *
  * 用法：
  *   node extensions/elenva-host-guard/sync-identity.mjs            # 同步
  *   node extensions/elenva-host-guard/sync-identity.mjs --print    # 只看会写成什么

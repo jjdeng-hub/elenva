@@ -29,6 +29,7 @@ import {
 } from "./subagents";
 import type { SessionEntry } from "./types";
 import { buildSubagentPromptPlan } from "./subagent-prompt";
+import { installReadOnlySubagentGuard } from "./subagent-readonly-guard";
 import { appendSubagentInputFiles, loadSubagentInputFiles } from "./subagent-input";
 import { projectTrustReloadOptions } from "./project-trust";
 import { resolveShellTools } from "./powershell-settings";
@@ -241,6 +242,9 @@ export function createSubagentController(
         tools: activeTools,
         excludeTools: [...SUBAGENT_CONTROL_TOOL_NAMES],
       });
+      // 只读工具面的子代理：把「不许改东西」从提示词自觉升级成工具面强制。
+      // 只对匿名 bash 生效，内核原有的 beforeToolCall（扩展 tool_call 派发）被包住而非覆盖。
+      installReadOnlySubagentGuard(inner.agent, activeTools);
       dependencies.registerSession(inner, {
         ...(promptPlan.exactSystemPrompt !== undefined
           ? { exactSystemPrompt: promptPlan.exactSystemPrompt }

@@ -20,6 +20,7 @@ import { computeSessionStats } from "./session-stats";
 import { aggregateUsage } from "./usage-aggregate";
 import { approachingBudgets, budgetBucket, checkBudgets, formatApproachNote, formatBudgetNote, parseBudgets } from "./budget-guard";
 import { readGuardrailSettings } from "./guardrail-settings";
+import { diagError, diagTrace } from "./diagnostics";
 import { hasActiveSessionLivenessProvider } from "./session-liveness";
 import type { AgentSession, SlashCommandInfo } from "@earendil-works/pi-coding-agent";
 import type { AgentSessionLike, ExtensionUiContextLike, ToolInfo } from "./pi-types";
@@ -188,6 +189,17 @@ export interface AgentSessionStartOptions {
   initialModel?: { provider: string; modelId: string };
   allowInitialModelFallback?: boolean;
   thinkingLevel?: ThinkingLevel;
+  /**
+   * 这次启动是否把「请求的模型 / 推理强度」写回全局启动默认（settings.json 的
+   * defaultProvider/defaultModel/defaultThinkingLevel）。
+   *
+   * 默认 **true**：新建会话里用户手选模型 = 显式选型意图，语义就是「我要用这个」，
+   * 下次开新会话延续它。
+   * 服务端**自动**起的会话必须显式传 `false`——换模型复核、节律任务里带 model
+   * 都不是用户的选型动作；顺手改全局默认会绕过「设为启动默认」按钮，属于越权
+   * （观测栏的复核选型正因此 `hideDefaultAction`）。
+   */
+  persistStartupPreferences?: boolean;
 }
 
 const CODING_TOOL_NAMES = ["read", "bash", "powershell", "edit", "write", "grep", "find", "ls"];
@@ -2110,6 +2122,50 @@ async function getBudgetSpendCached(now = Date.now()): Promise<BudgetSpend> {
 }
 
 /**
+ * 预算提示去重键：按会话 id 记住已推档位。
+ *
+ * 此前是每个 wrapper 一份（闭包持有），随会话回收重置：会话空闲回收后再被打开、
+ * 同档（如 daily:over）会重弹一次（模块 6 过审 C 未验证项，已确认成立）。会话 id
+ * 在回收重建后不变，所以改按 id 键控。有界 FIFO（上限 200 个会话），避免长期运行
+ * 下 Map 无限增长；被挤出的会话若再触发，最多重弹一次，不会造成持续刷屏。
+ */
+const BUDGET_NOTIFIED_KEYS_MAX = 200;
+const budgetNotifiedKeysBySession = new Map<string, Set<string>>();
+
+function budgetNotifiedKeysFor(sessionId: string): Set<string> {
+  const existing = budgetNotifiedKeysBySession.get(sessionId);
+  if (existing) {
+    // 触碰一下顺序（Map 保持插入序，重新 set 即移到末尾）。
+    budgetNotifiedKeysBySession.delete(sessionId);
+    budgetNotifiedKeysBySession.set(sessionId, existing);
+    return existing;
+  }
+  const created = new Set<string>();
+  budgetNotifiedKeysBySession.set(sessionId, created);
+  while (budgetNotifiedKeysBySession.size > BUDGET_NOTIFIED_KEYS_MAX) {
+    const oldest = budgetNotifiedKeysBySession.keys().next().value;
+    if (oldest === undefined) break;
+    budgetNotifiedKeysBySession.delete(oldest);
+  }
+  return created;
+}
+
+/** 自测用：拿某个会话的去重键集合（验证「按会话 id 跨回收保留」与有界性）。 */
+export function __budgetNotifiedKeysForTest(sessionId: string): Set<string> {
+  return budgetNotifiedKeysFor(sessionId);
+}
+
+/** 自测用：当前记住的会话数。 */
+export function __budgetNotifiedKeysSizeForTest(): number {
+  return budgetNotifiedKeysBySession.size;
+}
+
+/** 自测用：清空去重表（避免用例间相互影响）。 */
+export function __resetBudgetNotifiedKeysForTest(): void {
+  budgetNotifiedKeysBySession.clear();
+}
+
+/**
  * 每轮结束后的预算检查：命中就走 notice 通道推一条。永不影响执行路径
  * （调用方 `void`）—— 任何异常都只能落日志，不能阻断一轮的收尾。
  *
@@ -2119,7 +2175,9 @@ async function getBudgetSpendCached(now = Date.now()): Promise<BudgetSpend> {
  *   三档单调不减，所以「同会话同 scope 同档只推一次」等价于「每跨一档各推一次」。
  *   scope 含 weekly（模块 6 第 2 轮）：滚动 7 天花费 vs weeklyUsd，去重键自动带上
  *   weekly 维度，无需额外状态。
- * - `notifiedKeys` 由每个 wrapper 一份（调用方闭包持有），随会话回收重置。
+ * - `notifiedKeys` 按**会话 id** 记（`budgetNotifiedKeysFor`，跨 wrapper 回收重建保留）：
+ *   会话被空闲回收后重新起用是同一 session id，已推过的档位不重弹。有界 FIFO，
+ *   防止长期运行下无限增长。
  * - 同轮多个 scope 同时新跨档：合成一条（`formatBudgetNote` / `formatApproachNote`）。
  */
 async function runBudgetCheck(
@@ -2218,6 +2276,16 @@ export async function startAgentSession(
   );
   const chatOnly = selectedToolNames?.length === 0 && !subagentLoadsResources;
   const finishStartingSession = trackStartingSession(sessionCwd);
+  /** 启动耗时——「连不上」时第一个要回答的问题就是「卡在哪一步、卡了多久」 */
+  const startedAt = Date.now();
+  diagTrace("session-start", "开始启动会话", {
+    sessionId,
+    sessionFile: sessionFile || "(新会话)",
+    cwd: sessionCwd,
+    toolNames: selectedToolNames,
+    chatOnly,
+    subagentResources: Boolean(subagentResources),
+  });
   const starting = (async () => {
     // Some extensions access the SDK's global theme even outside the terminal UI.
     if (!chatOnly) initTheme();
@@ -2308,20 +2376,24 @@ export async function startAgentSession(
     });
     hostSessionIdRef.current = inner.sessionId as string;
 
-    const persistedPreferences = await persistExplicitStartupPreferences(
-      services.settingsManager,
-      {
-        ...(effectiveInitialModel ? { model: effectiveInitialModel } : {}),
-        ...(thinkingLevel ? { thinkingLevel } : {}),
-      },
-      {
-        ...(inner.model
-          ? { model: { provider: inner.model.provider, modelId: inner.model.id } }
-          : {}),
-        thinkingLevel: inner.thinkingLevel,
-        supportsThinking: inner.supportsThinking(),
-      },
-    );
+    // 自动路径（复核 / 节律）显式关闭持久化：会话照旧用 requested model 跑，但不改全局默认。
+    const persistStartupPreferences = options.persistStartupPreferences !== false;
+    const persistedPreferences = persistStartupPreferences
+      ? await persistExplicitStartupPreferences(
+          services.settingsManager,
+          {
+            ...(effectiveInitialModel ? { model: effectiveInitialModel } : {}),
+            ...(thinkingLevel ? { thinkingLevel } : {}),
+          },
+          {
+            ...(inner.model
+              ? { model: { provider: inner.model.provider, modelId: inner.model.id } }
+              : {}),
+            thinkingLevel: inner.thinkingLevel,
+            supportsThinking: inner.supportsThinking(),
+          },
+        )
+      : { modelDefaultChanged: false };
     if (persistedPreferences.modelDefaultChanged) invalidateModelsCache();
 
     // If specific tool names were requested (non-empty), set the active tools to the
@@ -2337,8 +2409,8 @@ export async function startAgentSession(
         ? () => subagentResources.appendSystemPrompt[0] ?? ""
         : () => contextFilesSystemPrompt(inner.resourceLoader.getAgentsFiles().agentsFiles)
       : undefined;
-    /** 预算提示去重键（每会话一份，随 wrapper 回收重置），见 runBudgetCheck 注释 */
-    const notifiedBudgetKeys = new Set<string>();
+    /** 预算提示去重键（按会话 id 跨回收保留），见 runBudgetCheck 注释 */
+    const notifiedBudgetKeys = budgetNotifiedKeysFor(inner.sessionId as string);
     const wrapper = new AgentSessionWrapper(inner, {
       exactSystemPrompt,
       chatOnly,
@@ -2360,10 +2432,33 @@ export async function startAgentSession(
     registerAgentWrapper(wrapper);
 
     return { session: wrapper, realSessionId };
-  })().finally(() => {
-    locks.delete(sessionId);
-    finishStartingSession();
-  });
+  })()
+    .then((result) => {
+      diagTrace("session-start", "会话启动完成", {
+        sessionId,
+        realSessionId: result.realSessionId,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return result;
+    })
+    .catch((error: unknown) => {
+      /* 启动失败此前在服务端**没有任何记录**——只把消息回给浏览器，日志里是空的，
+         排查「连不上」时无处可看。这里补上：哪一步失败、什么错、当时的参数。
+         只记日志后原样抛出，不改变调用方看到的行为。 */
+      diagError("session-start", "会话启动失败", {
+        sessionId,
+        sessionFile: sessionFile || "(新会话)",
+        cwd: sessionCwd,
+        elapsedMs: Date.now() - startedAt,
+        toolNames: selectedToolNames,
+        chatOnly,
+      }, error);
+      throw error;
+    })
+    .finally(() => {
+      locks.delete(sessionId);
+      finishStartingSession();
+    });
 
   locks.set(sessionId, starting);
   return starting;

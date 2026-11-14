@@ -163,6 +163,11 @@ writeFileSync(
   check("④ 桶按日期倒序", ledger.buckets[0].key === "2026-10-16");
   check("④ 摘要 from/to", ledger.summary.from === "2026-10-01" && ledger.summary.to === "2026-10-16", `${ledger.summary.from}~${ledger.summary.to}`);
   check("④ notes 有来源说明", Array.isArray(ledger.notes) && ledger.notes.length === 3);
+  check(
+    "④ 「去掉」口径：notes[2] 明说含改写旧版本、不等于删除数",
+    /改写/.test(ledger.notes[2]) && /不等于「删了这么多条」/.test(ledger.notes[2]),
+    ledger.notes[2].slice(0, 80),
+  );
   check("④ 记忆条目带文件标识（可点回）", ledger.buckets.flatMap((b) => b.learned).every((i) => typeof i.file === "string" && i.file.length > 0));
   check("④ 项目记忆条目标识为 project/demo-proj", ledger.buckets.flatMap((b) => b.learned).some((i) => i.file === "project/demo-proj"));
 }

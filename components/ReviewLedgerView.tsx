@@ -85,7 +85,7 @@ export function ReviewLedgerView({ onOpenMemoryEntry }: { onOpenMemoryEntry: (fi
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
           <SummaryStat icon={<GraduationCap size={12} />} label="学到" value={summary?.learned ?? 0} tone="accent" />
           <SummaryStat icon={<Upload size={12} />} label="更新" value={summary?.touched ?? 0} />
-          <SummaryStat icon={<MinusCircle size={12} />} label="去掉" value={summary?.removed ?? 0} />
+          <SummaryStat icon={<MinusCircle size={12} />} label="去掉" value={summary?.removed ?? 0} hint="含改写旧版本" />
           <SummaryStat icon={<ClipboardList size={12} />} label="工作" value={summary?.work ?? 0} />
           {data?.approximate && <span className="chip chip-warn">近似重建</span>}
         </div>
@@ -149,7 +149,7 @@ export function ReviewLedgerView({ onOpenMemoryEntry }: { onOpenMemoryEntry: (fi
                 </Section>
               )}
               {bucket.removed.length > 0 && (
-                <Section icon={<MinusCircle size={12} />} title="去掉（近似）" tone="warn">
+                <Section icon={<MinusCircle size={12} />} title="去掉（近似 · 含改写旧版本）" tone="warn">
                   {bucket.removed.map((item, i) => (
                     <div key={i} className="flex items-start gap-2 py-1">
                       <span className="chip chip-mono mt-0.5 shrink-0">{item.label}</span>
@@ -190,12 +190,13 @@ function SegButton({ active, onClick, children }: { active: boolean; onClick: ()
   );
 }
 
-function SummaryStat({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: number; tone?: "accent" }) {
+function SummaryStat({ icon, label, value, tone, hint }: { icon: React.ReactNode; label: string; value: number; tone?: "accent"; hint?: string }) {
   return (
-    <span className="flex items-center gap-1.5 text-[12px]">
+    <span className="flex items-center gap-1.5 text-[12px]" title={hint}>
       <span className={cn("text-dim", tone === "accent" && "text-accent")}>{icon}</span>
       <span className="text-dim">{label}</span>
       <b className={cn("font-medium tabular-nums text-fg", tone === "accent" && "text-accent")}>{value}</b>
+      {hint && <span className="text-[10px] text-dim/70">{hint}</span>}
     </span>
   );
 }

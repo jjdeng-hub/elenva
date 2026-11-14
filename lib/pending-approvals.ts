@@ -132,12 +132,15 @@ export function getPendingApprovalsPath(): string {
 }
 
 /**
- * 读审批队列 JSONL：文件缺失 = []；损坏行跳过。
+ * 读审批队列 JSONL：文件缺失 = []；损坏行跳过；每条补 `kind: "queued"` 作为来源标记。不抛。
  *
  * 读端做三件事（文件自身永不清理，清理代价放在读取这一侧）：
  *  ① 丢弃超过 TTL 的旧条目（at 缺失或非法时**保留** —— 宁可多显示，不吞真待办）；
  *  ② 同一会话 + 同一规则只留最新一条（重复入队不刷屏）；
  *  ③ 按时间新→旧取尾部 QUEUE_TAIL_LIMIT 条。
+ *
+ * 窗口口径：**先解析出合法条目，再做过滤 / 折叠 / 截取**（M5 过审报告 R2）。按原始行截取
+ * 会让坏行占一个名额（25 条合法 + 1 条坏行 → 只显示 19 条），而坏行对读端本就不可见。
  *
  * `now` 可注入，便于自检固定时间。任何一步失败都不抛（旁路纪律）。
  */
@@ -149,6 +152,7 @@ export function readQueuedApprovals(now: number = Date.now()): QueuedApproval[] 
     return [];
   }
   const lines = raw.split("\n").filter((line) => line.trim().length > 0);
+  // 先解析出全部合法条目：坏行在这里就被挡掉，不参与后面的尾窗名额
   const parsed: QueuedApproval[] = [];
   for (const line of lines) {
     try {
@@ -182,7 +186,7 @@ export function readQueuedApprovals(now: number = Date.now()): QueuedApproval[] 
     if (!prev || (q.at ?? "") >= (prev.at ?? "")) byKey.set(queueKey(q), q);
   }
 
-  // ③ 新 → 旧，封顶 QUEUE_TAIL_LIMIT。
+  // ③ 新 → 旧，封顶 QUEUE_TAIL_LIMIT（这一步已在合法条目集合上截取，坏行不占名额）。
   return [...byKey.values()]
     .sort((a, b) => (b.at ?? "").localeCompare(a.at ?? ""))
     .slice(0, QUEUE_TAIL_LIMIT);
