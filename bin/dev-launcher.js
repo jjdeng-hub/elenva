@@ -2,151 +2,128 @@
 "use strict";
 
 /**
- * 开发模式启动器 —— 由根目录的 dev.cmd 调用（也可 node bin/dev-launcher.js 手动跑）。
+ * 开发模式启动器 —— `npm run dev` 用。
  *
- * 流程：Node 版本检查 → 依赖检查/安装 → 启动 next dev（Turbopack，热更新）
- * → 轮询就绪 → 打开系统默认浏览器。已有开发服务时只打开浏览器，不重复启动。
+ * 为什么要有它：Hermes 侧 Agent 的对话走 ACP 宿主（bin/acp-host.cjs），
+ * 生产模式由 start-launcher 负责带起；dev 模式以前只跑 `next dev`，
+ * 于是「接入的 Hermes Agent 在开发环境里点进去必然报宿主不可用」。
+ * 这里把两件事绑在一起：起 next dev，顺带把 ACP 宿主拉起来，退出时一起收。
  *
- * 与生产模式（start-launcher.js）的区别：不做生产构建，源码改动即时生效；
- * 代价是页面首次打开需要现场编译。开发服务默认端口 30299，与生产（30200）
- * 可以同时运行。
+ * 子进程边界仍在 bin/（lib/app/components/hooks 内零 spawn 的硬约束不变）。
+ *
+ * 环境变量：
+ *   ELENVA_DEV_PORT / PORT   dev 服务端口（默认 30299，与 package.json 历史值一致）
+ *   ELENVA_ACP_PORT          ACP 宿主端口（默认 30201）
+ *   ELENVA_ACP_DISABLE=1     只起 next dev，不起 ACP 宿主
+ *   --lan                    绑 0.0.0.0（等同旧的 npm run dev:lan）
  */
 
-const { spawn, spawnSync } = require("child_process");
-const fs = require("fs");
+const { spawn } = require("child_process");
 const http = require("http");
 const path = require("path");
-const { getUnsupportedNodeVersionMessage, isNodeVersionSupported } = require("./node-version");
-
-if (!isNodeVersionSupported(process.versions.node)) {
-  process.stderr.write(`${getUnsupportedNodeVersionMessage(process.versions.node)}\n`);
-  process.exit(1);
-}
 
 const projectDir = path.resolve(__dirname, "..");
 const nextBin = path.join(projectDir, "node_modules", "next", "dist", "bin", "next");
-const port = String(process.env.PORT || 30299);
-const hostname = "127.0.0.1";
-const url = `http://${hostname}:${port}`;
+const acpHostPath = path.join(projectDir, "bin", "acp-host.cjs");
+
+const hostname = process.argv.includes("--lan") ? "0.0.0.0" : "127.0.0.1";
+const devPort = String(process.env.ELENVA_DEV_PORT || process.env.PORT || 30299);
+const acpPort = String(process.env.ELENVA_ACP_PORT || 30201);
+const acpDisabled = process.env.ELENVA_ACP_DISABLE === "1";
+
+let nextChild = null;
+let acpChild = null;
+let shuttingDown = false;
 
 function say(message) {
   process.stdout.write(`\n  ${message}\n`);
 }
 
-/** npm 在 Windows 上必须经 cmd 调用（.cmd 垫片不能直接 spawn——Node ≥ 20.12 会抛 EINVAL） */
-function runNpm(args) {
-  if (process.platform === "win32") {
-    return spawnSync(process.env.ComSpec || "cmd.exe", ["/d", "/s", "/c", `npm ${args.join(" ")}`], {
-      cwd: projectDir,
-      stdio: "inherit",
-      env: process.env,
-    });
-  }
-  return spawnSync("npm", args, { cwd: projectDir, stdio: "inherit", env: process.env });
-}
-
-function openBrowser() {
-  let opener;
-  if (process.platform === "win32") {
-    opener = spawn(process.env.ComSpec || "cmd.exe", ["/c", "start", "", url], {
-      stdio: "ignore",
-      detached: true,
-    });
-  } else if (process.platform === "darwin") {
-    opener = spawn("open", [url], { stdio: "ignore", detached: true });
-  } else {
-    opener = spawn("xdg-open", [url], { stdio: "ignore", detached: true });
-  }
-  opener.on("error", () => say(`无法自动打开浏览器，请手动访问 ${url}`));
-  opener.unref();
-}
-
-function probe(callback) {
-  const request = http.get({ host: hostname, port, path: "/", timeout: 90_000 }, (response) => {
-    response.resume();
-    callback(true);
+/** ACP 宿主是否已经在跑（生产启动器 / 手动起过时不要重复起）。 */
+function probeAcpHost(callback) {
+  const req = http.get({ host: hostname, port: acpPort, path: "/health", timeout: 800 }, (res) => {
+    res.resume();
+    callback(res.statusCode === 200);
   });
-  request.on("error", () => callback(false));
-  request.on("timeout", () => {
-    request.destroy();
+  req.on("error", () => callback(false));
+  req.on("timeout", () => {
+    req.destroy();
     callback(false);
   });
 }
 
-function waitUntilReady(deadline, callback) {
-  if (Date.now() > deadline) return callback(false);
-  probe((ready) => (ready ? callback(true) : setTimeout(() => waitUntilReady(deadline, callback), 300)));
-}
-
-function hasDependencies() {
-  return fs.existsSync(nextBin);
-}
-
-function installDependencies() {
-  say("未找到完整依赖，正在安装 npm 依赖…");
-  const result = runNpm(["install"]);
-  if (result.error) {
-    say(`无法执行 npm install：${result.error.message}`);
-    return false;
+function startAcpHost() {
+  if (acpDisabled) {
+    say("ELENVA_ACP_DISABLE=1：跳过 ACP 宿主（Hermes Agent 对话会报宿主不可用）");
+    return;
   }
-  if (result.status !== 0) {
-    say(`npm install 失败（退出码 ${result.status ?? "未知"}）。`);
-    return false;
-  }
-  return true;
-}
-
-function startDevelopment() {
-  say(`正在启动开发服务（端口 ${port}，热更新）…`);
-  const child = spawn(process.execPath, [nextBin, "dev", "-H", hostname, "-p", port], {
-    cwd: projectDir,
-    stdio: ["ignore", "inherit", "inherit"],
-    env: process.env,
-  });
-
-  child.on("error", (error) => {
-    say(`无法启动开发服务：${error.message}`);
-    process.exitCode = 1;
-  });
-
-  waitUntilReady(Date.now() + 180_000, (ready) => {
-    if (!ready) {
-      say("开发服务在 3 分钟内未就绪，请查看上方日志。");
+  probeAcpHost((alreadyRunning) => {
+    if (alreadyRunning) {
+      say(`ACP 宿主已在 ${acpPort} 端口运行，复用现有实例`);
       return;
     }
-    say(`已就绪 → ${url}`);
-    say("改动即时生效；页面首次打开需要现场编译，稍等几秒。");
-    openBrowser();
+    say(`启动 ACP 宿主（端口 ${acpPort}）…`);
+    acpChild = spawn(process.execPath, [acpHostPath], {
+      cwd: projectDir,
+      stdio: ["ignore", "inherit", "inherit"],
+      env: { ...process.env, ELENVA_ACP_PORT: acpPort },
+    });
+    acpChild.on("error", (error) => {
+      say(`ACP 宿主启动失败：${error.message}（其余功能不受影响）`);
+      acpChild = null;
+    });
+    acpChild.on("exit", (code) => {
+      if (!shuttingDown) say(`ACP 宿主已退出（${code ?? "signal"}），Hermes Agent 对话暂不可用`);
+      acpChild = null;
+    });
   });
-
-  for (const signal of ["SIGINT", "SIGTERM"]) {
-    process.on(signal, () => child.kill(signal));
-  }
-  child.on("exit", (code) => process.exit(code ?? 0));
 }
 
-// 自检模式：只验证 npm 调用链路（Windows CI 用——防 .cmd 直 spawn 回归）
-if (process.argv.includes("--selftest-npm")) {
-  const result = runNpm(["--version"]);
-  if (result.error || result.status !== 0) {
-    say(`npm 自检失败：${result.error ? result.error.message : `退出码 ${result.status}`}`);
-    process.exit(1);
-  }
-  say("npm 自检通过");
-  process.exit(0);
+function startNextDev() {
+  say(`启动 next dev（端口 ${devPort}）…`);
+  nextChild = spawn(process.execPath, [nextBin, "dev", "-H", hostname, "-p", devPort], {
+    cwd: projectDir,
+    stdio: "inherit",
+    env: process.env,
+  });
+  nextChild.on("error", (error) => {
+    say(`无法启动 next dev：${error.message}`);
+    shutdown(1);
+  });
+  nextChild.on("exit", (code) => shutdown(code ?? 0));
 }
 
-probe((alreadyRunning) => {
-  if (alreadyRunning) {
-    say(`开发模式已在运行 → ${url}`);
-    say("这个窗口只用来打开浏览器；关闭它不会停止开发服务。");
-    openBrowser();
-    return;
+function kill(child, signal) {
+  if (!child || child.exitCode !== null) return;
+  try {
+    child.kill(signal);
+  } catch {
+    /* 已经退出 */
   }
+}
 
-  if (!hasDependencies() && !installDependencies()) {
-    process.exitCode = 1;
-    return;
-  }
-  startDevelopment();
-});
+function shutdown(code) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  kill(acpChild, "SIGTERM");
+  kill(nextChild, "SIGTERM");
+  // 给子进程一点时间收尾；Windows 上 SIGTERM 不能保证被处理，兜底强杀
+  const timer = setTimeout(() => {
+    kill(acpChild, "SIGKILL");
+    kill(nextChild, "SIGKILL");
+    process.exit(code);
+  }, 3000);
+  timer.unref();
+  if (!nextChild || nextChild.exitCode !== null) process.exit(code);
+  nextChild.once("exit", () => {
+    clearTimeout(timer);
+    kill(acpChild, "SIGKILL");
+    process.exit(code);
+  });
+}
+
+process.on("SIGINT", () => shutdown(0));
+process.on("SIGTERM", () => shutdown(0));
+
+startAcpHost();
+startNextDev();
