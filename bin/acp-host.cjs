@@ -110,6 +110,8 @@ class AgentProc {
     this.subscribers = new Set(); // res
     this.lastActivity = Date.now();
     this.state = "starting"; // starting | ready | dead
+    /** 正在跑的那一次 start()：并发进来的请求要等它，而不是拿着 sessionId=null 往下走 */
+    this.startPromise = null;
     this.error = null;
     this.usage = null;
     /** 本轮 agent 的可见文本，收尾时落进历史 */
@@ -360,7 +362,16 @@ class AgentProc {
    */
   enqueuePrompt(text) {
     this.queued += 1;
-    const run = this.queue.then(() => {
+    const run = this.queue.then(async () => {
+      // 刚点开会话就发消息：进程还在启动，sessionId 还是 null。
+      // 在这条队列里等它，不阻塞 /prompt 的 202，也不会撞上「会话尚未建立」。
+      if (this.startPromise) {
+        try {
+          await this.startPromise;
+        } catch {
+          /* 启动失败：prompt() 会抛错，由调用方的 error 事件表达 */
+        }
+      }
       this.queued = Math.max(0, this.queued - 1);
       return this.prompt(text);
     });
@@ -387,11 +398,22 @@ class AgentProc {
   }
 }
 
-async function ensureAgent(agentId, profile, cwd, resumeSessionId = null) {
+async function ensureAgent(agentId, profile, cwd, resumeSessionId = null, wait = true) {
   if (!PROFILE_RE.test(profile)) throw new Error(`profile 名不合法：${profile}`);
   const existing = agents.get(agentId);
   // 同一个会话才复用；换会话必须重启进程（ACP 一个进程只挂一个 session）
-  if (existing && existing.state !== "dead" && (!resumeSessionId || existing.sessionId === resumeSessionId)) return existing;
+  if (existing && existing.state !== "dead" && (!resumeSessionId || existing.sessionId === resumeSessionId)) {
+    // 刚点开会话就发消息：这时进程还在 starting、sessionId 还是 null。
+    // 不等它就会撞上「会话尚未建立」（用户看到的是「连不上」）。
+    if (wait && existing.startPromise && !existing.sessionId) {
+      try {
+        await existing.startPromise;
+      } catch {
+        /* 启动失败由 error 事件与 state=dead 表达，这里不重复抛 */
+      }
+    }
+    return existing;
+  }
   if (existing) existing.stop();
   if (agents.size >= MAX_AGENTS) {
     // 先回收最久没动静的
@@ -401,15 +423,19 @@ async function ensureAgent(agentId, profile, cwd, resumeSessionId = null) {
   }
   const agent = new AgentProc(agentId, profile, cwd || process.cwd());
   agents.set(agentId, agent);
-  try {
-    await agent.start(resumeSessionId);
-  } catch (error) {
-    // 预检拒绝/初始化失败：进程没起来也把状态落成 dead + error ——
-    // health 不再卡在 starting，SSE 晚订阅者也能补到这条错误
+  agent.startPromise = agent.start(resumeSessionId).catch((error) => {
+    // 预检拒绝/初始化失败：状态落成 dead + error —— health 不卡在 starting，
+    // SSE 晚订阅者也能补到这条错误
     agent.state = "dead";
-    agent.error = agent.error || String(error.message || error);
+    agent.error = agent.error || String((error && error.message) || error);
     throw error;
+  });
+  if (!wait) {
+    // /prompt 不等启动：先把 202 还给前端，由 enqueuePrompt 在队列里等就绪
+    agent.startPromise.catch(() => {});
+    return agent;
   }
+  await agent.startPromise;
   return agent;
 }
 
@@ -538,7 +564,7 @@ const server = http.createServer(async (req, res) => {
   if (req.method === "POST" && url.pathname === "/prompt") {
     try {
       const body = await readBody(req);
-      const agent = await ensureAgent(body.agentId, body.profile, body.cwd);
+      const agent = await ensureAgent(body.agentId, body.profile, body.cwd, null, false);
       const text = String(body.text || "").trim();
       if (!text) return json(res, 400, { error: "text required" });
       // 排队而不是并发：同一 Agent 两条 prompt 并发会共用 turnText，前一轮的正文会丢
