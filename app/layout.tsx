@@ -36,9 +36,10 @@ export default function RootLayout({
         <ThemeInitScript />
       </head>
       <body suppressHydrationWarning>
+        {/* 放在 children 之前：即便退回 useEffect 安装，也会先于 AppShell 的首屏请求 */}
+        <ApiFeedbackGuard />
         {children}
         <PwaRegistration />
-        <ApiFeedbackGuard />
         <DialogHost />
         <ToastHost />
       </body>

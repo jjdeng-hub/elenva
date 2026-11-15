@@ -885,16 +885,32 @@ export function HomeDashboard({
                         {timeLabel(s.modified)}
                       </td>
                       <td className="border-b border-line-soft px-3 py-2.5">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOpenSession(s);
-                          }}
-                          className="flex size-6.5 items-center justify-center rounded-md text-dim t-fast hover:bg-active hover:text-accent cursor-pointer"
-                          title="打开会话"
-                        >
-                          <Play size={12} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onOpenSession(s);
+                            }}
+                            className="flex size-6.5 items-center justify-center rounded-md text-dim t-fast hover:bg-active hover:text-accent cursor-pointer"
+                            title="打开会话"
+                          >
+                            <Play size={12} />
+                          </button>
+                          {/* 「查看全部」页签里的审批队列行也能忽略，与首页待办 band 同一入口语义 */}
+                          {wait?.ignore && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                ignoreWaitItem(wait);
+                              }}
+                              className="shrink-0 rounded-md px-1.5 py-1 text-[11px] text-dim t-fast hover:bg-active hover:text-fg cursor-pointer"
+                              title="忽略这条审批待办（可撤销）"
+                              aria-label="忽略这条审批待办"
+                            >
+                              忽略
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );

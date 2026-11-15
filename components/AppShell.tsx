@@ -615,6 +615,12 @@ export function AppShell() {
   handleNewChatRef.current = handleNewChat;
   /** 「新建项目」/ 选择器里的「打开本地文件夹」：显式选择目录 */
   const openDirPicker = useCallback(() => setDirPickerOpen(true), []);
+  /* 全局 403 提示里的「更换目录」会派发这个事件，接到同一个选择器上（M12 的可执行动作）。 */
+  useEffect(() => {
+    const onOpenDirPicker = () => setDirPickerOpen(true);
+    window.addEventListener("elenva:open-dir-picker", onOpenDirPicker);
+    return () => window.removeEventListener("elenva:open-dir-picker", onOpenDirPicker);
+  }, []);
 
   const startChatWithCwd = (cwd: string) => {
     setSelected(null);
@@ -916,6 +922,19 @@ export function AppShell() {
   /** 切换 Agent = 换一套 workspace：视图回到首页、清掉当前会话，hash 由同步 effect 写回 */
   const selectAgent = (id: string) => {
     if (id === activeAgent) return;
+    // 草稿按会话 id 存在 localStorage（ChatView draftKey = session?.id ?? "new"）：
+    // 切换并不会丢，但要让用户知道它还在，而不是以为内容没了。
+    try {
+      const raw = localStorage.getItem(`elenva-draft:${selected?.id ?? "new"}`);
+      if (raw) {
+        const draft = JSON.parse(raw) as { value?: string; images?: unknown[] };
+        if ((draft.value ?? "").trim() || (draft.images?.length ?? 0) > 0) {
+          toast("当前会话的未发送草稿已保留，切回该会话可继续编辑");
+        }
+      }
+    } catch {
+      /* 草稿损坏不阻断切换 */
+    }
     resetAgentScopedState();
     setActiveAgent(id);
     setView("home");
