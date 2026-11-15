@@ -23,7 +23,7 @@ import { AccountProfilesSection } from "@/components/AccountProfilesSection";
 import { ProfilesSection } from "@/components/ProfilesSection";
 import { cn } from "@/components/lib/utils";
 import { useSound } from "@/hooks/useSound";
-import type { SoundLevel, SoundPack } from "@/lib/sound";
+import { MAX_VOLUME, type SoundPack } from "@/lib/sound";
 import { toast } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/bits";
 import { getToolNamesForPreset, TOOL_PRESET_VALUES, type ToolPreset } from "@/lib/tool-presets";
@@ -598,13 +598,13 @@ const THEME_CHOICES: { id: ThemePreference; label: string; hint: string; icon: R
 
 /**
  * UI 音效设置（规格 docs/specs/2026-11-12-ui-sound.md）。
- * 开关 + 三档音量（静音/轻/标准）+ 音色（minimal/studio/scifi/soft）+ 试听 + 长任务 loop 开关。
+ * 开关 + 音量滑杆（0~300%）+ 音色（minimal/studio/scifi/soft）+ 试听 + 长任务 loop 开关。
  * 偏好持久化在 lib/sound.ts 单例（localStorage `elenva:sound`）。
  */
-const SOUND_LEVEL_CHOICES: { id: SoundLevel; label: string; hint: string }[] = [
-  { id: "muted", label: "静音", hint: "完全不出声" },
-  { id: "light", label: "轻", hint: "0.35，只有长任务提醒" },
-  { id: "standard", label: "标准", hint: "0.6，全部事件" },
+const SOUND_VOLUME_PRESETS: { value: number; label: string }[] = [
+  { value: 0.8, label: "轻 80%" },
+  { value: 1.5, label: "标准 150%" },
+  { value: 2.5, label: "响 250%" },
 ];
 const SOUND_PACK_CHOICES: { id: SoundPack; label: string }[] = [
   { id: "minimal", label: "Minimal" },
@@ -614,7 +614,8 @@ const SOUND_PACK_CHOICES: { id: SoundPack; label: string }[] = [
 ];
 
 function SoundSection() {
-  const { prefs, setEnabled, setLevel, setPack, setLoop, play, unlocked } = useSound();
+  const { prefs, setEnabled, setVolume, setPack, setLoop, play, unlocked } = useSound();
+  const percent = Math.round(prefs.volume * 100);
 
   return (
     <Card data-testid="sound-settings">
@@ -622,7 +623,7 @@ function SoundSection() {
         <Volume2Icon size={14} className="text-accent" />
         <CardTitle>声音</CardTitle>
         <span className="ml-auto text-[11px] text-dim">
-          {prefs.enabled && prefs.level !== "muted" ? (unlocked ? "已解锁（可出声）" : "等待首次点击解锁") : "已静音"}
+          {prefs.enabled && prefs.volume > 0 ? (unlocked ? "已解锁（可出声）" : "等待首次点击解锁") : "已静音"}
         </span>
       </CardHeader>
       <div className="px-4 py-4">
@@ -639,30 +640,49 @@ function SoundSection() {
           {prefs.enabled ? "声音已开" : "声音已关"}
         </button>
 
-        {/* 三档音量 */}
-        <div className="mt-3 text-[11px] text-dim">音量</div>
-        <div className="mt-1.5 flex flex-wrap gap-2" role="group" aria-label="音量档位">
-          {SOUND_LEVEL_CHOICES.map((c) => {
-            const on = prefs.level === c.id;
+        {/* 音量滑杆 0~300%：uisfx 自己的主音量只能 0..1，>100% 走 lib/sound.ts 里的放大级 */}
+        <div className="mt-3 flex items-baseline justify-between text-[11px] text-dim">
+          <span>音量</span>
+          <span className="tabular-nums text-fg">{percent}%</span>
+        </div>
+        <input
+          type="range"
+          min={0}
+          max={Math.round(MAX_VOLUME * 100)}
+          step={5}
+          value={percent}
+          onChange={(e) => {
+            const value = Number(e.target.value) / 100;
+            setVolume(value);
+            if (value === 0) setEnabled(false);
+          }}
+          onPointerUp={() => play("notification")}
+          onKeyUp={() => play("notification")}
+          aria-label="音效音量"
+          data-testid="sound-volume"
+          className="range mt-1.5"
+        />
+        <div className="mt-1.5 flex flex-wrap items-center gap-2">
+          {SOUND_VOLUME_PRESETS.map((p) => {
+            const on = Math.abs(prefs.volume - p.value) < 0.001;
             return (
               <button
-                key={c.id}
+                key={p.value}
                 onClick={() => {
-                  setLevel(c.id);
-                  if (c.id === "muted") setEnabled(false);
-                  else if (!prefs.enabled) setEnabled(true);
+                  setVolume(p.value);
+                  play("notification");
                 }}
                 aria-pressed={on}
                 className={cn(
-                  "t-fast cursor-pointer rounded-md border px-3 py-1.5 text-[12px]",
+                  "t-fast cursor-pointer rounded-md border px-2 py-1 text-[11px]",
                   on ? "border-accent bg-active text-accent" : "border-line bg-panel-2 text-muted hover:border-accent/40 hover:text-fg",
                 )}
               >
-                {c.label}
-                <span className="ml-1.5 text-[11px] text-dim">{c.hint}</span>
+                {p.label}
               </button>
             );
           })}
+          <span className="text-[11px] text-dim">太小就拉到 250% 以上（最高 300%，自带限幅）</span>
         </div>
 
         {/* 音色 */}
@@ -706,13 +726,13 @@ function SoundSection() {
             "t-fast mt-4 flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1.5 text-[12px]",
             prefs.loop ? "border-accent/50 bg-accent-soft text-accent" : "border-line bg-panel-2 text-muted hover:text-fg",
           )}
-          title="任务超过 15 秒后响起循环提示音（音量 0.35），结束时自动停止"
+          title="任务超过 15 秒后响起循环提示音（音量 0.8），结束时自动停止"
         >
           {prefs.loop ? "长任务提示音：开" : "长任务提示音：关"}
         </button>
 
         <div className="mt-2.5 text-[11px] text-dim">
-          只在状态真正变化时响：一轮完成 / 失败 / 待审批 / 连接断开。标签页切走时音量升到 1.0，盯着屏幕时降到 0.55。
+          只在状态真正变化时响：一轮完成 / 失败 / 待审批 / 连接断开。滑杆是倍率：实际增益 = 倍率 × 0.55（盯着屏幕）或 × 1.0（标签页切走），超过 0 dBFS 的峰值由限幅器压住。
         </div>
       </div>
     </Card>

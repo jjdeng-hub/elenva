@@ -318,6 +318,48 @@
     color: var(--fg);
   }
 
+  /* 滑杆（设置页 · 音效音量）：原生 input[type=range]，只换轨道与拇指配色。
+     不引第三方控件 —— 原生键盘可达 / 触屏可用，样式改动最小。 */
+  .range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 100%;
+    height: 16px;
+    background: transparent;
+    cursor: pointer;
+  }
+  .range::-webkit-slider-runnable-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line);
+  }
+  .range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    margin-top: -4px;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .range::-moz-range-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--line);
+  }
+  .range::-moz-range-thumb {
+    width: 12px;
+    height: 12px;
+    border: none;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+  .range:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
   /* Chip：全站唯一的标签形态（6px 圆角 / 11px 字 / 1px 描边） */
   .chip {
     display: inline-flex;

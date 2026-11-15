@@ -101,7 +101,7 @@ export function useSoundEvents(options: UseSoundEventsOptions): {
         loopTimerRef.current = setTimeout(() => {
           loopTimerRef.current = null;
           if (!loopRef.current) {
-            loopRef.current = playCue("processing", { volume: 0.35, loop: true, retrigger: "ignore" });
+            loopRef.current = playCue("processing", { volume: 0.8, loop: true, retrigger: "ignore" });
           }
         }, LOOP_DELAY_MS);
       }
