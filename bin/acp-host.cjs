@@ -305,20 +305,28 @@ class AgentProc {
     this.turnText = "";
     this.turnEvents = [];
     this.turnDone = false;
+    this.turnStartedAt = Date.now();
     this.lastPrompt = text;
-    const result = await this.request("session/prompt", {
-      sessionId: this.sessionId,
-      prompt: [{ type: "text", text }],
-    });
-    // 会话记录由 Hermes 自己写 state.db，宿主不再复制一份
-    // session/prompt 的响应带着 stopReason，是这一轮的真正收尾：
-    // 从线程池/等待队列里回来时也要让前端把「运行中」放掉。
-    this.emit({
-      type: "turn_end",
-      stopReason: result?.stopReason ?? "end_turn",
-      usage: result?.usage ?? null,
-    });
-    return result;
+    try {
+      const result = await this.request("session/prompt", {
+        sessionId: this.sessionId,
+        prompt: [{ type: "text", text }],
+      });
+      // 会话记录由 Hermes 自己写 state.db，宿主不再复制一份
+      // session/prompt 的响应带着 stopReason，是这一轮的真正收尾：
+      // 从线程池/等待队列里回来时也要让前端把「运行中」放掉。
+      this.emit({
+        type: "turn_end",
+        stopReason: result?.stopReason ?? "end_turn",
+        usage: result?.usage ?? null,
+      });
+      return result;
+    } finally {
+      // 无论正常结束、报错、还是进程被重启（pending 被 reject），这一轮都要关掉：
+      // 否则 turnDone 永远为 false，之后每次重连都会把旧一轮完整重放一遍 ——
+      // 界面表现为同一段思考/回答重复出现两遍。
+      this.turnDone = true;
+    }
   }
 
   /** 发通知（无 id）—— ACP 里 cancel 是 notification，带 id 会 -32601 Method not found */
@@ -475,9 +483,12 @@ const server = http.createServer(async (req, res) => {
     const set = subscribers.get(agentId) ?? new Set();
     subscribers.set(agentId, set);
     set.add(res);
-    // 补放本轮（还没收尾的）事件：刷新页面回来时，过程与审批卡都还在
+    // 补放本轮（还没收尾的）事件：刷新页面回来时，过程与审批卡都还在。
+    // 只补真的还在跑的那一轮：超过 10 分钟没动静的旧轮当作已收尾，
+    // 否则每次重连都会把旧一轮完整重放一遍 —— 界面就会重复出现同一段思考/回答。
     const current = agents.get(agentId);
-    if (current && !current.turnDone && Array.isArray(current.turnEvents) && current.turnEvents.length > 0) {
+    const turnFresh = current?.turnStartedAt ? Date.now() - current.turnStartedAt < 10 * 60 * 1000 : false;
+    if (current && !current.turnDone && turnFresh && Array.isArray(current.turnEvents) && current.turnEvents.length > 0) {
       // 先把他刚才说的那句话补上，再补过程（流式事件里没有用户回显）
       if (current.lastPrompt) res.write(`data: ${JSON.stringify({ type: "user_message", text: current.lastPrompt })}\n\n`);
       for (const event of current.turnEvents) {

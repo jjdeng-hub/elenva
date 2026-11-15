@@ -170,6 +170,8 @@ export function sealTurn(state: AcpChatState): AcpChatState {
 export type HermesDbRecord = {
   role: string;
   text?: string;
+  /** state.db 里的思考内容（刷新后靠它还原「思考过程」） */
+  reasoning?: string;
   at?: string;
   toolCalls?: { id: string; toolName: string; input?: string; output?: string; isError?: boolean }[];
 };
@@ -194,7 +196,9 @@ export function hermesDbToMessages(
     }
     if (record.role !== "assistant" || (!record.text && !(record.toolCalls && record.toolCalls.length > 0))) continue;
 
-    const content: (ToolCallContent | { type: "text"; text: string })[] = [];
+    const content: (ToolCallContent | { type: "text"; text: string } | ThinkingContent)[] = [];
+    // 思考在正文之前（与流式时的顺序一致）：一行历史 = 一段思考 + 正文 + 工具卡
+    if (record.reasoning) content.push({ type: "thinking", thinking: record.reasoning });
     if (record.text) content.push({ type: "text", text: record.text });
     const calls: ToolCallContent[] = [];
     for (const call of record.toolCalls ?? []) {

@@ -65,6 +65,8 @@ export interface HermesToolCall {
 export interface HermesMessage {
   role: string;
   text: string;
+  /** assistant 行存的思考内容（reasoning_content 优先，回退 reasoning） */
+  reasoning?: string;
   toolName?: string;
   /** assistant 行拼出的工具调用序列（与 role='tool' 结果按 tool_call_id 配对） */
   toolCalls?: HermesToolCall[];
@@ -270,7 +272,7 @@ export async function readHermesMessages(profile: string, sessionId: string, lim
     db = new DatabaseSync(dbPath, { readOnly: true });
     const rows = db
       .prepare(
-        `select role, content, tool_call_id, tool_calls, tool_name, timestamp
+        `select role, content, reasoning, reasoning_content, tool_call_id, tool_calls, tool_name, timestamp
            from messages
           where session_id = ?
           order by id
@@ -283,6 +285,8 @@ export async function readHermesMessages(profile: string, sessionId: string, lim
       const role = String(row.role ?? "");
       const at = isoFromUnix(row.timestamp);
       if (role === "assistant") {
+        // 同一段思考有两列：reasoning_content（DeepSeek/Moonshot 等）与 reasoning（codex 投影）
+        const reasoningText = String(row.reasoning_content ?? row.reasoning ?? "").slice(0, 4000).trim();
         // tool_calls 是 JSON 数组：[{ id, function: { name, arguments } }]
         const toolCalls: HermesToolCall[] = [];
         const rawCalls = typeof row.tool_calls === "string" ? row.tool_calls : "";
@@ -310,6 +314,8 @@ export async function readHermesMessages(profile: string, sessionId: string, lim
         messages.push({
           role,
           text: String(row.content ?? "").slice(0, 4000),
+          // 思考随历史一起返回：刷新后从 state.db 重建，不再只靠宿主重放（那条路会导致一轮过程出现两遍）
+          ...(reasoningText ? { reasoning: reasoningText } : {}),
           ...(toolCalls.length > 0 ? { toolCalls } : {}),
           at,
         });
