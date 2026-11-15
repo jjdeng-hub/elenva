@@ -1,9 +1,9 @@
 "use client";
 
-import { AlertTriangle, Check, ChevronLeft, ExternalLink, KeyRound, Loader2, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ExternalLink, KeyRound, Loader2, Search, ShieldCheck, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
-import { toast } from "@/components/ui/dialog";
+import { toast, useDialogBehavior } from "@/components/ui/dialog";
 
 /**
  * 「接入模型」向导 —— 对应 pi CLI 的 `/login`，一个流程走完：
@@ -135,6 +135,13 @@ export function ModelSetupDialog({
 
   /* 卸载时关闭 SSE，避免 EventSource 自动重连重新发起登录 */
   useEffect(() => () => closeEs(), [closeEs]);
+
+  /* M11：Esc 关闭 / Tab 焦点陷阱 / 关闭时归还焦点（面板容器见下方 ref） */
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useDialogBehavior(open, () => {
+    closeEs();
+    onClose();
+  }, panelRef);
 
   const sorted = useMemo(() => {
     const rank = (p: ProviderAuthStatus) => (p.auth ? 0 : p.envSet ? 1 : 2);
@@ -295,13 +302,25 @@ export function ModelSetupDialog({
         const res = await fetch("/api/pi-settings", {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ settings: { defaultProvider: provider, defaultModel: modelId } }),
+          // PUT 收顶层字段（与 ModelsPage 写启动默认一致）；GET 才返回 { settings: {...} }。
+          // 之前误套了 GET 的结构，服务端 validateManagedPatch 读不到字段 → 空 patch →
+          // 返回 200 却什么都没写，界面还提示「已设置」。
+          body: JSON.stringify({ defaultProvider: provider, defaultModel: modelId }),
         });
         if (!res.ok) {
           const d = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(d.error || `保存默认模型失败（HTTP ${res.status}）`);
         }
-        toast("默认模型已设置");
+        // 空 patch 也会返回 200，只靠 res.ok 会再次「假成功」：回读确认值确实落盘。
+        const check = await fetch("/api/pi-settings", { cache: "no-store" });
+        if (!check.ok) throw new Error("默认模型已提交，但回读失败；请点「完成」重试，或到「模型」页确认");
+        const saved = (await check.json().catch(() => ({}))) as {
+          settings?: { defaultProvider?: string; defaultModel?: string };
+        };
+        if (saved.settings?.defaultProvider !== provider || saved.settings?.defaultModel !== modelId) {
+          throw new Error("默认模型没有写入成功，请重试保存（当前选择已保留）");
+        }
+        toast(`默认模型已设置为 ${provider}/${modelId}`);
       }
       onDone?.();
       onClose();
@@ -326,6 +345,7 @@ export function ModelSetupDialog({
       }}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="接入模型"
@@ -365,6 +385,18 @@ export function ModelSetupDialog({
               </span>
             ))}
           </div>
+          {/* M11：步骤 1/2 原本只能点遮罩关闭，补一处常驻「取消」（Esc 亦可关闭） */}
+          <button
+            onClick={() => {
+              closeEs();
+              onClose();
+            }}
+            aria-label="关闭接入模型向导"
+            title="关闭（Esc）"
+            className="ml-1.5 flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-dim t-fast hover:bg-hover hover:text-fg"
+          >
+            <X size={14} />
+          </button>
         </div>
 
         {/* 步骤 1：选厂商 */}

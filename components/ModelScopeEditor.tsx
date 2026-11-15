@@ -105,6 +105,9 @@ export function ModelScopeEditor({ refreshKey = 0, onlyFailing = false, onSummar
   const [checkedAt, setCheckedAt] = useState<number | undefined>();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  /** 白名单（enabledModels）读取失败：静默当成空数组会让一次「保存」把服务端真实白名单写成 null */
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [settingsRetrying, setSettingsRetrying] = useState(false);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [query, setQuery] = useState("");
@@ -160,19 +163,40 @@ export function ModelScopeEditor({ refreshKey = 0, onlyFailing = false, onSummar
     }
   }, []);
 
+  /** 只读取、不改状态：失败交给调用方显式呈现，绝不退化成「空白名单」。 */
+  const loadSettings = useCallback(async (): Promise<string[]> => {
+    const res = await fetch("/api/pi-settings", { cache: "no-store" });
+    if (!res.ok) throw new Error(`读取模型白名单失败（HTTP ${res.status}）`);
+    const d = (await res.json()) as { settings?: { enabledModels?: string[] } };
+    const list = d?.settings?.enabledModels;
+    return Array.isArray(list) ? list : [];
+  }, []);
+
+  const retrySettings = async () => {
+    setSettingsRetrying(true);
+    try {
+      const next = await loadSettings();
+      setPatterns(next);
+      setSettingsError(null);
+      toast("模型白名单已重新读取");
+    } catch (e) {
+      setSettingsError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSettingsRetrying(false);
+    }
+  };
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [d] = await Promise.all([
-          fetch("/api/pi-settings", { cache: "no-store" }).then((r) => r.json()),
-          loadModels(),
-        ]);
+        const [nextPatterns] = await Promise.all([loadSettings(), loadModels()]);
         if (cancelled) return;
-        const list = (d as { settings?: { enabledModels?: string[] } })?.settings?.enabledModels;
-        setPatterns(Array.isArray(list) ? list : []);
-      } catch {
-        /* 保持空列表 */
+        setPatterns(nextPatterns);
+        setSettingsError(null);
+      } catch (e) {
+        if (cancelled) return;
+        setSettingsError(e instanceof Error ? e.message : String(e));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -180,7 +204,7 @@ export function ModelScopeEditor({ refreshKey = 0, onlyFailing = false, onSummar
     return () => {
       cancelled = true;
     };
-  }, [loadModels, refreshKey]);
+  }, [loadSettings, loadModels, refreshKey]);
 
   const globPatterns = useMemo(() => patterns.filter(isGlobPattern), [patterns]);
 
@@ -230,14 +254,14 @@ export function ModelScopeEditor({ refreshKey = 0, onlyFailing = false, onSummar
   useEffect(() => {
     onSummary?.({
       loading,
-      error: loadError,
+      error: loadError ?? settingsError,
       total: models.length,
       selected: selectedRefs.size,
       scoped,
       failing: failingRefs.size,
       defaultRef: shownDefaultRef,
     });
-  }, [onSummary, loading, loadError, models, selectedRefs, scoped, failingRefs, shownDefaultRef]);
+  }, [onSummary, loading, loadError, settingsError, models, selectedRefs, scoped, failingRefs, shownDefaultRef]);
 
   const groups = useMemo(() => {
     const map = new Map<string, ModelEntry[]>();
@@ -272,6 +296,11 @@ export function ModelScopeEditor({ refreshKey = 0, onlyFailing = false, onSummar
   };
 
   const save = async () => {
+    // 白名单没读成功时，patterns 不是服务端真实值；此时保存 null 会清掉已有白名单。
+    if (settingsError) {
+      toast("模型白名单读取失败，请先重新读取再保存，避免覆盖已有配置");
+      return;
+    }
     setSaving(true);
     try {
       const enabledModels = patterns.length === 0 ? null : patterns;
@@ -331,7 +360,8 @@ export function ModelScopeEditor({ refreshKey = 0, onlyFailing = false, onSummar
           </button>
           <button
             onClick={() => void save()}
-            disabled={loading || saving}
+            disabled={loading || saving || !!settingsError}
+            title={settingsError ? "模型白名单读取失败，请先重新读取再保存" : "保存勾选结果到启动设置"}
             data-testid="model-scope-save"
             className="btn btn-primary"
           >
@@ -343,6 +373,20 @@ export function ModelScopeEditor({ refreshKey = 0, onlyFailing = false, onSummar
       <div className="px-4 pt-3 text-[11px] leading-relaxed text-dim">
         勾选的模型会出现在对话的模型选择器里；未勾选的保留在库中，不用管。
       </div>
+
+      {settingsError && (
+        <div className="mx-4 mt-2 flex flex-wrap items-center gap-2 rounded-md bg-danger/10 px-2.5 py-2 text-[12px] leading-relaxed text-danger">
+          <span>模型白名单读取失败：{settingsError}。为避免覆盖已有配置，已暂停保存；「重新读取」会恢复服务端的勾选。</span>
+          <button
+            onClick={() => void retrySettings()}
+            disabled={settingsRetrying}
+            className="btn btn-sm btn-ghost shrink-0"
+          >
+            {settingsRetrying ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+            重新读取
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 px-4 pt-2">
         <div className="relative min-w-48 flex-1">
