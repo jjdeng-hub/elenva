@@ -226,6 +226,10 @@ export function HomeDashboard({
   // 「等你处理」两源（被中断 / 工具报错 / 等待审批 / 审批队列）+ 「最近完成」+ 「逾期」：
   // 同一个 /api/attention 轮询（5s 节奏，与运行卡一致；不新增第二处轮询）。
   const [attention, setAttention] = useState<AttentionItem[]>([]);
+  /** 轮询三态：首屏未加载（计数显示 —）/ 更新失败（显示 ! + 重试）/ 成功 */
+  const [attentionLoaded, setAttentionLoaded] = useState(false);
+  const [attentionError, setAttentionError] = useState<string | null>(null);
+  const [attentionRetry, setAttentionRetry] = useState(0);
   const [pendingApprovals, setPendingApprovals] = useState<{ live: PendingApproval[]; queued: QueuedApproval[] }>({
     live: [],
     queued: [],
@@ -236,15 +240,25 @@ export function HomeDashboard({
     let cancelled = false;
     const load = () => {
       fetch("/api/attention", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data: { items?: AttentionItem[]; pendingApprovals?: PendingApprovalsPayload; recentlyCompleted?: RecentCompletion[]; overdueTodos?: OverdueTodoSummary[] } | null) => {
-          if (cancelled || !data) return;
-          setAttention(data.items ?? []);
-          setPendingApprovals({ live: data.pendingApprovals?.live ?? [], queued: data.pendingApprovals?.queued ?? [] });
-          setCompletions(data.recentlyCompleted ?? []);
-          setOverdueTodos(data.overdueTodos ?? []);
+        .then((r) => {
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.json();
         })
-        .catch(() => {});
+        .then((data: { items?: AttentionItem[]; pendingApprovals?: PendingApprovalsPayload; recentlyCompleted?: RecentCompletion[]; overdueTodos?: OverdueTodoSummary[] } | null) => {
+          if (cancelled) return;
+          // 失败不清空上一帧数据：轮询抖动时待办 / 最近完成保持可读
+          setAttention(data?.items ?? []);
+          setPendingApprovals({ live: data?.pendingApprovals?.live ?? [], queued: data?.pendingApprovals?.queued ?? [] });
+          setCompletions(data?.recentlyCompleted ?? []);
+          setOverdueTodos(data?.overdueTodos ?? []);
+          setAttentionError(null);
+          setAttentionLoaded(true);
+        })
+        .catch((e) => {
+          if (cancelled) return;
+          setAttentionError(e instanceof Error ? e.message : String(e));
+          setAttentionLoaded(true);
+        });
     };
     load();
     const timer = setInterval(load, 5000);
@@ -252,7 +266,7 @@ export function HomeDashboard({
       cancelled = true;
       clearInterval(timer);
     };
-  }, []);
+  }, [attentionRetry]);
 
   const runningSessions = useMemo(() => sessions.filter((s) => runningIds.has(s.id)), [sessions, runningIds]);
 
@@ -297,6 +311,8 @@ export function HomeDashboard({
     return [...byId.values()];
   }, [pendingApprovals, attention, sessionsById]);
   const waitCount = waitItems.length;
+  /** 计数三态：首屏未加载显示 —，更新失败显示 !，只在成功后渲染真值 */
+  const attentionCountLabel = !attentionLoaded ? "—" : attentionError ? "!" : waitCount;
   /**
    * 会话 → 等待信号。用 Map 而不是 Set：状态列要回答「为什么在等我」，
    * 只标记「有没有等」的话，运行中的待审批会话仍然只显示成「运行中」。
@@ -422,7 +438,15 @@ export function HomeDashboard({
               {stats.running > 0 && <span className="size-1.5 rounded-full bg-accent anim-pulse-dot" />}
               运行中 {stats.running}
             </span>
-            <span className={cn(waitCount > 0 ? "font-semibold text-warn" : "text-dim")}>等你处理 {waitCount}</span>
+            <span className={cn(waitCount > 0 ? "font-semibold text-warn" : "text-dim")} aria-busy={!attentionLoaded}>
+              等你处理 {attentionCountLabel}
+            </span>
+            {attentionError && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-warn" role="status">
+                待办 / 完成数据更新失败{attentionError ? `：${attentionError}` : ""} · 显示的是上次读取的结果
+                <button onClick={() => setAttentionRetry((v) => v + 1)} className="underline">重试</button>
+              </span>
+            )}
             {/* 今日/累计 token 与成本不在此重复 —— 它们是右栏「今日概览」卡的职责 */}
             <span className="ml-auto text-dim">
               {stats.total} 会话 · {projectCount} 项目
@@ -584,7 +608,7 @@ export function HomeDashboard({
                       t.key === "attention" && waitCount > 0 && tab !== t.key && "bg-warn/10 text-warn",
                     )}
                   >
-                    {tabCount(t.key)}
+                    {t.key === "attention" ? attentionCountLabel : tabCount(t.key)}
                   </span>
                 </button>
               ))}
@@ -624,7 +648,19 @@ export function HomeDashboard({
                   const wait = waitInfoById.get(s.id);
                   const overdue = overdueById.get(s.id);
                   return (
-                    <tr key={s.id} className="cursor-pointer t-fast hover:bg-hover" onClick={() => onOpenSession(s)}>
+                    <tr
+                      key={s.id}
+                      className="cursor-pointer t-fast hover:bg-hover focus-visible:bg-hover"
+                      onClick={() => onOpenSession(s)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onOpenSession(s);
+                        }
+                      }}
+                      tabIndex={0}
+                      aria-label={`打开会话：${displayTitle(s)}（按 Enter）`}
+                    >
                       <td className="border-b border-line-soft px-3 py-2.5">
                         <div className="flex items-center gap-2.5">
                           <Avatar session={s} running={running} />

@@ -1629,6 +1629,7 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
         await sendAgentCommand(sid, { type: "abort_bash" });
       } catch (e) {
         console.error("Failed to abort bash:", e);
+        addNotice({ message: "停止 shell 命令失败，可能仍在执行；请再点一次停止", type: "warning" });
       }
       return;
     }
@@ -1636,8 +1637,9 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
       await sendAgentCommand(sid, { type: "abort" });
     } catch (e) {
       console.error("Failed to abort:", e);
+      addNotice({ message: "停止失败，任务可能仍在运行；请再点一次停止", type: "warning" });
     }
-  }, []);
+  }, [addNotice]);
 
   const handleFork = useCallback(async (entryId: string) => {
     if (bashRunningRef.current) return;

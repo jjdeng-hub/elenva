@@ -252,7 +252,12 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   /* ---------- 图片附件 ---------- */
   const addImages = useCallback(
     (files: File[] | FileList) => {
-      const list = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      const incoming = Array.from(files);
+      const list = incoming.filter((f) => f.type.startsWith("image/"));
+      // 非图片文件被静默丢掉会让人以为「没贴上」：明确说明当前只收图片。
+      if (incoming.length > list.length) {
+        onNotice?.("当前只支持图片附件；其他文件请把路径写进消息或放到工作区");
+      }
       if (list.length === 0) return;
       const room = MAX_ATTACHED_IMAGES - imagesRef.current.length;
       if (room <= 0) {
@@ -954,6 +959,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                     onClick={onStop}
                     className="flex size-8 shrink-0 items-center justify-center rounded-full bg-danger/90 text-white transition-opacity hover:opacity-85 cursor-pointer"
                     title="停止"
+                    aria-label="停止本轮"
                   >
                     <Square size={12} fill="currentColor" />
                   </button>

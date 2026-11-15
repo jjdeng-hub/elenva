@@ -28,17 +28,22 @@ type ProviderAuthStatus = {
 function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string) => void }) {
   const [providers, setProviders] = useState<ProviderAuthStatus[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [keyDraft, setKeyDraft] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [query, setQuery] = useState("");
 
   const load = useCallback(async () => {
+    setLoadError(null);
     try {
-      const d = await fetch("/api/auth", { cache: "no-store" }).then((r) => r.json());
+      const res = await fetch("/api/auth", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = (await res.json()) as { providers?: ProviderAuthStatus[] };
       setProviders(d.providers ?? []);
-    } catch {
-      setProviders([]);
+    } catch (e) {
+      // 读失败不填 []：保留已有数据，由内联错误块 + 重试承载，避免把「读不到」显示成「没有配置」
+      setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -103,6 +108,7 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
       danger: true,
     });
     if (!ok) return;
+    setSaving(p.id);
     try {
       const res = await fetch(`/api/auth?provider=${encodeURIComponent(p.id)}`, { method: "DELETE" });
       const d = (await res.json()) as { error?: string };
@@ -111,6 +117,8 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
       await load();
     } catch (e) {
       toast(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(null);
     }
   };
 
@@ -134,8 +142,12 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
     <Card testId="provider-auth">
       <CardHeader>
         <CardTitle>厂商与密钥</CardTitle>
-        <span className="text-[12px] text-dim">
-          内置 {providers.length} 个厂商 · 已配置 {configuredCount} 个 · 存放于 ~/.pi/agent/auth.json
+        <span className="text-[12px] text-dim" aria-busy={loading}>
+          {loading
+            ? "正在读取厂商目录…"
+            : loadError && providers.length === 0
+              ? "厂商目录读取失败"
+              : `内置 ${providers.length} 个厂商 · 已配置 ${configuredCount} 个 · 存放于 ~/.pi/agent/auth.json`}
         </span>
       </CardHeader>
       {loading ? (
@@ -150,6 +162,16 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
         </div>
       ) : (
         <>
+          {loadError && (
+            <div className="mx-4 mt-3 flex flex-wrap items-center gap-2 rounded-md bg-danger/10 px-2.5 py-2 text-[12px] leading-relaxed text-danger">
+              <span>
+                {providers.length > 0
+                  ? `厂商目录更新失败，显示的是上次读取的结果：${loadError}`
+                  : `厂商目录读取失败：${loadError}`}
+              </span>
+              <button onClick={() => void load()} disabled={loading} className="btn btn-sm btn-ghost shrink-0">重新读取</button>
+            </div>
+          )}
           <div className="px-4 pt-3">
             <input
               value={query}
@@ -247,10 +269,11 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
                             </button>
                             {p.auth && (
                               <button
-                                onClick={() => removeKey(p)}
-                                className="flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-line px-2.5 text-[12px] text-danger t-fast hover:bg-danger/10"
+                                onClick={() => void removeKey(p)}
+                                disabled={saving === p.id}
+                                className="flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-md border border-line px-2.5 text-[12px] text-danger t-fast hover:bg-danger/10 disabled:opacity-50"
                               >
-                                <X size={12} /> 删除
+                                {saving === p.id ? <Loader2 size={12} className="anim-spin" /> : <X size={12} />} 删除
                               </button>
                             )}
                           </div>
@@ -262,7 +285,7 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
                 </div>
               );
             })}
-            {visible.length === 0 && (
+            {visible.length === 0 && (searching || !loadError) && (
               <div className="py-3 text-[12px] text-dim">
                 {searching
                   ? "没有匹配的厂商"
@@ -330,6 +353,7 @@ function ModelHealthSection({
   const [report, setReport] = useState<ModelHealthReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   /** 常态折叠：健康数据已经下沉到模型行，这里退成一行摘要，点开才拉完整明细 */
   const [expanded, setExpanded] = useState(false);
   const [defaults, setDefaults] = useState<{ defaultProvider?: string; defaultModel?: string }>({});
@@ -337,19 +361,22 @@ function ModelHealthSection({
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const [healthRes, settingsRes] = await Promise.all([
         fetch("/api/model-health", { cache: "no-store" }),
         fetch("/api/pi-settings", { cache: "no-store" }),
       ]);
-      const health = (await healthRes.json().catch(() => null)) as ModelHealthReport | null;
+      if (!healthRes.ok) throw new Error(`健康数据读取失败（HTTP ${healthRes.status}）`);
+      const health = (await healthRes.json()) as ModelHealthReport | null;
       const settings = (await settingsRes.json().catch(() => null)) as
         | { settings?: { defaultProvider?: string; defaultModel?: string } }
         | null;
       setReport(health && Array.isArray(health.models) ? health : null);
       setDefaults(settings?.settings ?? {});
-    } catch {
-      setReport(null);
+    } catch (e) {
+      // 读失败不置空 report：保留上次结果，由内联错误块 + 重试承载
+      setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
       setLoaded(true);
@@ -458,7 +485,17 @@ function ModelHealthSection({
         </div>
       )}
 
-      {!loading && models.length === 0 && (
+      {!loading && loadError && (
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3 text-[12px] text-danger">
+          <span>
+            {report ? "健康数据刷新失败，显示的是上次读取的结果：" : "健康数据读取失败："}
+            {loadError}
+          </span>
+          <button onClick={() => void load()} disabled={loading} className="btn btn-sm btn-ghost">重新读取</button>
+        </div>
+      )}
+
+      {!loading && !loadError && models.length === 0 && (
         <div className="px-4 py-6 text-center text-[12px] leading-relaxed text-dim">
           近 14 天没有模型调用记录。聊过天后，这里会按模型显示成功率、失败次数与最近失败时刻。
         </div>
@@ -550,6 +587,7 @@ function ModelStatusBar({
     <section
       data-testid="model-status-bar"
       className="rounded-card border border-line bg-panel px-4 py-3"
+      aria-busy={pending}
     >
       <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] text-muted">
         <span className="flex min-w-0 items-baseline gap-1.5">
@@ -566,6 +604,8 @@ function ModelStatusBar({
           <span className="text-dim">已选模型</span>
           {pending ? (
             <span className="text-dim">读取中…</span>
+          ) : summary.error ? (
+            <span className="text-danger" title="模型库加载失败，见下方模型库卡片的重新读取">!</span>
           ) : (
             <span className="tabular-nums text-fg">
               {summary.selected}
@@ -591,7 +631,7 @@ function ModelStatusBar({
             <span className="text-[11px] text-dim">已标在对应模型行</span>
           </span>
         ) : (
-          !pending && <span className="text-[12px] text-dim">近 14 天没有故障模型</span>
+          !pending && !summary.error && <span className="text-[12px] text-dim">近 14 天没有故障模型</span>
         )}
         {summary.error && <span className="text-[12px] text-danger">模型库加载失败：{summary.error}</span>}
       </div>
@@ -603,6 +643,7 @@ function ModelStatusBar({
 export function ModelsPage() {
   const [config, setConfig] = useState<Record<string, ProviderConfig>>({});
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   /* 自定义厂商保存后要让「模型库」卡重新拉一次（白名单 + 新模型），否则它拿旧白名单保存会把同步结果覆盖掉 */
   const [scopeVersion, setScopeVersion] = useState(0);
@@ -621,6 +662,7 @@ export function ModelsPage() {
   const [catQuery, setCatQuery] = useState("");
   const [catalog, setCatalog] = useState<CatalogEntry[] | null>(null);
   const [catSearching, setCatSearching] = useState(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
   /* 「接入模型」向导（选厂商 → 凭据 → 默认模型），对应 pi CLI 的 /login */
   const [setupOpen, setSetupOpen] = useState(false);
   const [setupProvider, setSetupProvider] = useState<string | undefined>(undefined);
@@ -638,10 +680,14 @@ export function ModelsPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await fetch("/api/models-config", { cache: "no-store" }).then((r) => r.json());
+      const res = await fetch("/api/models-config", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { providers?: Record<string, ProviderConfig> };
       setConfig(data.providers ?? {});
-    } catch {
-      setConfig({});
+      setLoadError(null);
+    } catch (e) {
+      // 读失败不填 {}：保留已有配置，由内联错误块 + 重试承载
+      setLoadError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
     }
@@ -710,11 +756,15 @@ export function ModelsPage() {
     const q = catQuery.trim();
     if (!q) return;
     setCatSearching(true);
+    setCatalogError(null);
     try {
-      const data = await fetch(`/api/models-config/catalog?q=${encodeURIComponent(q)}`, { cache: "no-store" }).then((r) => r.json());
+      const res = await fetch(`/api/models-config/catalog?q=${encodeURIComponent(q)}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = (await res.json()) as { entries?: CatalogEntry[] };
       setCatalog(data.entries ?? []);
-    } catch {
-      setCatalog([]);
+    } catch (e) {
+      // 失败不填 []：保留上次结果，由内联错误块 + 重试承载
+      setCatalogError(e instanceof Error ? e.message : String(e));
     } finally {
       setCatSearching(false);
     }
@@ -736,6 +786,12 @@ export function ModelsPage() {
 
   const testProvider = async (name: string, p: ProviderConfig) => {
     setTesting(name);
+    // 重测时先清掉该行旧结果，避免显示上一次的结论
+    setTestResult((prev) => {
+      const next = { ...prev };
+      delete next[name];
+      return next;
+    });
     try {
       const res = await fetch("/api/models-config/test", {
         method: "POST",
@@ -848,7 +904,17 @@ export function ModelsPage() {
               ))}
             </div>
           )}
-          {!loading && providerNames.length === 0 && (
+          {!loading && loadError && (
+            <div className="flex flex-wrap items-center gap-2 px-4 py-3 text-[12px] text-danger">
+              <span>
+                {providerNames.length > 0
+                  ? `配置更新失败，显示的是上次读取的结果：${loadError}`
+                  : `自定义 Provider 配置读取失败：${loadError}`}
+              </span>
+              <button onClick={() => void load()} disabled={loading} className="btn btn-sm btn-ghost">重新读取</button>
+            </div>
+          )}
+          {!loading && !loadError && providerNames.length === 0 && (
             <div className="flex flex-col items-center gap-2.5 px-4 py-8 text-center">
               <div className="max-w-md text-[12px] leading-relaxed text-dim">
                 还没有自定义厂商。中转站、自建网关（Ollama / vLLM / 内网）从这里接入；官方厂商不用填这里。
@@ -869,9 +935,15 @@ export function ModelsPage() {
                   <span className="chip shrink-0">{modelCount} 模型</span>
                   <div className="ml-auto flex shrink-0 items-center gap-1.5">
                     <button
-                      onClick={() => testProvider(name, p)}
+                      onClick={() => void testProvider(name, p)}
                       disabled={testing !== null || modelCount === 0}
-                      title={modelCount === 0 ? "先添加模型再测试" : "用第一个模型发一条最短请求"}
+                      title={
+                        modelCount === 0
+                          ? "先添加模型再测试"
+                          : testing !== null && testing !== name
+                            ? `正在测试「${testing}」，一次只测一个`
+                            : "用第一个模型发一条最短请求"
+                      }
                       className="btn btn-sm btn-ghost"
                     >
                       {testing === name ? <Loader2 size={12} className="anim-spin" /> : <Check size={12} />}
@@ -914,7 +986,11 @@ export function ModelsPage() {
                     </button>
                   </div>
                 </div>
-                {testResult[name] && (
+                {testing === name ? (
+                  <div className="mt-1.5 flex items-center gap-1.5 rounded-md bg-panel-2 px-2.5 py-1 text-[12px] text-dim">
+                    <Loader2 size={12} className="anim-spin" /> 测试中…
+                  </div>
+                ) : testResult[name] ? (
                   <div
                     className={cn(
                       "mt-1.5 rounded-md px-2.5 py-1 text-[12px]",
@@ -923,7 +999,7 @@ export function ModelsPage() {
                   >
                     {testResult[name].msg}
                   </div>
-                )}
+                ) : null}
               </div>
             );
           })}
@@ -969,6 +1045,12 @@ export function ModelsPage() {
               搜索
             </button>
           </div>
+          {catalogError && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-danger">
+              <span>目录搜索失败：{catalogError}</span>
+              <button onClick={() => void searchCatalog()} className="btn btn-sm btn-ghost">重试</button>
+            </div>
+          )}
           {catalog && (
             <div className="mt-3 max-h-56 overflow-y-auto">
               {catalog.length === 0 && <div className="py-2 text-[12px] text-dim">没有匹配结果</div>}

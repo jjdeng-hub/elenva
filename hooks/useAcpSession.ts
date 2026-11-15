@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   addToolCall,
   addToolResult,
@@ -24,6 +24,7 @@ import type {
   TurnRound,
 } from "@/hooks/useTurnCheckpoints";
 import type { SessionRuntimeSurface } from "@/lib/session-runtime";
+import type { ChatInputHandle } from "@/hooks/useAgentSession";
 
 /**
  * Hermes（ACP）运行时适配器（P2 · 单一真源）。
@@ -62,6 +63,8 @@ export interface UseAcpSessionOptions {
   onAgentEnd?: () => void;
   onSystemToolsChange?: (tools: ToolEntryLike[] | null) => void;
   chatInputFocus?: () => void;
+  /** 提交失败 / 能力不支持时把文字回填输入框，避免 ChatInput 清空后内容静默丢失 */
+  chatInputRef?: RefObject<ChatInputHandle | null>;
 }
 
 /** 松散的工具条目形状（只清空，不产出） */
@@ -198,7 +201,7 @@ function makeEmptySurfaceParts() {
 }
 
 export function useAcpSession(options: UseAcpSessionOptions): Surface {
-  const { agentId, profile, session, onAgentEnd, onSystemToolsChange } = options;
+  const { agentId, profile, session, onAgentEnd, onSystemToolsChange, chatInputRef } = options;
 
   const [chat, setChat] = useState<AcpChatState>({ messages: [], streaming: null });
   const [status, setStatus] = useState<"idle" | "waiting" | "error">("idle");
@@ -489,9 +492,23 @@ export function useAcpSession(options: UseAcpSessionOptions): Surface {
 
   /* ---------------- 动作：send / abort / permission / model ---------------- */
 
+  /** ChatInput 在提交前已清空草稿：失败或被拒时把文字放回去，否则内容静默丢失。 */
+  const restoreText = useCallback(
+    (text: string) => {
+      chatInputRef?.current?.setText(text);
+    },
+    [chatInputRef],
+  );
+
   const handleSend = useCallback(
-    async (text: string) => {
+    async (text: string, images?: Array<{ data: string; mimeType: string }>) => {
       const body = text.trim();
+      // ACP 的 prompt 通道目前只送文本：宁可明确拒绝并回填，也不能静默丢掉附件。
+      if (images && images.length > 0) {
+        setError("当前 Agent 暂不支持图片附件；请把图片放到工作区，并在消息里写明路径");
+        restoreText(text);
+        return;
+      }
       if (!body) return;
       setError(null);
       setTurnStat(null);
@@ -510,36 +527,63 @@ export function useAcpSession(options: UseAcpSessionOptions): Surface {
           const data = (await res.json().catch(() => ({}))) as { error?: string };
           setError(data.error ?? `HTTP ${res.status}`);
           setStatus("error");
+          restoreText(text);
         }
       } catch (cause) {
         setError(String(cause));
         setStatus("error");
+        restoreText(text);
       }
     },
-    [agentId],
+    [agentId, restoreText],
+  );
+
+  /** 运行中插话/跟发：ACP 没有对应能力，明确告知并回填，不再静默清空输入。 */
+  const rejectDuringRun = useCallback(
+    async (text: string) => {
+      setError("当前 Agent 暂不支持运行中插话，请等本轮结束后再发送（内容已放回输入框）");
+      restoreText(text);
+    },
+    [restoreText],
   );
 
   const handleAbort = useCallback(async () => {
-    await fetch("/api/agents/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ agentId, action: "cancel" }),
-    }).catch(() => {});
-    setStatus("idle");
+    try {
+      const res = await fetch("/api/agents/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentId, action: "cancel" }),
+      });
+      if (!res.ok) {
+        setError(`停止失败（HTTP ${res.status}），任务可能仍在运行；请重试`);
+        return;
+      }
+      setStatus("idle");
+    } catch (cause) {
+      setError(`停止失败：${String(cause)}，任务可能仍在运行；请重试`);
+    }
   }, [agentId]);
 
   const respondToPermission = useCallback(
     async (optionId: string) => {
       if (!permission) return;
-      handledRequests.current.add(permission.requestId);
       const requestId = permission.requestId;
-      setPermission(null);
-      setStatus("waiting");
-      await fetch("/api/agents/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentId, action: "permission", requestId, optionId }),
-      }).catch(() => {});
+      const snapshot = permission;
+      try {
+        const res = await fetch("/api/agents/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agentId, action: "permission", requestId, optionId }),
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        handledRequests.current.add(requestId);
+        setPermission(null);
+        setStatus("waiting");
+      } catch (cause) {
+        // 失败时恢复卡片：不能在请求发出前就把 requestId 标记成已处理（3s 轮询会永久隐藏它）。
+        setPermission(snapshot);
+        setError(`审批没有送达：${cause instanceof Error ? cause.message : String(cause)}，请重试`);
+      }
     },
     [agentId, permission],
   );
@@ -693,15 +737,15 @@ export function useAcpSession(options: UseAcpSessionOptions): Surface {
     queuedMessages: { steering: [], followUp: [] },
     extensionWidgets: [] as Surface["extensionWidgets"],
     extensionStatuses: [] as Surface["extensionStatuses"],
-    // 审批：与 Pi 的 extensionDialog 不同源，但 ChatView 只要求「有请求 → 渲染 → 回答」。
-    // 这里把 permission 映射成 ChatView 期望的扩展对话框形状不可行（结构不同），
-    // Hermes 的审批由宿主的 /pending 通道承载，界面上以 agentPhase + 宿主页面的审批卡出现。
+    // 审批：与 Pi 的 extensionDialog 结构不同，ChatView 用 hermesPermission 单独渲染审批卡。
     extensionDialog: null,
     respondToExtensionUi: (async () => {}) as Surface["respondToExtensionUi"],
     sessionIdRef,
     scrollContainerRef,
     lastUserMsgRef,
     handleSend: handleSend as Surface["handleSend"],
+    handleSteer: rejectDuringRun as Surface["handleSteer"],
+    handleFollowUp: rejectDuringRun as Surface["handleFollowUp"],
     handleAbort: handleAbort as Surface["handleAbort"],
     handleModelChange: handleModelChange as Surface["handleModelChange"],
     loadModels: loadModels as Surface["loadModels"],

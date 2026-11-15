@@ -14,7 +14,7 @@ export default function NotFound() {
         <div className="flex size-12 items-center justify-center rounded-card bg-accent-soft text-accent">
           <FileQuestion size={20} />
         </div>
-        <div className="mt-3 text-[16px] font-bold">页面不存在</div>
+        <h1 className="mt-3 text-[16px] font-bold">页面不存在</h1>
         <p className="mt-1 text-[12px] leading-relaxed text-dim">
           ELENVA Web 是单页应用，所有视图都在根路径下用 <code className="font-mono">#hash</code> 切换。
         </p>

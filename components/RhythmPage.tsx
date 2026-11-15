@@ -17,7 +17,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { EmptyState, PageHeader } from "@/components/ui/bits";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
@@ -234,13 +234,34 @@ function scheduleFromForm(form: FormState): string {
   }
 }
 
-/** 客户端能判的先判（schedule 合法性只有 Hermes 知道，留给提交后的报错展示）。 */
+/** 校验项按字段拆开，错误才能显示在对应输入框旁，而不是集中在表单底部。 */
+type FormField = "name" | "content" | "dailyAt" | "cron";
+const FORM_FIELDS: FormField[] = ["name", "content", "dailyAt", "cron"];
+
+function validateField(form: FormState, field: FormField): string | null {
+  switch (field) {
+    case "name":
+      if (!form.name.trim()) return "任务名称不能为空";
+      if (form.name.trim().length > 60) return "任务名称最长 60 字";
+      return null;
+    case "content":
+      if (!form.content.trim()) return form.type === "script" ? "脚本路径不能为空" : "任务内容不能为空";
+      return null;
+    case "dailyAt":
+      if (form.tab === "daily" && !/^\d{1,2}:\d{2}$/.test(form.dailyAt)) return "时间格式应为 HH:MM";
+      return null;
+    case "cron":
+      if (form.tab === "cron" && form.cron.trim().split(/\s+/).length < 5) return "cron 表达式至少 5 段";
+      return null;
+  }
+}
+
+/** 提交前整体判一次（schedule 合法性只有 Hermes 知道，留给提交后的报错展示）。 */
 function formError(form: FormState): string | null {
-  if (!form.name.trim()) return "任务名称不能为空";
-  if (form.name.trim().length > 60) return "任务名称最长 60 字";
-  if (!form.content.trim()) return form.type === "script" ? "脚本路径不能为空" : "任务内容不能为空";
-  if (form.tab === "daily" && !/^\d{1,2}:\d{2}$/.test(form.dailyAt)) return "时间格式应为 HH:MM";
-  if (form.tab === "cron" && form.cron.trim().split(/\s+/).length < 5) return "cron 表达式至少 5 段";
+  for (const field of FORM_FIELDS) {
+    const e = validateField(form, field);
+    if (e) return e;
+  }
   return null;
 }
 
@@ -275,6 +296,7 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<FormState | null>(null);
   const [formErrorText, setFormErrorText] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<FormField, string>>>({});
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [runningId, setRunningId] = useState<string | null>(null);
@@ -286,14 +308,14 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
       const data = await hermesFetch<HermesJob[]>("cron/jobs", undefined, profile);
       setJobs(data ?? []);
       setBackendDown(false);
-    } catch (error) {
+    } catch {
+      // 后端未就绪由下方常驻「Hermes 后端未就绪」卡承载；轮询不再每次弹 toast
       setBackendDown(true);
       setJobs([]);
-      if (loading) toast(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
     }
-  }, [loading, profile]);
+  }, [profile]);
 
   const loadTargets = useCallback(async () => {
     try {
@@ -304,16 +326,59 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
     }
   }, [profile]);
 
+  /** timer 只在 mount 注册一次，用 ref 读最新的 load / form，避免闭包拿到旧的
+   *  load（其 loading 恒为 true，后端持续不可用时会反复弹 toast）。 */
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  const formRef = useRef(form);
+  formRef.current = form;
+
   useEffect(() => {
-    void load();
+    void loadRef.current();
     void loadTargets();
     const timer = setInterval(() => {
-      if (document.hidden || form) return;
-      void load();
+      if (document.hidden || formRef.current) return;
+      void loadRef.current();
     }, 15000);
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** 打开表单时记下初始值，用于判断「有未保存改动」；取消前据此给确认。 */
+  const formInitialRef = useRef<string>("");
+  const formDirty = form !== null && JSON.stringify(form) !== formInitialRef.current;
+
+  const openForm = (initial: FormState) => {
+    formInitialRef.current = JSON.stringify(initial);
+    setForm(initial);
+    setFieldErrors({});
+    setFormErrorText(null);
+  };
+
+  const closeForm = async () => {
+    if (formDirty) {
+      const ok = await dialogConfirm({
+        title: "放弃未保存的改动？",
+        message: "这个节律表单还有未保存的内容，关闭后会丢失。",
+        confirmText: "放弃改动",
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    setForm(null);
+    setFieldErrors({});
+    setFormErrorText(null);
+  };
+
+  const blurField = (field: FormField) => {
+    setFieldErrors((prev) => {
+      const next = { ...prev };
+      const e = form ? validateField(form, field) : null;
+      if (e) next[field] = e;
+      else delete next[field];
+      return next;
+    });
+  };
 
   const sorted = useMemo(
     () => [...jobs].sort((a, b) => a.name.localeCompare(b.name, "zh-CN")),
@@ -408,7 +473,14 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
     if (!form) return;
     const err = formError(form);
     if (err) {
-      setFormErrorText(err);
+      // 客户端校验错误定位到对应字段旁；底部的 formErrorText 留给服务端报错
+      setFormErrorText(null);
+      const next: Partial<Record<FormField, string>> = {};
+      for (const field of FORM_FIELDS) {
+        const e = validateField(form, field);
+        if (e) next[field] = e;
+      }
+      setFieldErrors(next);
       return;
     }
     setSaving(true);
@@ -454,10 +526,7 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
                 刷新
               </button>
               <button
-                onClick={() => {
-                  setFormErrorText(null);
-                  setForm(emptyForm());
-                }}
+                onClick={() => openForm(emptyForm())}
                 className="btn btn-sm btn-primary"
               >
                 <Plus size={12} />
@@ -488,7 +557,7 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
             <CardHeader>
               <CardTitle>{form.id ? "编辑节律" : "新建节律"}</CardTitle>
               <button
-                onClick={() => setForm(null)}
+                onClick={() => void closeForm()}
                 className="btn btn-sm btn-subtle ml-auto"
                 aria-label="关闭表单"
               >
@@ -502,14 +571,21 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
                   value={form.name}
                   maxLength={60}
                   onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  onBlur={() => blurField("name")}
                   placeholder="如：每日进展汇总"
                   className={cn(inputCls, "w-full max-w-md")}
                 />
+                {fieldErrors.name && <span className="text-[11px] text-danger">{fieldErrors.name}</span>}
               </label>
 
               <div className="flex flex-col gap-1.5">
                 <span className="text-[12px] text-dim">触发规则</span>
-                <ScheduleEditor form={form} onChange={(patch) => setForm({ ...form, ...patch })} />
+                <ScheduleEditor
+                  form={form}
+                  onChange={(patch) => setForm({ ...form, ...patch })}
+                  fieldErrors={fieldErrors}
+                  onBlurField={blurField}
+                />
               </div>
 
               <div className="flex flex-col gap-1.5">
@@ -544,6 +620,7 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
                 <textarea
                   value={form.content}
                   onChange={(e) => setForm({ ...form, content: e.target.value })}
+                  onBlur={() => blurField("content")}
                   rows={form.type === "script" ? 2 : 4}
                   spellCheck={false}
                   placeholder={form.type === "script" ? "elenva-probe.sh" : "如：汇总今天在仓库里的改动，写进 worklog。"}
@@ -552,6 +629,7 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
                     form.type === "script" && "font-mono resize-none",
                   )}
                 />
+                {fieldErrors.content && <span className="text-[11px] text-danger">{fieldErrors.content}</span>}
               </label>
 
               <label className="flex flex-col gap-1.5">
@@ -587,7 +665,7 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
               )}
 
               <div className="flex items-center justify-end gap-2">
-                <button onClick={() => setForm(null)} className="btn btn-sm btn-ghost">
+                <button onClick={() => void closeForm()} className="btn btn-sm btn-ghost">
                   取消
                 </button>
                 <button onClick={() => void submitForm()} disabled={saving} className="btn btn-sm btn-primary">
@@ -613,7 +691,7 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
               title="还没有节律任务"
               hint="建一条：选好触发规则与要跑的内容，到点 Hermes 会自动执行。"
               action={
-                <button onClick={() => setForm(emptyForm())} className="btn btn-primary">
+                <button onClick={() => openForm(emptyForm())} className="btn btn-primary">
                   <Plus size={12} />
                   新建第一条
                 </button>
@@ -634,10 +712,7 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
                 onToggleExpand={() => void toggleExpand(job)}
                 onPauseResume={() => void pauseResume(job)}
                 onRun={() => void trigger(job)}
-                onEdit={() => {
-                  setFormErrorText(null);
-                  setForm(formFromJob(job));
-                }}
+                onEdit={() => openForm(formFromJob(job))}
                 onDelete={() => void removeJob(job)}
                 onReloadRuns={() => void loadRuns(job.id)}
               />
@@ -649,7 +724,17 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
   );
 }
 
-function ScheduleEditor({ form, onChange }: { form: FormState; onChange: (patch: Partial<FormState>) => void }) {
+function ScheduleEditor({
+  form,
+  onChange,
+  fieldErrors,
+  onBlurField,
+}: {
+  form: FormState;
+  onChange: (patch: Partial<FormState>) => void;
+  fieldErrors: Partial<Record<FormField, string>>;
+  onBlurField: (field: FormField) => void;
+}) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex w-fit items-center rounded-lg border border-line bg-panel-2 p-0.5">
@@ -695,6 +780,7 @@ function ScheduleEditor({ form, onChange }: { form: FormState; onChange: (patch:
               type="time"
               value={form.dailyAt}
               onChange={(e) => onChange({ dailyAt: e.target.value })}
+              onBlur={() => onBlurField("dailyAt")}
               className={cn(inputCls, "w-28 tabular-nums")}
             />
           </>
@@ -704,6 +790,7 @@ function ScheduleEditor({ form, onChange }: { form: FormState; onChange: (patch:
           <input
             value={form.cron}
             onChange={(e) => onChange({ cron: e.target.value })}
+            onBlur={() => onBlurField("cron")}
             placeholder="分 时 日 月 周，如 0 8 * * 1"
             spellCheck={false}
             className={cn(inputCls, "w-full max-w-sm font-mono")}
@@ -711,6 +798,8 @@ function ScheduleEditor({ form, onChange }: { form: FormState; onChange: (patch:
         )}
       </div>
 
+      {fieldErrors.dailyAt && <div className="text-[11px] text-danger">{fieldErrors.dailyAt}</div>}
+      {fieldErrors.cron && <div className="text-[11px] text-danger">{fieldErrors.cron}</div>}
       <div className="text-[11px] text-dim">提交后 Hermes 会校验规则；非法值会把原始报错显示在这里。</div>
     </div>
   );

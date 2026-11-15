@@ -22,6 +22,14 @@ import { SideSessionPane } from "@/components/SideSessionPane";
 import { SessionSidebar } from "@/components/SessionSidebar";
 import { WorkspacePicker, type WorkspaceOption } from "@/components/WorkspacePicker";
 import type { AttachedImage, ChatInputHandle } from "@/hooks/useAgentSession";
+
+/** Hermes/ACP 审批请求在会话页要渲染的形状（字段来自 /api/agents/pending 与 ACP 宿主 /pending）。 */
+type HermesPermissionView = {
+  requestId: number;
+  title: string;
+  detail?: string;
+  options?: { optionId: string; name?: string; kind?: string }[];
+};
 import { useSessionRuntime } from "@/lib/session-runtime";
 import { useSessionActions } from "@/hooks/useSessionActions";
 import { usePersistedWidth } from "@/components/ui/Resizer";
@@ -211,6 +219,22 @@ export function ChatView({
   }, [sessions, runtime, hermesProfile, hermesAgentId]);
 
   const approvalPending = runtime === "hermes" ? rt.hermesPermission : extensionDialog;
+  /* H3：Hermes 的审批与 Pi 的 extensionDialog 结构不同，单独在会话页渲染应答卡。 */
+  const hermesPermission: HermesPermissionView | null =
+    runtime === "hermes" ? ((rt.hermesPermission as HermesPermissionView | null | undefined) ?? null) : null;
+  const [permissionBusy, setPermissionBusy] = useState(false);
+  const respondHermesPermission = useCallback(
+    async (optionId: string) => {
+      if (permissionBusy || !rt.hermesRespondToPermission) return;
+      setPermissionBusy(true);
+      try {
+        await rt.hermesRespondToPermission(optionId);
+      } finally {
+        setPermissionBusy(false);
+      }
+    },
+    [permissionBusy, rt.hermesRespondToPermission],
+  );
   const soundEvents = useSoundEvents({
     agentRunning,
     error,
@@ -240,13 +264,25 @@ export function ChatView({
      useAgentSession 的 notice 队列承载，但此前没有任何组件消费，导致
      11 处 addNotice 全部静默：切模型失败时界面毫无反应。这里接到 Toast。 */
   const seenNoticeIds = useRef<Set<string>>(new Set());
+  const previousRunningRef = useRef(false);
+  /* 新一轮开始时允许同类问题再次提示：原来 seenNoticeIds 永不清空，第二次卡死就再无声息。 */
+  useEffect(() => {
+    if (agentRunning && !previousRunningRef.current) seenNoticeIds.current.clear();
+    previousRunningRef.current = agentRunning;
+  }, [agentRunning]);
   useEffect(() => {
     for (const n of notices) {
       if (seenNoticeIds.current.has(n.id)) continue;
       seenNoticeIds.current.add(n.id);
-      toast(n.message);
+      // 失败 / 断线 / 卡死类提示常驻，并给一个可点动作；其余仍是一次性轻提示。
+      const serious = n.type === "warning" || /失败|断开|卡住|无事件|超时|拒绝|没有送达/.test(n.message);
+      if (serious) {
+        toast.error(n.message, agentRunning ? { label: "停止本轮", onClick: () => void handleAbort() } : undefined);
+      } else {
+        toast(n.message);
+      }
     }
-  }, [notices]);
+  }, [notices, agentRunning, handleAbort]);
 
   /* ---------- 会话内搜索（Ctrl+F / 顶栏按钮）---------- */
   const [searchOpen, setSearchOpen] = useState(false);
@@ -896,7 +932,10 @@ export function ChatView({
       alive = false;
     };
   }, [cwd]);
+  /* M2：拒绝项目信任只是关掉弹窗，不该把用户踢出当前会话；输入仍保持禁用，可重新打开。 */
+  const [trustCancelled, setTrustCancelled] = useState(false);
   const trustBlocked = trust?.requiresTrust === true && !trust.trusted;
+  const trustDialogOpen = trustBlocked && !trustCancelled;
   const confirmTrust = useCallback(async () => {
     const res = await fetch("/api/project-trust", {
       method: "POST",
@@ -1414,11 +1453,61 @@ export function ChatView({
             />
           ) : null}
         </div>
-        {trustBlocked && (
-          <ProjectTrustDialog cwd={cwd} onConfirm={confirmTrust} onCancel={onExit} />
+        {trustDialogOpen && (
+          <ProjectTrustDialog cwd={cwd} onConfirm={confirmTrust} onCancel={() => setTrustCancelled(true)} />
+        )}
+        {trustBlocked && trustCancelled && (
+          <div className="fixed bottom-16 left-1/2 z-[120] flex -translate-x-1/2 items-center gap-2 rounded-card border border-line bg-panel px-4 py-2 text-[12px] text-muted shadow-lg">
+            <span>当前目录未信任，暂时无法发送消息。</span>
+            <button onClick={() => setTrustCancelled(false)} className="btn btn-sm btn-ghost">
+              重新选择
+            </button>
+          </div>
         )}
         {extensionDialog && (
           <ExtensionDialog request={extensionDialog} onRespond={wrappedRespond} />
+        )}
+        {hermesPermission && (
+          <div className="fixed inset-0 z-[160] flex items-center justify-center bg-overlay p-4">
+            <div
+              className="w-full max-w-md rounded-card border border-line bg-panel p-5 shadow-lg"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="hermes-permission-title"
+            >
+              <h2 id="hermes-permission-title" className="text-[14px] font-semibold text-fg">等待授权</h2>
+              <p className="mt-2 text-[12px] leading-relaxed text-muted">{hermesPermission.title}</p>
+              {hermesPermission.detail && (
+                <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-panel-2 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap text-muted">
+                  {hermesPermission.detail}
+                </pre>
+              )}
+              {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
+              <div className="mt-4 flex flex-wrap justify-end gap-2">
+                {(hermesPermission.options ?? []).map((o) => (
+                  <button
+                    key={o.optionId}
+                    onClick={() => void respondHermesPermission(o.optionId)}
+                    disabled={permissionBusy}
+                    className="btn btn-sm btn-ghost"
+                  >
+                    {o.name ?? o.optionId}
+                  </button>
+                ))}
+                {/* 宿主没有给选项时仍要能退出：ACP 宿主把空 optionId 解析为 deny。 */}
+                {(hermesPermission.options ?? []).length === 0 && (
+                  <button
+                    onClick={() => void respondHermesPermission("deny")}
+                    disabled={permissionBusy}
+                    className="btn btn-sm btn-ghost"
+                  >
+                    拒绝
+                  </button>
+                )}
+              </div>
+              <p className="mt-3 text-[11px] text-dim">选择后本轮才会继续；提交失败会保留这张卡片以便重试。</p>
+            </div>
+          </div>
         )}
       </div>
     </div>

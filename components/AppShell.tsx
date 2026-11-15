@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, MessageSquarePlus, Search } from "lucide-react";
+import { ArrowLeft, Bot, Menu, MessageSquarePlus, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChatView } from "@/components/ChatView";
 import { DirPicker } from "@/components/DirPicker";
@@ -54,6 +54,8 @@ const AGENT_SCOPED_VIEWS = new Set([
  * 没列在这里的视图（代码 / 提示词）走占位页说明数据在哪。
  */
 const AGENT_RESOURCE_KINDS: Record<string, "sessions" | "memory" | "skills" | "soul" | "rhythm" | "usage"> = {
+  // chat 走统一 ChatView、rhythm 走可写 RhythmPage，二者都在上面的分支里被提前消费；
+  // 这两项仅为「Agent 级视图 → 资源 kind」映射的完整性保留，不会被 AGENT_RESOURCE_KINDS[view] 命中。
   chat: "sessions",
   memory: "memory",
   skills: "skills",
@@ -149,6 +151,11 @@ export function AppShell() {
   const [agents, setAgents] = useState<AgentRecord[]>(() => builtinAgents());
   /** 当前 Agent；由 hash 前缀 `#a/<id>/...` 决定，缺省是内置编码 Agent */
   const [activeAgent, setActiveAgent] = useState<string>(BUILTIN_AGENT_ID);
+  /** 当前 Agent 记录：注册表尚未补齐时回落到内置 Agent，保证类型与首帧都不空。
+   *  放在组件最前：全局快捷键与首页搜索 effect 也要用它判断当前作用域。 */
+  const activeAgentRecord: AgentRecord = findAgent(agents, activeAgent) ?? agents[0] ?? builtinAgents()[0];
+  /** 应用包 Agent：P0 只有首页，平台面板（观测/审查/成长）暂不适用 */
+  const isPackageAgent = activeAgentRecord.source === "package";
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [runningIds, setRunningIds] = useState<Set<string>>(new Set());
   /** 会话默认工作区（~/pi-workspace，非项目语义；仅由 /api/default-cwd 初始化，勿他写） */
@@ -171,6 +178,8 @@ export function AppShell() {
   const [port, setPort] = useState("");
   const [isNarrow, setIsNarrow] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  /** 并排副屏在 <1440px 被 ChatView 降级为不渲染（L5）：仅用于给出「已按单栏显示」提示 */
+  const [sideDegraded, setSideDegraded] = useState(false);
   const hashReady = useRef(false);
 
 /** 会话列表版本号：轻量轮询据此判断是否需要全量刷新列表 */
@@ -502,6 +511,15 @@ export function AppShell() {
     return () => mq.removeEventListener("change", apply);
   }, []);
 
+  /* 并排副屏降级阈值与 ChatView 的 SIDE_PANE_MIN_WIDTH（1440）保持一致 */
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 1439px)");
+    const apply = () => setSideDegraded(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+
   /* ---------------- 键盘快捷键 ---------------- */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -509,6 +527,13 @@ export function AppShell() {
       const tag = target?.tagName;
       // contentEditable（扩展自定义可编辑区等）也算输入区：按 ? 时应输入问号，不弹总览
       const inField = tag === "INPUT" || tag === "TEXTAREA" || target?.isContentEditable === true;
+
+      // M5：Esc 收起窄屏主侧栏抽屉（与点遮罩等价，键盘可达）
+      if (e.key === "Escape" && isNarrow && drawerOpen) {
+        e.preventDefault();
+        setDrawerOpen(false);
+        return;
+      }
 
       // ?：唤起 / 收起快捷键总览（不带修饰键；输入框内不拦截，避免打不出问号）
       if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey && !inField) {
@@ -520,6 +545,9 @@ export function AppShell() {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
       if (e.key.toLowerCase() === "k" && !e.altKey && !e.shiftKey) {
+        // M1：应用包首页没有消费搜索结果的界面，Ctrl+K 不该聚焦到无效控件，
+        // 也不拦截默认行为 —— 明确禁用，避免「按键有反应但没结果」。
+        if (view === "home" && isPackageAgent) return;
         e.preventDefault();
         if (view === "home") {
           document.getElementById("home-search")?.focus();
@@ -537,7 +565,7 @@ export function AppShell() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [view]);
+  }, [view, isPackageAgent, isNarrow, drawerOpen]);
   const handleNewChatRef = useRef<() => void>(() => {});
 
   /* ---------------- ChatView 回调 ---------------- */
@@ -660,7 +688,8 @@ export function AppShell() {
   const [contentTruncated, setContentTruncated] = useState(false);
   useEffect(() => {
     const q = homeQuery.trim();
-    if (q.length < 2) {
+    // M1：应用包首页没有 HomeDashboard 消费搜索结果，不发无消费的 /api/sessions/search
+    if (q.length < 2 || (isPackageAgent && view === "home")) {
       setContentResults([]);
       setContentTruncated(false);
       return;
@@ -702,7 +731,7 @@ export function AppShell() {
         .finally(() => setContentSearching(false));
     }, 350);
     return () => clearTimeout(t);
-  }, [homeQuery]);
+  }, [homeQuery, isPackageAgent, view]);
 
   /* ---------------- AI 自动命名 ---------------- */
   const handleAutoRename = useCallback(
@@ -856,19 +885,30 @@ export function AppShell() {
     );
   }, [sessions, homeQuery]);
 
-  /** 当前 Agent 记录：注册表尚未补齐时回落到内置 Agent，保证类型与首帧都不空 */
-  const activeAgentRecord: AgentRecord = findAgent(agents, activeAgent) ?? agents[0] ?? builtinAgents()[0];
-  /** 应用包 Agent：P0 只有首页，平台面板（观测/审查/成长）暂不适用 */
-  const isPackageAgent = activeAgentRecord.source === "package";
+  /* 当前 Agent 记录与 isPackageAgent 定义在组件顶部（快捷键 / 搜索 effect 需要先用到） */
   /** 应用包 Agent 的 Agent 级视图还没接数据：进得去，但显示「数据在哪」的空态页。
    *  P2：Hermes 的 chat 走统一 ChatView（chat 视图不再算 agent 级资源页）。 */
   const agentScoped = isPackageAgent && view !== "chat" && AGENT_SCOPED_VIEWS.has(view) && view !== "home";
   /** rhythm 是可写页：hermes Agent（含应用包）都要进 RhythmPage，读写落到该 Agent 自己 profile 的 cron */
   const rhythmProfile = activeAgentRecord.runtime === "hermes" ? activeAgentRecord.profile ?? activeAgentRecord.id : undefined;
 
+  /**
+   * M4：Agent 是作用域边界，切换时清掉属于上一个 Agent 的临时态。
+   * 全局态（主题 / 端口 / 会话列表 / 未读 / Agent 注册表）不在此列，勿加进来。
+   */
+  const resetAgentScopedState = useCallback(() => {
+    setNewChatWorkspace(null);
+    setNewSessionCwd(null);
+    setHomeQuery("");
+    setGitCwd(null);
+    setCodeFile(null);
+    setCodeOnlyChanged(false);
+  }, []);
+
   /** 切换 Agent = 换一套 workspace：视图回到首页、清掉当前会话，hash 由同步 effect 写回 */
   const selectAgent = (id: string) => {
     if (id === activeAgent) return;
+    resetAgentScopedState();
     setActiveAgent(id);
     setView("home");
     setSelected(null);
@@ -931,16 +971,21 @@ export function AppShell() {
               </button>
             )}
             {view === "home" ? (
-              <div className="flex h-8 max-w-md flex-1 items-center gap-2 rounded-lg border border-line bg-panel-2 px-3 text-dim">
-                <Search size={14} />
-                <input
-                  id="home-search"
-                  value={homeQuery}
-                  onChange={(e) => setHomeQuery(e.target.value)}
-                  placeholder="搜索会话、项目…（Ctrl+K）"
-                  className="w-full bg-transparent text-[13px] text-fg outline-none placeholder:text-dim"
-                />
-              </div>
+              isPackageAgent ? (
+                // M1：应用包首页没有消费搜索结果的界面，隐藏无效输入框（Ctrl+K 也已禁用）
+                <span className="text-[13px] text-dim">工作台</span>
+              ) : (
+                <div className="flex h-8 max-w-md flex-1 items-center gap-2 rounded-lg border border-line bg-panel-2 px-3 text-dim">
+                  <Search size={14} />
+                  <input
+                    id="home-search"
+                    value={homeQuery}
+                    onChange={(e) => setHomeQuery(e.target.value)}
+                    placeholder="搜索会话、项目…（Ctrl+K）"
+                    className="w-full bg-transparent text-[13px] text-fg outline-none placeholder:text-dim"
+                  />
+                </div>
+              )
             ) : (
               <>
                 <button
@@ -956,6 +1001,11 @@ export function AppShell() {
             {/* 全局簇：所有视图一致的常驻控件（chat 的独立顶栏里也有同样顺序的一份）。
                 原「运行中/全部空闲」胶囊已移除 —— 同一状态在 hero 状态条 / 侧栏统计卡 / 页脚已有三处。 */}
             <div className="ml-auto flex items-center gap-3.5">
+              {/* L4：任何视口、任何视图都能看到当前 Agent；窄屏抽屉关闭时尤其靠它辨认作用域 */}
+              <span className="flex items-center gap-1.5 text-[12px] text-dim" title={`当前 Agent：${activeAgentRecord.name}`}>
+                <Bot size={14} />
+                <span className="max-w-28 truncate">{activeAgentRecord.name}</span>
+              </span>
               <ThemeToggle />
               <button
                 onClick={handleNewChat}
@@ -968,6 +1018,41 @@ export function AppShell() {
           </header>
         )}
 
+        {/* M2/L4/L5：chat 视图自带顶栏，这里补一条轻量「上下文条」承载返回入口、
+            当前 Agent 名与窄屏降级说明；不改 ChatView，也不复用 onExit（保留 selected）。 */}
+        {view === "chat" && (
+          <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line bg-panel px-4 text-[11px]">
+            <button
+              onClick={() => setView("home")}
+              className="flex cursor-pointer items-center gap-1 rounded-md px-1.5 py-1 text-dim t-fast hover:bg-hover hover:text-fg"
+              aria-label="返回工作台（保留当前会话）"
+            >
+              <ArrowLeft size={12} /> 工作台
+            </button>
+            <span className="text-dim/50">/</span>
+            <span className="truncate text-dim">{activeAgentRecord.name}</span>
+            <div className="ml-auto flex items-center gap-2">
+              {/* L5：带 ?side= 深链接在窄窗被 ChatView 降级为不渲染，URL 仍保留参数 */}
+              {sideDegraded && sideSessionId && (
+                <span className="text-dim">已按单栏显示（宽屏可并排）</span>
+              )}
+              {/* L5：窄屏下 ChatView 的 Git chip 被 hidden，给一处通往「代码」（含 Git 变更）的入口 */}
+              {isNarrow && (
+                <button
+                  onClick={() => {
+                    setCodeFile(null);
+                    setCodeOnlyChanged(true);
+                    setView("code");
+                  }}
+                  className="shrink-0 cursor-pointer rounded-md px-1.5 py-1 text-dim t-fast hover:bg-hover hover:text-fg"
+                >
+                  代码
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* 视图内容 */}
         {agentScoped ? (
           // P4c：rhythm 不走只读投影 —— hermes Agent 的节律页用可写 RhythmPage（带该 Agent 的 profile）
@@ -976,7 +1061,7 @@ export function AppShell() {
           ) : AGENT_RESOURCE_KINDS[view] ? (
             <AgentResourcesPage agent={activeAgentRecord} kind={AGENT_RESOURCE_KINDS[view]} />
           ) : (
-            <AgentScopePlaceholder agent={activeAgentRecord} view={view} />
+            <AgentScopePlaceholder agent={activeAgentRecord} view={view} onNavigate={(v) => setView(v as View)} />
           )
         ) : (
           <>

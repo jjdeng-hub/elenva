@@ -20,7 +20,7 @@ import {
   Settings,
   ShieldCheck,
 } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { cn } from "@/components/lib/utils";
 import { Logo, LogoMark } from "@/components/Logo";
 import { Resizer, usePersistedWidth } from "@/components/ui/Resizer";
@@ -138,9 +138,33 @@ export function WorkstationSidebar({
   const running = runningCount > 0;
   /* 展开态宽度可拖拽；抽屉模式（窄屏浮层）保持固定，拖拽只对静态侧栏有意义 */
   const { width, grow, reset } = usePersistedWidth("elenva-ws-sidebar-width", 220, 180, 360);
+  const asideRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     onWidthChange?.(width);
   }, [width, onWidthChange]);
+  /* M5：抽屉隐藏态设 inert（DOM 属性，让屏幕外子树彻底退出 Tab 序列）；
+     打开时把焦点移入首个可聚焦项，关闭时归还到触发按钮。
+     inert 用 ref 设置，避免依赖 JSX 属性类型。 */
+  const drawerTriggerRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const el = asideRef.current;
+    if (!el) return;
+    if (drawer && drawerOpen) {
+      drawerTriggerRef.current = document.activeElement as HTMLElement | null;
+      el.inert = false;
+      const first = el.querySelector<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      );
+      first?.focus();
+    } else if (drawer && !drawerOpen) {
+      el.inert = true;
+      const trigger = drawerTriggerRef.current;
+      drawerTriggerRef.current = null;
+      if (trigger?.isConnected) trigger.focus();
+    } else {
+      el.inert = false;
+    }
+  }, [drawer, drawerOpen]);
   // 抽屉模式恒为展开态（220px 完整导航），收起态只属于 >=1024px 的静态侧栏
   const isCollapsed = drawer ? false : collapsed;
 
@@ -160,8 +184,15 @@ export function WorkstationSidebar({
     isCollapsed ? "h-2.5 overflow-hidden py-0 opacity-0" : "px-2.5 pb-1.5 pt-3 opacity-100",
   );
 
+  /* M5：抽屉关闭时隐藏子树对读屏不可见（inert 由上面的 effect 写到 DOM）；
+     打开时作为带可访问名称的模态对话框。 */
   const aside = (
     <aside
+      ref={asideRef}
+      aria-hidden={drawer && !drawerOpen ? true : undefined}
+      role={drawer && drawerOpen ? "dialog" : undefined}
+      aria-modal={drawer && drawerOpen ? true : undefined}
+      aria-label={drawer && drawerOpen ? "主导航" : undefined}
       className={cn(
         "flex h-full min-h-0 flex-col border-r border-line bg-panel t-pane",
         drawer
@@ -191,6 +222,8 @@ export function WorkstationSidebar({
       <div className="h-3 shrink-0" />
       {/* 中部可滚动（2026-11-12）：内容高于视口时导航区自己滚，统计卡不挤出视口 */}
       <div className="min-h-0 flex-1 overflow-y-auto">
+          {/* L4：兑现 agentLabel 形参 —— Agent 级菜单分组标题，窄屏关抽屉后也能辨认作用域 */}
+          {agentLabel && <div className={groupCls}>{agentLabel} · 此 Agent</div>}
           <NavItem collapsed={isCollapsed} icon={<House size={14} />} label="工作台" active={view === "home"} onClick={() => onViewChange("home")} />
           <NavItem collapsed={isCollapsed} icon={<ListChecks size={14} />} label="会话" active={view === "chat"} onClick={() => onViewChange("chat")} />
           <NavItem collapsed={isCollapsed} icon={<Brain size={14} />} label="记忆" active={view === "memory"} onClick={() => onViewChange("memory")} />

@@ -1,7 +1,8 @@
 "use client";
 
 import { FolderOpen, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useDialogBehavior } from "@/components/ui/dialog";
 
 /**
  * 项目信任对话框（对应 Pi 的 project-trust 机制）：
@@ -32,6 +33,13 @@ export function ProjectTrustDialog({
     }
   };
 
+  /* M11：Esc / Tab 焦点陷阱 / 关闭归还焦点（处理中不允许 Esc 退出）。
+     取消语义沿用既有 onCancel，不在此处改动（M2 只在外壳侧补返回入口）。 */
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useDialogBehavior(true, () => {
+    if (!busy) onCancel();
+  }, panelRef);
+
   return (
     <div
       role="presentation"
@@ -41,8 +49,10 @@ export function ProjectTrustDialog({
       }}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
+        aria-labelledby="trust-title"
         className="w-[460px] max-w-full overflow-hidden rounded-card border border-line bg-panel shadow-lg"
         data-testid="trust-dialog"
       >
@@ -51,7 +61,7 @@ export function ProjectTrustDialog({
             <ShieldCheck size={16} />
           </div>
           <div className="min-w-0">
-            <div className="text-[14px] font-bold text-fg">信任此项目？</div>
+            <div id="trust-title" className="text-[14px] font-bold text-fg">信任此项目？</div>
             <p className="mt-1.5 text-[12px] leading-relaxed text-muted">
               该项目包含需要信任的 Pi 资源（扩展、项目级设置或技能）。信任后 Pi
               将加载并执行这些<strong className="text-fg">本项目内的代码</strong>

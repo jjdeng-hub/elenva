@@ -1058,7 +1058,7 @@ export function AssistantMessageView({
           </div>
         )}
         {!streaming && fullText.trim() && (
-          <div className="mt-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+          <div className="mt-1 flex gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 focus-within:opacity-100 focus-visible:opacity-100 max-lg:opacity-100">
             {onDraftSkill && (
               <button
                 onClick={() => onDraftSkill(fullText)}
@@ -1072,10 +1072,15 @@ export function AssistantMessageView({
               onClick={() => {
                 // 非安全上下文（局域网 http 访问）下 navigator.clipboard 不可用，
                 // 走 lib/clipboard 的 execCommand 回退，否则复制按钮静默失败。
-                void copyText(fullText).then(() => toast("已复制回复内容"));
+                // L1：成功/失败都给文字反馈（失败用可停留的错误 toast），不只靠图标颜色。
+                void copyText(fullText).then(
+                  () => toast("已复制回复内容"),
+                  () => toast.error("复制失败，请手动选中文字复制"),
+                );
               }}
               className="flex h-6 cursor-pointer items-center gap-1 rounded-md px-1.5 text-[11px] text-dim t-fast hover:bg-hover hover:text-fg"
               title="复制回复内容"
+              aria-label="复制回复内容"
             >
               <Copy size={12} /> 复制
             </button>

@@ -822,5 +822,15 @@
     .anim-spin {
       animation: none;
     }
+    /* M14：组件里仍有 30+ 处 Tailwind 原生 animate-spin / animate-pulse / animate-*，
+       一并归零，避免开启「减弱动态效果」时 spinner 仍在旋转。
+       新增组件优先用 .anim-* 语义类；此处对原生类做兜底覆盖。 */
+    .animate-spin,
+    .animate-pulse,
+    .animate-bounce,
+    .animate-ping,
+    [class*="animate-"] {
+      animation: none !important;
+    }
   }
 }

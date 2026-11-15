@@ -3,7 +3,7 @@
 import { ClipboardList, GraduationCap, History, Loader2, MinusCircle, RefreshCw, Upload } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
-import { EmptyState, Skeleton } from "@/components/ui/bits";
+import { EmptyState, Skeleton, SlowHint } from "@/components/ui/bits";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
 import type { ReviewLedger, ReviewLedgerGroupBy, ReviewLedgerWorkItem } from "@/lib/review-ledger";
 
@@ -39,7 +39,8 @@ export function ReviewLedgerView({ onOpenMemoryEntry }: { onOpenMemoryEntry: (fi
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
-      setData(null);
+      // 读取失败不清空已有数据：切换聚合方式时旧台账可能正显示着，
+      // 置 null 会让整块消失，被误读成「没有数据」。
     } finally {
       setLoading(false);
     }
@@ -50,6 +51,8 @@ export function ReviewLedgerView({ onOpenMemoryEntry }: { onOpenMemoryEntry: (fi
   }, [groupBy, load]);
 
   const summary = data?.summary;
+  /** 计数三态：成功显示真值，加载中显示 —，失败显示 !（0 只表示「确实是 0」） */
+  const statVal = (n?: number): number | string => (summary ? (n ?? 0) : loading ? "—" : "!");
 
   return (
     <div className="flex flex-col gap-3">
@@ -61,6 +64,9 @@ export function ReviewLedgerView({ onOpenMemoryEntry }: { onOpenMemoryEntry: (fi
             <span className="ml-1 text-[11px] tabular-nums text-dim">
               {summary.from ?? "—"} ~ {summary.to ?? "—"}
             </span>
+          )}
+          {data && error && (
+            <span className="ml-1 text-[11px] text-warn" role="status">数据可能不是最新 · 见下方重试</span>
           )}
           <div className="ml-auto flex items-center gap-2">
             <div className="flex items-center rounded-md border border-line bg-panel-2 p-0.5">
@@ -82,11 +88,11 @@ export function ReviewLedgerView({ onOpenMemoryEntry }: { onOpenMemoryEntry: (fi
             </button>
           </div>
         </CardHeader>
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-          <SummaryStat icon={<GraduationCap size={12} />} label="学到" value={summary?.learned ?? 0} tone="accent" />
-          <SummaryStat icon={<Upload size={12} />} label="更新" value={summary?.touched ?? 0} />
-          <SummaryStat icon={<MinusCircle size={12} />} label="去掉" value={summary?.removed ?? 0} hint="含改写旧版本" />
-          <SummaryStat icon={<ClipboardList size={12} />} label="工作" value={summary?.work ?? 0} />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3" aria-busy={loading}>
+          <SummaryStat icon={<GraduationCap size={12} />} label="学到" value={statVal(summary?.learned)} tone="accent" />
+          <SummaryStat icon={<Upload size={12} />} label="更新" value={statVal(summary?.touched)} />
+          <SummaryStat icon={<MinusCircle size={12} />} label="去掉" value={statVal(summary?.removed)} hint="含改写旧版本" />
+          <SummaryStat icon={<ClipboardList size={12} />} label="工作" value={statVal(summary?.work)} />
           {data?.approximate && <span className="chip chip-warn">近似重建</span>}
         </div>
         {data && (
@@ -98,7 +104,12 @@ export function ReviewLedgerView({ onOpenMemoryEntry }: { onOpenMemoryEntry: (fi
       </Card>
 
       {error && (
-        <Card className="px-4 py-3 text-[12px] text-danger">读复台账失败：{error}</Card>
+        <Card className="flex flex-wrap items-center gap-2 px-4 py-3 text-[12px] text-danger">
+          <span>读复台账失败：{error}</span>
+          <button onClick={() => void load(groupBy)} disabled={loading} className="btn btn-sm btn-ghost">
+            重新读取
+          </button>
+        </Card>
       )}
 
       {loading && !data && (
@@ -106,6 +117,7 @@ export function ReviewLedgerView({ onOpenMemoryEntry }: { onOpenMemoryEntry: (fi
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-16 w-full" />
           ))}
+          <SlowHint hint="首次要扫描记忆文件与工作记录" />
         </Card>
       )}
 
@@ -190,7 +202,7 @@ function SegButton({ active, onClick, children }: { active: boolean; onClick: ()
   );
 }
 
-function SummaryStat({ icon, label, value, tone, hint }: { icon: React.ReactNode; label: string; value: number; tone?: "accent"; hint?: string }) {
+function SummaryStat({ icon, label, value, tone, hint }: { icon: React.ReactNode; label: string; value: number | string; tone?: "accent"; hint?: string }) {
   return (
     <span className="flex items-center gap-1.5 text-[12px]" title={hint}>
       <span className={cn("text-dim", tone === "accent" && "text-accent")}>{icon}</span>

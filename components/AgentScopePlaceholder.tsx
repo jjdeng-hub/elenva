@@ -61,7 +61,16 @@ function dataHome(agent: AgentRecord): { runtime: string; paths: string[] } {
   };
 }
 
-export function AgentScopePlaceholder({ agent, view }: { agent: AgentRecord; view: string }) {
+export function AgentScopePlaceholder({
+  agent,
+  view,
+  onNavigate,
+}: {
+  agent: AgentRecord;
+  view: string;
+  /** 复用外壳的视图切换（setView + hash 同步），把纯文字指示变成可点动作（L5） */
+  onNavigate?: (view: string) => void;
+}) {
   const label = VIEW_LABELS[view] ?? view;
   const home = dataHome(agent);
   const notApplicable = NOT_APPLICABLE[view];
@@ -85,6 +94,18 @@ export function AgentScopePlaceholder({ agent, view }: { agent: AgentRecord; vie
               {notApplicable.instead.map((line) => (
                 <div key={line}>· {line}</div>
               ))}
+              {/* L5：文字里的「去哪」都给出可点入口，而不是让用户自己找路 */}
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                <button type="button" className="btn btn-sm btn-subtle" onClick={() => onNavigate?.("home")}>
+                  回「工作台」
+                </button>
+                <button type="button" className="btn btn-sm btn-subtle" onClick={() => onNavigate?.("identity")}>
+                  去身份
+                </button>
+                <button type="button" className="btn btn-sm btn-subtle" onClick={() => onNavigate?.("memory")}>
+                  去记忆
+                </button>
+              </div>
             </div>
           </Card>
         ) : (
@@ -107,9 +128,21 @@ export function AgentScopePlaceholder({ agent, view }: { agent: AgentRecord; vie
               <CardHeader>
                 <CardTitle>现在能做什么</CardTitle>
               </CardHeader>
-              <div className="flex flex-col gap-1.5 px-4 py-3 text-[12px] text-dim">
-                <div>· 回「工作台」：这条 Agent 的视图与数据都在那里</div>
-                <div>· 已经能进：会话 / 记忆 / 技能 / 节律 / 成长 / 身份</div>
+              <div className="flex flex-col gap-2 px-4 py-3 text-[12px] text-dim">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button type="button" className="btn btn-sm btn-subtle" onClick={() => onNavigate?.("home")}>
+                    回「工作台」
+                  </button>
+                  <span>这条 Agent 的视图与数据都在那里</span>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span>· 已经能进：</span>
+                  {(["chat", "memory", "skills", "rhythm", "growth", "identity"] as const).map((v) => (
+                    <button key={v} type="button" className="btn btn-sm btn-subtle" onClick={() => onNavigate?.(v)}>
+                      {VIEW_LABELS[v]}
+                    </button>
+                  ))}
+                </div>
                 <div>· 「平台」那一组（模型 / 插件 / 系统 / 设置）是所有 Agent 共用的，随时可进</div>
               </div>
             </Card>

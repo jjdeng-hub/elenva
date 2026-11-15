@@ -788,8 +788,17 @@ export function SessionSidebar({
     );
   };
 
+  /* M5：折叠态（w-0 opacity-0）仍保留 DOM，用 inert 让整棵子树退出 Tab 序列；
+     inert 通过 ref 写 DOM 属性，避免依赖 JSX 属性类型。 */
+  const paneRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (paneRef.current) paneRef.current.inert = collapsed;
+  }, [collapsed]);
+
   const pane = (
     <div
+      ref={paneRef}
+      aria-hidden={collapsed ? true : undefined}
       className={cn(
         "flex h-full flex-col border-r border-line bg-panel t-pane",
         // 收起时内容整体淡出：只靠 overflow 裁切会「文字还在、只是被切掉」，
@@ -939,7 +948,8 @@ export function SessionSidebar({
                 <button
                   onClick={() => onCreateInProject(defaultCwd)}
                   title="新建会话（使用默认目录）"
-                  className="relative shrink-0 cursor-pointer rounded-sm p-0.5 text-dim opacity-0 transition-opacity after:absolute after:-inset-1 after:content-[''] hover:text-accent group-hover/hd:opacity-100"
+                  aria-label="新建会话（使用默认目录）"
+                  className="relative shrink-0 cursor-pointer rounded-sm p-0.5 text-dim opacity-0 transition-opacity after:absolute after:-inset-1 after:content-[''] hover:text-accent group-hover/hd:opacity-100 group-focus-within/hd:opacity-100 focus-within:opacity-100 focus-visible:opacity-100"
                 >
                   <Plus size={12} />
                 </button>
@@ -981,7 +991,8 @@ export function SessionSidebar({
                         <button
                           onClick={() => onCreateInProject(g.root!)}
                           title={`在「${g.name}」中新建会话`}
-                          className="relative shrink-0 cursor-pointer rounded-sm p-0.5 text-dim opacity-0 transition-opacity after:absolute after:-inset-1 after:content-[''] hover:text-accent group-hover/proj:opacity-100"
+                          aria-label={`在「${g.name}」中新建会话`}
+                          className="relative shrink-0 cursor-pointer rounded-sm p-0.5 text-dim opacity-0 transition-opacity after:absolute after:-inset-1 after:content-[''] hover:text-accent group-hover/proj:opacity-100 group-focus-within/proj:opacity-100 focus-within:opacity-100 focus-visible:opacity-100"
                         >
                           <Plus size={12} />
                         </button>

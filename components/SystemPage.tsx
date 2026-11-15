@@ -5,8 +5,7 @@ import { Card as UICard, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { cn } from "@/components/lib/utils";
-import { PageHeader, Skeleton } from "@/components/ui/bits";
-import { toast } from "@/components/ui/dialog";
+import { PageHeader, Skeleton, SlowHint } from "@/components/ui/bits";
 import { formatSize, relTime, timeLabel } from "@/lib/format";
 import type { SystemStatus } from "@/lib/system-status";
 
@@ -178,7 +177,7 @@ export function SystemPage() {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
-      toast(message);
+      // 刷新失败保留旧数据，由页头的过期标记 + 重试承载，不再只用一次性 toast
     } finally {
       setLoading(false);
     }
@@ -220,17 +219,28 @@ export function SystemPage() {
           }
         />
 
+        {data && error && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-warn/10 px-3 py-2 text-[12px] text-warn" role="status">
+            <span>数据可能不是最新：{error}</span>
+            <button onClick={() => void load()} disabled={loading} className="btn btn-sm btn-ghost">重试</button>
+          </div>
+        )}
+
         {!data && !error && (
-          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {Array.from({ length: 6 }).map((_, i) => (
-              <Skeleton key={i} className="h-40 rounded-card" />
-            ))}
+          <div className="flex flex-col gap-3">
+            <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <Skeleton key={i} className="h-40 rounded-card" />
+              ))}
+            </div>
+            <SlowHint hint="逐项读取本机服务状态" />
           </div>
         )}
 
         {!data && error && (
-          <UICard className="px-4 py-10 text-center text-[12px] text-warn">
-            读取失败：{error}
+          <UICard className="flex flex-col items-center gap-3 px-4 py-10 text-center text-[12px] text-warn">
+            <span>读取失败：{error}</span>
+            <button onClick={() => void load()} disabled={loading} className="btn btn-sm btn-ghost">重新读取</button>
           </UICard>
         )}
 

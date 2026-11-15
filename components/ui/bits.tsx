@@ -106,17 +106,20 @@ export function PageHeader({
   title,
   subtitle,
   actions,
+  as: Heading = "h2",
 }: {
   icon: React.ReactNode;
   title: string;
   subtitle?: React.ReactNode;
   actions?: React.ReactNode;
+  /** L6：页面级标题用 h1（每页恰好一个 h1）；卡片内嵌标题默认 h2 */
+  as?: "h1" | "h2";
 }) {
   return (
     <div className="mb-5 flex items-center gap-2.5">
       <div className="flex size-9 shrink-0 items-center justify-center rounded-card bg-accent-soft text-accent">{icon}</div>
       <div className="min-w-0">
-        <h2 className="text-[16px] font-bold leading-tight text-fg">{title}</h2>
+        <Heading className="text-[16px] font-bold leading-tight text-fg">{title}</Heading>
         {subtitle && <p className="mt-0.5 text-[12px] text-dim">{subtitle}</p>}
       </div>
       {actions && <div className="ml-auto flex shrink-0 items-center gap-2">{actions}</div>}

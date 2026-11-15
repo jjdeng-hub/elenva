@@ -3,8 +3,7 @@
 import { RefreshCw, TrendingUp } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Card, CardHeader, CardTitle } from "@/components/ui/card";
-import { EmptyState, PageHeader, Skeleton } from "@/components/ui/bits";
-import { toast } from "@/components/ui/dialog";
+import { EmptyState, PageHeader, Skeleton, SlowHint } from "@/components/ui/bits";
 import { cn } from "@/components/lib/utils";
 import type { GrowthBucket, GrowthReport, GrowthWeek } from "@/lib/growth-metrics";
 
@@ -110,7 +109,7 @@ export function GrowthPage() {
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);
-      toast(message);
+      // 刷新失败保留旧数据，由页头的过期标记 + 重试承载，不再只用一次性 toast
     } finally {
       setLoading(false);
     }
@@ -138,12 +137,30 @@ export function GrowthPage() {
           }
         />
 
-        {error && !data && <EmptyState icon={<TrendingUp size={20} />} title="读取失败" hint={error} className="py-14" />}
+        {error && data && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-warn/10 px-3 py-2 text-[12px] text-warn" role="status">
+            <span>数据可能不是最新：{error}</span>
+            <button onClick={() => void load()} disabled={loading} className="btn btn-sm btn-ghost">重试</button>
+          </div>
+        )}
+
+        {error && !data && (
+          <EmptyState
+            icon={<TrendingUp size={20} />}
+            title="读取失败"
+            hint={error}
+            action={
+              <button onClick={() => void load()} disabled={loading} className="btn btn-sm btn-ghost">重新读取</button>
+            }
+            className="py-14"
+          />
+        )}
 
         {!data && !error && (
           <div className="flex flex-col gap-4">
             <Skeleton className="h-56 rounded-card" />
             <Skeleton className="h-40 rounded-card" />
+            <SlowHint hint="跨 8 周扫会话记录需要点时间" />
           </div>
         )}
 

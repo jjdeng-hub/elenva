@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useRef } from "react";
 import { X } from "lucide-react";
+import { useDialogBehavior } from "@/components/ui/dialog";
 
 /**
  * 快捷键总览面板：`?` 唤起，`Esc` 关闭。
@@ -26,7 +27,7 @@ const GROUPS: { title: string; items: Shortcut[] }[] = [
   {
     title: "全局",
     items: [
-      { label: "聚焦搜索框", keys: ["Ctrl", "K"] },
+      { label: "聚焦搜索框", keys: ["Ctrl", "K"], note: "应用包首页不可用" },
       { label: "新建会话", keys: ["Ctrl", "Alt", "N"] },
       { label: "快捷键总览", keys: ["?"] },
     ],
@@ -54,23 +55,16 @@ const GROUPS: { title: string; items: Shortcut[] }[] = [
 ];
 
 export function ShortcutPanel({ open, onClose }: { open: boolean; onClose: () => void }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  /* M11：Esc / Tab 焦点陷阱 / 关闭归还焦点统一走对话框基座 */
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useDialogBehavior(open, onClose, panelRef);
 
   if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-overlay p-4" onMouseDown={onClose}>
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="快捷键总览"

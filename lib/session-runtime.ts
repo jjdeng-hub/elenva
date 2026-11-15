@@ -51,6 +51,7 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): SessionRun
       session: options.session,
       onAgentEnd: options.onAgentEnd,
       onSystemToolsChange: options.onSystemToolsChange as UseAcpSessionOptions["onSystemToolsChange"],
+      chatInputRef: options.chatInputRef,
     };
     return useAcpSession(acpOptions);
   }

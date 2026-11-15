@@ -65,6 +65,10 @@ export function IdentityPage() {
   /** 最近一次「已落盘」的段落，用来判断是否 dirty */
   const savedRef = useRef<string>("[]");
   const previewSeq = useRef(0);
+  /** 409 冲突：常驻冲突条，直到用户处理；草稿绝不自动被 load() 覆盖 */
+  const [conflict, setConflict] = useState<string | null>(null);
+  /** 「查看服务端版本」前保存的我的草稿，可一键切回 */
+  const [draftBackup, setDraftBackup] = useState<IdentitySection[] | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -101,6 +105,17 @@ export function IdentityPage() {
   const emptyBodyIndex = sections.findIndex((s) => !s.body.trim());
   const overLimit = data ? draftChars > data.limit : false;
   const canSave = dirty && !saving && emptyBodyIndex < 0 && !overLimit;
+  const saveDisabledReason = saving
+    ? "正在保存…"
+    : conflict
+      ? "有冲突待处理，请先在上方冲突条选择处理方式"
+      : !dirty
+        ? "没有未保存改动"
+        : emptyBodyIndex >= 0
+          ? "有段落正文为空，请补全"
+          : overLimit
+            ? `超出字数上限（${draftChars} / ${data?.limit ?? 0}）`
+            : "";
 
   /* 生效预览：改动后 500ms 防抖，用服务端装配函数拼一遍 */
   useEffect(() => {
@@ -157,22 +172,28 @@ export function IdentityPage() {
     setSections((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const save = async () => {
+  const save = async (overrideRevision?: string) => {
     setSaving(true);
     try {
       const res = await fetch("/api/identity", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sections, revision }),
+        body: JSON.stringify({ sections, revision: overrideRevision ?? revision }),
       });
       const d = (await res.json()) as { ok?: boolean; error?: string; revision?: string; history?: HistoryEntry[] };
       if (!res.ok || !d.ok) {
+        if (res.status === 409) {
+          // 冲突时不 load()：草稿一条都不能丢，改由常驻冲突条处理
+          setConflict(d.error ?? "服务端已有新版本，你的草稿仍完整保留在编辑区。");
+          return;
+        }
         toast(d.error ?? "保存失败");
-        if (res.status === 409) await load();
         return;
       }
       savedRef.current = JSON.stringify(sections);
-      setRevision(d.revision ?? revision);
+      setRevision(d.revision ?? overrideRevision ?? revision);
+      setConflict(null);
+      setDraftBackup(null);
       if (d.history) setData((prev) => (prev ? { ...prev, history: d.history!, chars: draftChars, source: "file", error: undefined } : prev));
       toast("已保存 · 两端新建会话生效");
     } catch (error) {
@@ -180,6 +201,44 @@ export function IdentityPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  /** 冲突后「用我的内容覆盖」：先读服务端最新 revision（不覆盖草稿），二次确认后提交 */
+  const forceSave = async () => {
+    const ok = await dialogConfirm({
+      title: "用我的内容覆盖服务端版本？",
+      message: "服务端已有别人保存的新版本。强制保存会用你编辑区的内容覆盖它，对方的版本仍留在历史里但不再是当前值。",
+      confirmText: "覆盖并保存",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      const res = await fetch("/api/identity", { cache: "no-store" });
+      const d = (await res.json()) as IdentityPayload & { error?: string };
+      if (!res.ok) throw new Error(d.error ?? "读取服务端版本失败");
+      await save(d.revision);
+    } catch (error) {
+      toast(`强制保存失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  /** 冲突后「查看服务端版本」：先存草稿快照，再展示服务端内容，可一键切回 */
+  const viewServer = async () => {
+    try {
+      const res = await fetch("/api/identity", { cache: "no-store" });
+      const d = (await res.json()) as IdentityPayload & { error?: string };
+      if (!res.ok) throw new Error(d.error ?? "读取服务端版本失败");
+      setDraftBackup(sections.map((s) => ({ ...s })));
+      setSections(d.sections.map((s) => ({ ...s })));
+      setRevision(d.revision);
+    } catch (error) {
+      toast(`读取服务端版本失败：${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
+  const backToDraft = () => {
+    if (draftBackup) setSections(draftBackup.map((s) => ({ ...s })));
+    setDraftBackup(null);
   };
 
   const viewHistory = async (id: string) => {
@@ -212,8 +271,12 @@ export function IdentityPage() {
       });
       const d = (await res.json()) as { ok?: boolean; error?: string };
       if (!res.ok || !d.ok) {
+        if (res.status === 409) {
+          // 恢复同样遇到并发写入：保留当前草稿，交给常驻冲突条处理
+          setConflict(d.error ?? "服务端已有新版本，你的草稿仍完整保留在编辑区。");
+          return;
+        }
         toast(d.error ?? "恢复失败");
-        if (res.status === 409) await load();
         return;
       }
       toast("已恢复（当前值也已进历史，可再撤回）");
@@ -252,12 +315,45 @@ export function IdentityPage() {
               <button onClick={() => void load()} disabled={loading || saving} className="btn btn-sm btn-ghost">
                 <RefreshCw size={12} className={loading ? "anim-spin" : undefined} /> 刷新
               </button>
-              <button onClick={() => void save()} disabled={!canSave} className="btn btn-primary btn-sm" data-testid="identity-save">
-                {saving ? <Loader2 size={12} className="anim-spin" /> : <Save size={12} />} 保存
+              {!canSave && saveDisabledReason && (
+                <span className="text-[11px] text-dim" role="status">{saveDisabledReason}</span>
+              )}
+              <button
+                onClick={() => void save()}
+                disabled={!canSave || !!conflict}
+                title={saveDisabledReason || "保存到两端新建会话生效"}
+                className="btn btn-primary btn-sm"
+                data-testid="identity-save"
+              >
+                {conflict ? (
+                  "有冲突待处理"
+                ) : (
+                  <>{saving ? <Loader2 size={12} className="anim-spin" /> : <Save size={12} />} 保存</>
+                )}
               </button>
             </>
           }
         />
+
+        {conflict && (
+          <div className="mb-4 flex flex-wrap items-center gap-2 rounded-card border border-warn/30 bg-warn/10 px-4 py-3 text-[12px] leading-relaxed text-warn" role="status">
+            <span className="min-w-0 flex-1">
+              服务端已有别人保存的新版本，你的草稿仍完整保留在编辑区，未被覆盖。{conflict}
+            </span>
+            <button onClick={() => void forceSave()} disabled={saving} className="btn btn-sm btn-ghost shrink-0">
+              用我的内容覆盖（强制保存）
+            </button>
+            <button onClick={() => void viewServer()} disabled={saving} className="btn btn-sm btn-ghost shrink-0">
+              查看服务端版本
+            </button>
+            {draftBackup && (
+              <button onClick={backToDraft} className="btn btn-sm btn-ghost shrink-0">切回我的草稿</button>
+            )}
+            <button onClick={() => { setConflict(null); setDraftBackup(null); }} className="btn btn-sm btn-ghost shrink-0">
+              先不处理
+            </button>
+          </div>
+        )}
 
         {loading && !data ? (
           <EmptyState icon={<Loader2 size={16} className="anim-spin" />} title="正在读取身份…" />

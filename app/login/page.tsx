@@ -65,7 +65,7 @@ export default function LoginPage() {
       <div className="w-full max-w-[380px]">
         <div className="mb-5 flex flex-col items-center">
           <LogoMark size={40} />
-          <div className="mt-3 text-[16px] font-bold tracking-[0.12em]">ELENVA</div>
+          <h1 className="mt-3 text-[16px] font-bold tracking-[0.12em]">ELENVA</h1>
           <div className="mt-1 text-[11px] tracking-[0.22em] text-dim">在确定性中寻找出口</div>
         </div>
 
@@ -92,6 +92,7 @@ export default function LoginPage() {
                     if (e.key === "Enter") void submit();
                   }}
                   placeholder="访问密码"
+                  aria-label="访问密码"
                   autoComplete="current-password"
                   data-testid="web-password"
                   className="h-9 min-w-0 flex-1 rounded-md border border-line bg-panel-2 px-2.5 text-[13px] text-fg outline-none focus:border-accent/60"

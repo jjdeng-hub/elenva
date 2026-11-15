@@ -194,7 +194,12 @@ export function AgentResourcesPage({ agent, kind }: { agent: AgentRecord; kind: 
       <div className="mx-auto flex max-w-4xl flex-col gap-4">
         <div className="flex flex-wrap items-baseline gap-2">
           <h1 className="text-[20px] font-bold tracking-tight">{agent.name} · {TITLES[kind]}</h1>
-          <span className="chip">只读</span>
+          {/* L7：soul 实际有 textarea 与保存按钮，页头标记必须与可操作性一致 */}
+          {kind === "soul" ? (
+            <span className="chip chip-accent">可编辑 · 保存后写入</span>
+          ) : (
+            <span className="chip">只读</span>
+          )}
           <span className="text-[11px] text-dim">来自 {profileHome(agent)}</span>
         </div>
 
@@ -258,7 +263,13 @@ export function AgentResourcesPage({ agent, kind }: { agent: AgentRecord; kind: 
                   <button type="button" className="btn btn-sm btn-ghost" onClick={() => setSoulDraft(soul.content)}>
                     还原
                   </button>
-                  <span className={cn("text-[11px]", soulState === "error" ? "text-danger" : "text-dim")}>
+                  <span
+                    role="status"
+                    className={cn(
+                      "text-[11px]",
+                      soulState === "error" ? "text-danger" : soulState === "saved" ? "text-success" : "text-dim",
+                    )}
+                  >
                     {soulMsg ?? "这是它的身份与规则（系统提示词第 1 段）；技能与记忆不在这个文件里"}
                   </span>
                 </div>

@@ -145,6 +145,7 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
   const [archiving, setArchiving] = useState<string | null>(null);
   // 用量与建议（模块 4 R5）：用量取 /api/skill-usage（含近 7/30 天窗口），建议由纯函数现算
   const [usage, setUsage] = useState<SkillUsageReport | null>(null);
+  const [usageError, setUsageError] = useState<string | null>(null);
   const [entries, setEntries] = useState<LifecycleEntry[]>([]);
 
   const advisor = useMemo(
@@ -184,12 +185,14 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
   }, []);
 
   const loadUsage = useCallback(async () => {
+    setUsageError(null);
     try {
-      const data = await fetch("/api/skill-usage", { cache: "no-store" });
-      if (!data.ok) return;
-      setUsage((await data.json()) as SkillUsageReport);
-    } catch {
-      /* 拿不到就不显示用量 */
+      const res = await fetch("/api/skill-usage", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setUsage((await res.json()) as SkillUsageReport);
+    } catch (e) {
+      // 失败不再静默：usage 保持 null 会恒显示「扫描中」，改用内联失败块 + 重试
+      setUsageError(e instanceof Error ? e.message : String(e));
     }
   }, []);
 
@@ -325,16 +328,24 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
   };
 
   const toggle = async (s: SkillInfo) => {
+    if (toggling) return;
     setToggling(s.filePath);
+    const next = !s.disableModelInvocation;
     try {
-      await fetch("/api/skills", {
+      const res = await fetch("/api/skills", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ filePath: s.filePath, disableModelInvocation: !s.disableModelInvocation }),
+        body: JSON.stringify({ filePath: s.filePath, disableModelInvocation: next }),
       });
+      const d = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) throw new Error(d.error || `保存失败（HTTP ${res.status}）`);
+      // 成功后才翻转开关，翻转本身即「即时生效」的可见确认
       setSkills((prev) =>
-        prev.map((x) => (x.filePath === s.filePath ? { ...x, disableModelInvocation: !s.disableModelInvocation } : x)),
+        prev.map((x) => (x.filePath === s.filePath ? { ...x, disableModelInvocation: next } : x)),
       );
+    } catch (e) {
+      // 开关保持原值（没有先翻转），失败只报原因，不产生假状态
+      toast(`开关未保存：${e instanceof Error ? e.message : String(e)}，请重试`);
     } finally {
       setToggling(null);
     }
@@ -435,7 +446,11 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
         <PageHeader
           icon={<Library size={16} />}
           title="技能"
-          subtitle={`管理 Agent 可用的 Skills · 共 ${loading ? "—" : skills.length} 个`}
+          subtitle={
+            <span aria-busy={loading}>
+              管理 Agent 可用的 Skills · 共 {loading ? "—" : loadError ? "!" : skills.length} 个
+            </span>
+          }
           actions={
             <button
               onClick={() => defaultCwd && load(defaultCwd)}
@@ -703,6 +718,12 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
             与整理助手的采纳 UX（候选 → 确认列明对象 → 逐个执行 → 汇总 toast），
             归档动作全部复用既有确认流，绝不自动执行。 */}
         <Card className="mt-5">
+          {usage && usageError && (
+            <div className="flex flex-wrap items-center gap-2 px-4 pt-3 text-[12px] text-warn" role="status">
+              <span>用量数据可能不是最新：{usageError}</span>
+              <button onClick={() => void loadUsage()} className="btn btn-sm btn-ghost">重试</button>
+            </div>
+          )}
           <div className="flex flex-wrap items-center gap-2 px-4 pt-4">
             <TrendingUp size={14} className="text-accent" />
             <span className="text-[13px] font-semibold text-fg">用量与建议</span>
@@ -733,7 +754,12 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
               </button>
             )}
           </div>
-          {!usage ? (
+          {!usage && usageError ? (
+            <div className="flex flex-wrap items-center gap-2 px-4 py-6 text-[12px] text-danger">
+              <span>用量统计读取失败：{usageError}</span>
+              <button onClick={() => void loadUsage()} className="btn btn-sm btn-ghost">重新读取</button>
+            </div>
+          ) : !usage ? (
             <div className="flex items-center gap-2 px-4 py-6 text-[12px] text-dim">
               <Loader2 size={14} className="animate-spin" /> 扫描会话统计技能调用与读取…
             </div>

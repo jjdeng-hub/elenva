@@ -24,7 +24,7 @@ import { ProfilesSection } from "@/components/ProfilesSection";
 import { cn } from "@/components/lib/utils";
 import { useSound } from "@/hooks/useSound";
 import { MAX_VOLUME, type SoundPack } from "@/lib/sound";
-import { toast } from "@/components/ui/dialog";
+import { toast, dialogConfirm } from "@/components/ui/dialog";
 import { PageHeader } from "@/components/ui/bits";
 import { getToolNamesForPreset, TOOL_PRESET_VALUES, type ToolPreset } from "@/lib/tool-presets";
 import type { ApprovalMode } from "@/lib/tool-risk";
@@ -90,6 +90,8 @@ const inputCls =
 function PiSettingsSection() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [path, setPath] = useState<string>("");
   const [form, setForm] = useState<{ steeringMode: "all" | "one-at-a-time"; followUpMode: "all" | "one-at-a-time" }>({
     steeringMode: "one-at-a-time",
@@ -107,39 +109,56 @@ function PiSettingsSection() {
   const [startupDefault, setStartupDefault] = useState<{ provider?: string; model?: string }>({});
   const [resettingDefault, setResettingDefault] = useState(false);
 
-  useEffect(() => {
-    fetch("/api/pi-settings", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d: { path?: string; settings?: PiManagedSettings }) => {
-        if (!d.settings) return;
-        setPath(d.path ?? "");
-        setForm({
-          steeringMode: d.settings.steeringMode ?? "one-at-a-time",
-          followUpMode: d.settings.followUpMode ?? "one-at-a-time",
-        });
-        setCompactionEnabled(d.settings.compaction?.enabled ?? true);
-        setReserveTokens(d.settings.compaction?.reserveTokens ?? 16384);
-        setKeepRecentTokens(d.settings.compaction?.keepRecentTokens ?? 20000);
-        setRetryEnabled(d.settings.retry?.enabled ?? true);
-        setMaxRetries(d.settings.retry?.maxRetries ?? 3);
-        setCacheWarming(d.settings.cacheWarming ?? "streaming");
-        setStartupDefault({
-          provider: d.settings.defaultProvider,
-          model: d.settings.defaultModel,
-        });
-        if (d.settings.defaultTools) {
-          const names = [...d.settings.defaultTools].sort().join(",");
-          const match = TOOL_PRESET_VALUES.find((p) => getToolNamesForPreset(p).sort().join(",") === names);
-          setToolSelect(match ?? "pi-default");
-        }
-      })
-      .catch(() => toast("读取 Pi 设置失败"))
-      .finally(() => setLoading(false));
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const res = await fetch("/api/pi-settings", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = (await res.json()) as { path?: string; settings?: PiManagedSettings };
+      if (!d.settings) return;
+      setPath(d.path ?? "");
+      setForm({
+        steeringMode: d.settings.steeringMode ?? "one-at-a-time",
+        followUpMode: d.settings.followUpMode ?? "one-at-a-time",
+      });
+      setCompactionEnabled(d.settings.compaction?.enabled ?? true);
+      setReserveTokens(d.settings.compaction?.reserveTokens ?? 16384);
+      setKeepRecentTokens(d.settings.compaction?.keepRecentTokens ?? 20000);
+      setRetryEnabled(d.settings.retry?.enabled ?? true);
+      setMaxRetries(d.settings.retry?.maxRetries ?? 3);
+      setCacheWarming(d.settings.cacheWarming ?? "streaming");
+      setStartupDefault({
+        provider: d.settings.defaultProvider,
+        model: d.settings.defaultModel,
+      });
+      if (d.settings.defaultTools) {
+        const names = [...d.settings.defaultTools].sort().join(",");
+        const match = TOOL_PRESET_VALUES.find((p) => getToolNamesForPreset(p).sort().join(",") === names);
+        setToolSelect(match ?? "pi-default");
+      }
+    } catch (e) {
+      // 读失败不呈现可保存的默认值：整卡改渲染错误 + 重新读取
+      setLoadError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   /** 重置为自动选择：删掉 defaultProvider/defaultModel/defaultThinkingLevel 三个键，
    *  新会话回到「按 enabledModels / 可用性自动挑」——此前只有手工改 settings.json 一条路。 */
   const resetStartupDefault = async () => {
+    const ok = await dialogConfirm({
+      title: "重置启动默认模型",
+      message: "将删除 defaultProvider / defaultModel / defaultThinkingLevel，新会话回到按已启用模型自动选择。当前固定的默认模型会被清除。",
+      confirmText: "重置",
+      danger: true,
+    });
+    if (!ok) return;
     setResettingDefault(true);
     try {
       const res = await fetch("/api/pi-settings", {
@@ -159,7 +178,9 @@ function PiSettingsSection() {
   };
 
   const save = async () => {
+    if (loadError) return; // 读取未成功，不允许基于假值写入
     setSaving(true);
+    setSaveError(null);
     try {
       const body: PiManagedSettings = {
         steeringMode: form.steeringMode,
@@ -179,13 +200,11 @@ function PiSettingsSection() {
         body: JSON.stringify(body),
       });
       const d = (await res.json()) as { error?: string };
-      if (!res.ok) {
-        toast(`保存失败：${d.error ?? res.status}`);
-        return;
-      }
+      if (!res.ok) throw new Error(d.error || `HTTP ${res.status}`);
       toast("已保存到 ~/.pi/agent/settings.json，新会话生效");
-    } catch {
-      toast("保存失败（网络原因）");
+    } catch (e) {
+      // 表单值保留供修改，标记「未保存」并提供重试
+      setSaveError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
@@ -199,7 +218,7 @@ function PiSettingsSection() {
         <span className="truncate text-[11px] text-dim">{path || "~/.pi/agent/settings.json"}</span>
         <button
           onClick={() => void save()}
-          disabled={loading || saving}
+          disabled={loading || saving || !!loadError}
           data-testid="pi-settings-save"
           className="btn btn-primary ml-auto shrink-0"
         >
@@ -210,8 +229,19 @@ function PiSettingsSection() {
         <div className="flex justify-center py-5">
           <Loader2 size={14} className="animate-spin text-dim" />
         </div>
+      ) : loadError ? (
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3.5 text-[12px] text-danger">
+          <span>Pi 设置读取失败：{loadError}。显示的不是服务端真实值，已暂停保存。</span>
+          <button onClick={() => void load()} className="btn btn-sm btn-ghost">重新读取</button>
+        </div>
       ) : (
         <div className="divide-y divide-line-soft">
+          {saveError && (
+            <div className="flex flex-wrap items-center gap-2 px-4 py-2.5 text-[12px] text-danger">
+              <span>未保存：{saveError}（已填内容仍在，可重试）</span>
+              <button onClick={() => void save()} disabled={saving || !!loadError} className="btn btn-sm btn-ghost">重试</button>
+            </div>
+          )}
           <Field
             label="启动默认模型"
             hint="写入 settings.json 的 defaultProvider/defaultModel，所有新会话的落选；聊天里选模型会更新它。重置后按已启用模型自动挑。"
@@ -340,16 +370,25 @@ function ToolsSection() {
   const [psEnabled, setPsEnabled] = useState<boolean | null>(null);
   const [isWindows, setIsWindows] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const res = await fetch("/api/tools/settings", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const d = (await res.json()) as { isWindows?: boolean; powerShellEnabled?: boolean };
+      setIsWindows(d.isWindows ?? true);
+      setPsEnabled(d.powerShellEnabled ?? false);
+    } catch (e) {
+      // 读失败不填 false：psEnabled 保持 null，整卡改渲染错误 + 重新读取
+      setLoadError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
 
   useEffect(() => {
-    fetch("/api/tools/settings", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((d: { isWindows?: boolean; powerShellEnabled?: boolean }) => {
-        setIsWindows(d.isWindows ?? true);
-        setPsEnabled(d.powerShellEnabled ?? false);
-      })
-      .catch(() => setPsEnabled(false));
-  }, []);
+    void load();
+  }, [load]);
 
   const toggle = async () => {
     if (psEnabled === null) return;
@@ -376,12 +415,20 @@ function ToolsSection() {
         <CardTitle>工具</CardTitle>
         <span className="ml-auto text-[11px] text-dim">即时生效</span>
       </CardHeader>
+      {loadError && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-line-soft px-4 py-2.5 text-[12px] text-danger">
+          <span>工具设置读取失败：{loadError}。显示的不是服务端真实值，已暂停操作。</span>
+          <button onClick={() => void load()} className="btn btn-sm btn-ghost">重新读取</button>
+        </div>
+      )}
       <div className="flex items-center gap-3 px-4 py-3.5">
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium text-fg">PowerShell 工具</div>
           <p className="text-[12px] text-dim">允许 Agent 在 Windows 上执行 PowerShell 命令</p>
         </div>
-        {psEnabled === null ? (
+        {loadError ? (
+          <span className="text-[12px] text-danger">读取失败，开关已暂停</span>
+        ) : psEnabled === null ? (
           <Loader2 size={14} className="animate-spin text-dim" />
         ) : !isWindows ? (
           <div className="flex shrink-0 items-center gap-2" title="当前系统不支持（仅 Windows 可用）">
@@ -400,7 +447,7 @@ function ToolsSection() {
         ) : (
           <button
             onClick={toggle}
-            disabled={saving}
+            disabled={saving || !!loadError}
             role="switch"
             aria-checked={psEnabled}
             aria-label="PowerShell 工具"
@@ -831,6 +878,13 @@ function GuardrailsSection({ projects, defaultCwd }: {
   const [declared, setDeclared] = useState<string[]>([]);
   const [verifyDraft, setVerifyDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [verifyLoadError, setVerifyLoadError] = useState<string | null>(null);
+  const [writeState, setWriteState] = useState<{
+    kind: "idle" | "saved" | "error";
+    text: string;
+    retryBody: Record<string, unknown> | null;
+  }>({ kind: "idle", text: "", retryBody: null });
 
   /*
    * 声明列表按当前选中项目单独拉：cwd 的写法在不同来源不一致
@@ -840,17 +894,29 @@ function GuardrailsSection({ projects, defaultCwd }: {
   const loadVerify = useCallback((cwd: string) => {
     if (!cwd) {
       setDeclared([]);
+      setVerifyLoadError(null);
       return;
     }
+    setVerifyLoadError(null);
     fetch(`/api/guardrails?cwd=${encodeURIComponent(cwd)}`, { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((d: { verifyCommands?: string[] }) => setDeclared(d.verifyCommands ?? []))
-      .catch(() => setDeclared([]));
+      .catch((e) => {
+        // 读失败不置空：保留已有声明，由内联错误块 + 重试承载
+        setVerifyLoadError(e instanceof Error ? e.message : String(e));
+      });
   }, []);
 
-  const load = () => {
+  const load = useCallback(() => {
+    setLoadError(null);
     fetch("/api/guardrails", { cache: "no-store" })
-      .then((r) => r.json())
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        return r.json();
+      })
       .then((d: {
         approvalMode?: ApprovalMode;
         approvalFallback?: "reject" | "queue";
@@ -872,9 +938,12 @@ function GuardrailsSection({ projects, defaultCwd }: {
         setWeeklyDraft(d.budgets?.weeklyUsd !== undefined ? String(d.budgets.weeklyUsd) : "");
         setSessionDraft(d.budgets?.sessionUsd !== undefined ? String(d.budgets.sessionUsd) : "");
       })
-      .catch(() => setMode("risky"));
-  };
-  useEffect(load, []);
+      .catch((e) => {
+        // 读失败不填 "risky"：显示的不是服务端真实值，整卡写入被暂停
+        setLoadError(e instanceof Error ? e.message : String(e));
+      });
+  }, []);
+  useEffect(load, [load]);
   useEffect(() => {
     if (!verifyCwd && (defaultCwd || projects?.[0]?.path)) {
       setVerifyCwd(defaultCwd ?? projects?.[0]?.path ?? "");
@@ -884,8 +953,18 @@ function GuardrailsSection({ projects, defaultCwd }: {
     loadVerify(verifyCwd);
   }, [verifyCwd, loadVerify]);
 
-  const post = async (body: Record<string, unknown>) => {
+  /** 统一写入：成功给非打扰确认，失败回滚到调用方给的原值并标「未保存」+「重试」。
+   *  不再向外抛 rejection，杜绝 void post(...) 的未捕获异常。 */
+  const post = async (
+    body: Record<string, unknown>,
+    opts?: { rollback?: () => void; successText?: string },
+  ): Promise<Record<string, unknown> | null> => {
+    if (loadError) {
+      setWriteState({ kind: "error", text: "读取失败，请先点「重新读取」再保存", retryBody: null });
+      return null;
+    }
     setSaving(true);
+    setWriteState({ kind: "idle", text: "", retryBody: body });
     try {
       const res = await fetch("/api/guardrails", {
         method: "POST",
@@ -893,10 +972,20 @@ function GuardrailsSection({ projects, defaultCwd }: {
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return await res.json() as Record<string, unknown>;
+      const data = (await res.json()) as Record<string, unknown>;
+      setWriteState({ kind: "saved", text: opts?.successText ?? "已保存 · 即时生效", retryBody: null });
+      window.setTimeout(() => {
+        setWriteState((s) => (s.kind === "saved" ? { kind: "idle", text: "", retryBody: null } : s));
+      }, 2500);
+      return data;
     } catch (e) {
-      toast("保存失败（网络原因）");
-      throw e;
+      opts?.rollback?.();
+      setWriteState({
+        kind: "error",
+        text: `未保存：${e instanceof Error ? e.message : String(e)} · 请重试`,
+        retryBody: body,
+      });
+      return null;
     } finally {
       setSaving(false);
     }
@@ -911,7 +1000,12 @@ function GuardrailsSection({ projects, defaultCwd }: {
   const addVerify = async () => {
     const pattern = verifyDraft.trim();
     if (!pattern || !verifyCwd) return;
-    await post({ action: "addVerifyCommand", cwd: verifyCwd, pattern });
+    if (verifyLoadError) {
+      setWriteState({ kind: "error", text: "验证命令读取失败，请先点「重新读取」再修改", retryBody: null });
+      return;
+    }
+    const data = await post({ action: "addVerifyCommand", cwd: verifyCwd, pattern });
+    if (!data) return; // 失败保留草稿
     setVerifyDraft("");
     loadVerify(verifyCwd);
   };
@@ -933,17 +1027,24 @@ function GuardrailsSection({ projects, defaultCwd }: {
       return;
     }
     const data = await post({ action: "setBudgets", dailyUsd: daily, weeklyUsd: weekly, sessionUsd: session });
+    if (!data) return;
     const saved = (data.budgets as { dailyUsd?: number; weeklyUsd?: number; sessionUsd?: number } | undefined) ?? {};
     setDailyDraft(saved.dailyUsd !== undefined ? String(saved.dailyUsd) : "");
     setWeeklyDraft(saved.weeklyUsd !== undefined ? String(saved.weeklyUsd) : "");
     setSessionDraft(saved.sessionUsd !== undefined ? String(saved.sessionUsd) : "");
-    toast("预算上限已保存");
   };
 
   const removeVerify = async (pattern: string) => {
     if (!verifyCwd) return;
-    await post({ action: "removeVerifyCommand", cwd: verifyCwd, pattern });
-    loadVerify(verifyCwd);
+    const ok = await dialogConfirm({
+      title: "移除验证命令",
+      message: `移除「${pattern}」后，命令里不再把它当作验证证据。`,
+      confirmText: "移除",
+      danger: true,
+    });
+    if (!ok) return;
+    const data = await post({ action: "removeVerifyCommand", cwd: verifyCwd, pattern });
+    if (data) loadVerify(verifyCwd);
   };
 
   const ruleEntries = Object.entries(allowByProject);
@@ -980,6 +1081,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
   /** 写项目策略：patch 里的 null 表示该键回到继承；patch 为 null 整条清除 */
   const saveProjectPolicy = async (cwd: string, patch: Record<string, unknown> | null) => {
     const data = await post({ action: "setProjectPolicy", cwd, policy: patch });
+    if (!data) return;
     setPolicyByProject((data.policyByProject as Record<string, ProjectPolicy> | undefined) ?? {});
   };
 
@@ -1000,23 +1102,57 @@ function GuardrailsSection({ projects, defaultCwd }: {
         <span className="ml-auto text-[11px] text-dim">即时生效</span>
       </CardHeader>
       <div className="px-4 py-3.5">
+        {loadError && (
+          <div className="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-danger/10 px-2.5 py-2 text-[12px] leading-relaxed text-danger">
+            <span>安全确认设置读取失败：{loadError}。显示的不是服务端真实值，已暂停保存；点「重新读取」恢复。</span>
+            <button onClick={() => void load()} className="btn btn-sm btn-ghost shrink-0">重新读取</button>
+          </div>
+        )}
+        {writeState.kind !== "idle" && (
+          <div
+            className={cn(
+              "mb-3 flex flex-wrap items-center gap-2 rounded-md px-2.5 py-2 text-[12px]",
+              writeState.kind === "saved" ? "bg-success/10 text-success" : "bg-danger/10 text-danger",
+            )}
+            role="status"
+          >
+            <span>{writeState.text}</span>
+            {writeState.kind === "error" && writeState.retryBody && (
+              <button
+                onClick={() => void post(writeState.retryBody!)}
+                disabled={saving}
+                className="btn btn-sm btn-ghost shrink-0"
+              >
+                重试
+              </button>
+            )}
+          </div>
+        )}
         <div className="text-[13px] font-medium text-fg">危险操作审批</div>
         <p className="mt-0.5 text-[12px] text-dim">
           Agent 执行被判定为危险的操作前，在会话里弹确认卡；选择「总是允许」后不再打扰。
         </p>
         <div className="mt-2.5 flex flex-col gap-1.5 sm:flex-row">
           {mode === null ? (
-            <Loader2 size={14} className="animate-spin text-dim" />
+            loadError ? (
+              <span className="text-[12px] text-danger">读取失败，暂不可切换</span>
+            ) : (
+              <Loader2 size={14} className="animate-spin text-dim" />
+            )
           ) : (
             CHOICES.map((choice) => {
               const on = mode === choice.id;
               return (
                 <button
                   key={choice.id}
-                  disabled={saving}
+                  disabled={saving || !!loadError}
                   onClick={() => {
+                    const prev = mode;
                     setMode(choice.id);
-                    void post({ action: "setApprovalMode", mode: choice.id });
+                    void post(
+                      { action: "setApprovalMode", mode: choice.id },
+                      { rollback: () => setMode(prev) },
+                    );
                   }}
                   aria-pressed={on}
                   className={cn(
@@ -1085,8 +1221,17 @@ function GuardrailsSection({ projects, defaultCwd }: {
                     </span>
                     {Object.keys(row.policy).length > 0 && (
                       <button
-                        disabled={saving}
-                        onClick={() => void saveProjectPolicy(row.cwd, null)}
+                        disabled={saving || !!loadError}
+                        onClick={async () => {
+                          const ok = await dialogConfirm({
+                            title: "清除该项目的全部设置",
+                            message: `「${row.name}」的审批档 / 无人时 / MCP 写确认覆盖会全部清除，回到跟随全局。`,
+                            confirmText: "清除",
+                            danger: true,
+                          });
+                          if (!ok) return;
+                          void saveProjectPolicy(row.cwd, null);
+                        }}
                         className="shrink-0 cursor-pointer text-[11px] text-dim t-fast hover:text-danger disabled:opacity-50"
                         title="清除该项目的全部档位覆盖，回到全继承"
                       >
@@ -1099,7 +1244,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
                       审批档
                       <select
                         value={row.policy.approvalMode ?? ""}
-                        disabled={saving}
+                        disabled={saving || !!loadError}
                         onChange={(e) =>
                           void saveProjectPolicy(row.cwd, {
                             approvalMode: e.target.value === "" ? null : e.target.value,
@@ -1116,7 +1261,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
                       无人时
                       <select
                         value={row.policy.approvalFallback ?? ""}
-                        disabled={saving}
+                        disabled={saving || !!loadError}
                         onChange={(e) =>
                           void saveProjectPolicy(row.cwd, {
                             approvalFallback: e.target.value === "" ? null : e.target.value,
@@ -1134,7 +1279,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
                         value={row.policy.mcpWriteApproval === undefined
                           ? ""
                           : row.policy.mcpWriteApproval ? "on" : "off"}
-                        disabled={saving}
+                        disabled={saving || !!loadError}
                         onChange={(e) =>
                           void saveProjectPolicy(row.cwd, {
                             mcpWriteApproval: e.target.value === "" ? null : e.target.value === "on",
@@ -1160,11 +1305,15 @@ function GuardrailsSection({ projects, defaultCwd }: {
           </div>
           <Toggle
             on={planDefault}
-            disabled={saving}
+            disabled={saving || !!loadError}
             label="新会话默认进入计划模式"
             onChange={(next) => {
+              const prev = planDefault;
               setPlanDefault(next);
-              void post({ action: "setPlanModeDefault", enabled: next });
+              void post(
+                { action: "setPlanModeDefault", enabled: next },
+                { rollback: () => setPlanDefault(prev) },
+              );
             }}
           />
         </div>
@@ -1178,11 +1327,15 @@ function GuardrailsSection({ projects, defaultCwd }: {
           </div>
           <Toggle
             on={verificationGuard}
-            disabled={saving}
+            disabled={saving || !!loadError}
             label="收尾验证门禁"
             onChange={(next) => {
+              const prev = verificationGuard;
               setVerificationGuard(next);
-              void post({ action: "setVerificationGuard", enabled: next });
+              void post(
+                { action: "setVerificationGuard", enabled: next },
+                { rollback: () => setVerificationGuard(prev) },
+              );
             }}
           />
         </div>
@@ -1244,7 +1397,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
             </label>
             <button
               onClick={() => void saveBudgets()}
-              disabled={saving}
+              disabled={saving || !!loadError}
               className="btn btn-sm shrink-0"
             >
               保存
@@ -1259,6 +1412,13 @@ function GuardrailsSection({ projects, defaultCwd }: {
             （如 <span className="font-mono">python tools/style-converge.py</span>）请在这里声明：
             命令里<span className="text-fg">包含</span>这段文字就算验证，会以「项目检查」记进证据账本。
           </p>
+
+          {verifyLoadError && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 rounded-md bg-danger/10 px-2.5 py-2 text-[12px] text-danger">
+              <span>验证命令读取失败：{verifyLoadError}，已暂停修改以免覆盖已有声明。</span>
+              <button onClick={() => loadVerify(verifyCwd)} className="btn btn-sm btn-ghost shrink-0">重新读取</button>
+            </div>
+          )}
 
           {(projects?.length ?? 0) > 0 && (
             <select
@@ -1287,7 +1447,7 @@ function GuardrailsSection({ projects, defaultCwd }: {
             />
             <button
               onClick={() => void addVerify()}
-              disabled={saving || !verifyDraft.trim() || !verifyCwd}
+              disabled={saving || !!loadError || !!verifyLoadError || !verifyDraft.trim() || !verifyCwd}
               className="btn btn-sm shrink-0"
             >
               添加
@@ -1301,7 +1461,8 @@ function GuardrailsSection({ projects, defaultCwd }: {
                   <span className="min-w-0 flex-1 truncate font-mono text-dim" title={pattern}>{pattern}</span>
                   <button
                     onClick={() => void removeVerify(pattern)}
-                    className="shrink-0 cursor-pointer text-dim t-fast hover:text-danger"
+                    disabled={saving || !!loadError || !!verifyLoadError}
+                    className="shrink-0 cursor-pointer text-dim t-fast hover:text-danger disabled:opacity-50"
                   >
                     移除
                   </button>
@@ -1322,10 +1483,19 @@ function GuardrailsSection({ projects, defaultCwd }: {
                       {rule}
                     </span>
                     <button
-                      onClick={() => {
-                        void post({ action: "removeRule", cwd: project, ruleKey: rule }).then(load);
+                      disabled={saving || !!loadError}
+                      onClick={async () => {
+                        const ok = await dialogConfirm({
+                          title: "移除免确认规则",
+                          message: `移除后，命中「${rule}」的操作会重新需要确认。`,
+                          confirmText: "移除",
+                          danger: true,
+                        });
+                        if (!ok) return;
+                        const data = await post({ action: "removeRule", cwd: project, ruleKey: rule });
+                        if (data) load();
                       }}
-                      className="shrink-0 cursor-pointer text-dim t-fast hover:text-danger"
+                      className="shrink-0 cursor-pointer text-dim t-fast hover:text-danger disabled:opacity-50"
                       title="移除这条规则"
                     >
                       移除
@@ -1356,13 +1526,23 @@ function HostPromptCard() {
     fileSlots: Array<{ path: string; scope: string; trusted: boolean }>;
   } | null>(null);
   const [open, setOpen] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoadError(null);
+    try {
+      const res = await fetch("/api/host-prompt", { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setData(await res.json());
+    } catch (e) {
+      // 读失败不清空已有数据，改由内联错误块 + 重新读取承载
+      setLoadError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
 
   useEffect(() => {
-    fetch("/api/host-prompt", { cache: "no-store" })
-      .then((r) => r.json())
-      .then(setData)
-      .catch(() => setData(null));
-  }, []);
+    void load();
+  }, [load]);
 
   return (
     <Card>
@@ -1374,6 +1554,12 @@ function HostPromptCard() {
         )}
       </CardHeader>
       <div className="px-4 py-3.5">
+        {loadError && (
+          <div className="mb-2 flex flex-wrap items-center gap-2 rounded-md bg-danger/10 px-2.5 py-2 text-[12px] text-danger">
+            <span>宿主提示词读取失败：{loadError}</span>
+            <button onClick={() => void load()} className="btn btn-sm btn-ghost">重新读取</button>
+          </div>
+        )}
         <p className="text-[12px] leading-relaxed text-dim">
           每个会话都注入的一段系统提示，位于 pi 基座之后、项目 <span className="font-mono text-muted">AGENTS.md</span> 之前。
           分两层：<span className="text-muted">身份段</span>（它叫 ELENVA / Elen，能做什么、做不到时缺哪类能力、怎么成长），

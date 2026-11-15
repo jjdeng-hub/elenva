@@ -68,11 +68,11 @@ function WorkspaceSkeleton() {
         {[0, 1, 2].map((card) => (
           <div key={card} className="rounded-card border border-line bg-panel">
             <div className="border-b border-line-soft px-4 py-3">
-              <div className="h-3 w-20 animate-pulse rounded-sm bg-panel-2" />
+              <div className="h-3 w-20 anim-pulse rounded-sm bg-panel-2" />
             </div>
             <div className="flex flex-col gap-2 px-4 py-3">
-              <div className="h-3 w-3/4 animate-pulse rounded-sm bg-panel-2" />
-              <div className="h-3 w-1/2 animate-pulse rounded-sm bg-panel-2" />
+              <div className="h-3 w-3/4 anim-pulse rounded-sm bg-panel-2" />
+              <div className="h-3 w-1/2 anim-pulse rounded-sm bg-panel-2" />
             </div>
           </div>
         ))}

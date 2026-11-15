@@ -7,7 +7,9 @@
   :root {
     --bg:#f6f5f2; --panel:#ffffff; --panel-2:#f1efeb; --hover:#f0eee9; --active:#fcebeb;
     --line:rgba(0,0,0,.10); --line-soft:rgba(0,0,0,.05);
-    --fg:#2c2c2a; --muted:#5f5e5a; --dim:#888780;
+    /* --dim 与 app/globals.css 对齐（#6e6c66，5.1:1 达 AA）；#888780 只作 --dim-soft（装饰性浅字）。
+       token 与禁用态规则以 globals.css 为实现真源，本页只做设计说明。 */
+    --fg:#2c2c2a; --muted:#5f5e5a; --dim:#6e6c66; --dim-soft:#888780;
     --accent:#c9302c; --accent-hover:#a32d2d; --accent-fg:#fff; --accent-soft:#fcebeb;
     --danger:#c9302c; --success:#3b6d11; --warn:#8f5210;
     --r-sm:6px; --r-md:6px; --r-lg:10px; --r-card:12px;
@@ -44,7 +46,8 @@
   .fs-row em{font-style:normal;font-size:var(--fs-caption);color:var(--muted)}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border:1px solid transparent;border-radius:var(--r-md);background:transparent;font-family:inherit;font-size:var(--fs-small);font-weight:500;line-height:1;color:var(--fg);cursor:pointer;white-space:nowrap;transition:background-color .15s,color .15s,border-color .15s}
-  .btn:disabled{opacity:.5;cursor:not-allowed}
+  /* 禁用态与 globals.css 的 button:disabled 对齐：灰底灰字 + 全不透明（不用 opacity:.5） */
+  .btn:disabled{opacity:1;background:var(--panel-2);border-color:var(--line);color:var(--dim);cursor:not-allowed}
   .btn-sm{height:26px;padding:0 8px;font-size:var(--fs-caption)}
   .btn-icon{width:28px;padding:0}
   .btn-primary{background:var(--accent);color:var(--accent-fg)}
@@ -91,7 +94,7 @@
       <div class="sw" data-page-node-id="5aCwBPluMjHkf5j1NoDeGZ"><i style="background:#c9302c" data-page-node-id="lLLvJeyEMLFmZp4yeKFqvv"></i><div data-page-node-id="GZP7Deim6SlZoiTbMfKiB6"><b data-page-node-id="hBmG9svvqoRc306jTfWub0">accent</b><u data-page-node-id="ApGz3HCzdvEMYsVd1MY1Hp">#c9302c</u>品牌红</div></div>
       <div class="sw" data-page-node-id="2LLvHR17tt31REO7Ymxctm"><i style="background:#2c2c2a" data-page-node-id="7eNKpQdNJkXdCREGOAzvEa"></i><div data-page-node-id="RVXH7sLRBLBtWGFDc8rT5Q"><b data-page-node-id="PLy4fXyLT8lzOuBfaysXIb">fg</b><u data-page-node-id="2dktxSfl5AsWk2knqEhHbH">#2c2c2a</u>正文</div></div>
       <div class="sw" data-page-node-id="PKEtvxKfVRDz7u7vVHpvJT"><i style="background:#5f5e5a" data-page-node-id="8eq1S0ZEvmmQNwwW9rBysf"></i><div data-page-node-id="1YDICA5WUJY5HQBJXaNPGU"><b data-page-node-id="ZjiLLdDYAIkRrBiNfOuJXq">muted</b><u data-page-node-id="dL70wBy5u17oCZYoNRyUul">#5f5e5a</u>次要</div></div>
-      <div class="sw" data-page-node-id="FBDXyeaCRFD2I1iptLEzIq"><i style="background:#888780" data-page-node-id="yUgF3royDASyVUKUZvATmz"></i><div data-page-node-id="Qg3oxaAJxUS3cjEG2Vmu0G"><b data-page-node-id="3gomhfWTVAspUyFJ0Nljke">dim</b><u data-page-node-id="hFWFjSGzpD3NuzmNrUMrjB">#888780</u>元信息</div></div>
+      <div class="sw" data-page-node-id="FBDXyeaCRFD2I1iptLEzIq"><i style="background:#6e6c66" data-page-node-id="yUgF3royDASyVUKUZvATmz"></i><div data-page-node-id="Qg3oxaAJxUS3cjEG2Vmu0G"><b data-page-node-id="3gomhfWTVAspUyFJ0Nljke">dim</b><u data-page-node-id="hFWFjSGzpD3NuzmNrUMrjB">#6e6c66</u>元信息</div></div>
       <div class="sw" data-page-node-id="Mynkd10XwcgbJyBXHYZtyD"><i style="background:#3b6d11" data-page-node-id="JIIJqbvfkJ1AglEqsPDvnk"></i><div data-page-node-id="Xrp15YhL8NpRj7gZ5dT3my"><b data-page-node-id="Q7VvD6uA6mbjZGdaIDSH5M">success</b><u data-page-node-id="cnF4JfF8YDHV6DRGLJWFkW">#3b6d11</u>成功/新增</div></div>
       <div class="sw" data-page-node-id="cZly7vgYiDwdkABnhsssPf"><i style="background:#8f5210" data-page-node-id="XmuK2LWMDNG3TEKwEQwaVC"></i><div data-page-node-id="eZYtrkx71VUscwDxCjnevP"><b data-page-node-id="atgHYyxtyyYjkfrGYC9kKW">warn</b><u data-page-node-id="7Z4QaWQQ0AB2AoOrKRdXEm">#8f5210</u>警告</div></div>
       <div class="sw" data-page-node-id="ClgOKHPnijKrEwadyy4ul9"><i style="background:#c9302c" data-page-node-id="6EjUIm86NwbuuTbJtk5mk4"></i><div data-page-node-id="Pu5wb1o2UttWDJfLSIGbGy"><b data-page-node-id="rj4w0LwedKz6lBH7eEMvWd">danger</b><u data-page-node-id="ImwYMZ4OCjWbQuXDJc8xDu">#c9302c</u>错误/删除</div></div>

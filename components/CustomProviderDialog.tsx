@@ -1,9 +1,9 @@
 "use client";
 
 import { AlertTriangle, Check, Download, Loader2, Plus, Search, Server, SlidersHorizontal, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/components/lib/utils";
-import { toast } from "@/components/ui/dialog";
+import { toast, useDialogBehavior } from "@/components/ui/dialog";
 
 /**
  * 自定义模型（中转站 / 自建网关）接入对话框。
@@ -331,6 +331,12 @@ export function CustomProviderDialog({
     }
   };
 
+  /* M11：Esc 关闭 / Tab 焦点陷阱 / 关闭时归还焦点（保存中不允许 Esc 退出） */
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useDialogBehavior(open, () => {
+    if (!saving) onClose();
+  }, panelRef);
+
   if (!open) return null;
 
   return (
@@ -342,6 +348,7 @@ export function CustomProviderDialog({
       }}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={editing ? "编辑自定义模型" : "接入自定义模型"}
