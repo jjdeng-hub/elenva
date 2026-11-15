@@ -100,6 +100,7 @@ export function ApprovalHistoryPage({
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="page-col py-6">
         <PageHeader
+          as="h1"
           icon={<History size={16} />}
           title="审批历史"
           subtitle="危险操作的批准 / 拒绝 / 超时 / 入队记录（最近 1000 条）"

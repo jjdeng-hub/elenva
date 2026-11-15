@@ -405,6 +405,7 @@ export function SubagentsPage({ defaultCwd }: { defaultCwd: string | null }) {
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="page-col py-6">
         <PageHeader
+          as="h1"
           icon={<Bot size={16} />}
           title="子代理"
           subtitle="可复用的专用代理，由主会话按需派生"

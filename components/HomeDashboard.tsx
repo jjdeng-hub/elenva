@@ -15,6 +15,7 @@ import { UsageAnalysis } from "@/components/home/UsageAnalysis";
 import { TodayOverview } from "@/components/home/TodayOverview";
 import { RunningCards } from "@/components/home/RunningCards";
 import { ModelSetupDialog } from "@/components/ModelSetupDialog";
+import { toast } from "@/components/ui/dialog";
 
 /** 模型短名：provider/modelId → modelId */
 function shortModel(model?: string): string {
@@ -62,10 +63,73 @@ const WAIT_PRIORITY: Record<WaitSource, number> = {
   "approval-queued": 2,
 };
 
+/* ------------------------------------------------------------------ *
+ * M8：审批队列的「本地忽略」清单
+ *
+ * 队列文件是 append-only 的（lib/pending-approvals.ts 只在读端折叠），已处理过的
+ * 条目会一直留在「等你处理」里直到 7 天 TTL。这里不碰写入路径、不新增接口，
+ * 只在浏览器本地记下「哪一条我已处理过」，渲染待办时跳过它。
+ *
+ * 记录带 sessionId + ruleKey/detail + at：
+ *  - 规则与服务端折叠键（sessionId + ruleKey ?? detail）同构，忽略的是「这一条」；
+ *  - at 是时间水位：服务端折叠只留同规则里 at 最新的一条，之后同一规则产生的
+ *    新审批 at 更大，水位比对不命中，会重新出现，不会被永久静默。
+ * ------------------------------------------------------------------ */
+const IGNORED_KEY = "elenva:ignored-queued-approvals:v1";
+
+interface IgnoredQueued {
+  /** 三元组组合键，撤销时按它精确移除 */
+  key: string;
+  sessionId: string;
+  ruleKey: string;
+  at: string;
+}
+
+/** 与读端 queueKey 同口径：没有 ruleKey 时用 detail 兜底 */
+function queuedRuleKey(q: QueuedApproval): string {
+  return q.ruleKey ?? q.detail ?? q.reason ?? q.toolName ?? "";
+}
+
+function queuedIgnoreKey(sessionId: string, ruleKey: string, at: string): string {
+  return JSON.stringify([sessionId, ruleKey, at]);
+}
+
+/** 本地清单读失败 / 脏数据一律退化为「没有忽略项」，绝不影响主流程。 */
+function readIgnoredQueued(): IgnoredQueued[] {
+  try {
+    const raw = localStorage.getItem(IGNORED_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((x: unknown): x is IgnoredQueued => {
+      const r = x as IgnoredQueued | null;
+      return (
+        !!r &&
+        typeof r.key === "string" &&
+        typeof r.sessionId === "string" &&
+        typeof r.ruleKey === "string" &&
+        typeof r.at === "string"
+      );
+    });
+  } catch {
+    return [];
+  }
+}
+
+function writeIgnoredQueued(list: IgnoredQueued[]): void {
+  try {
+    localStorage.setItem(IGNORED_KEY, JSON.stringify(list));
+  } catch {
+    /* 写不进去（隐私模式 / 配额）时忽略退化为本次会话内有效，不影响待办 */
+  }
+}
+
 interface WaitItem {
   sessionId: string;
   source: WaitSource;
   detail: string;
+  /** 仅 approval-queued 有：本地忽略清单的定位信息 */
+  ignore?: IgnoredQueued;
 }
 
 interface PendingApprovalsPayload {
@@ -143,6 +207,11 @@ export function HomeDashboard({
 }) {
   const [tab, setTab] = useState<TabKey>("all");
   const [supportInfoOpen, setSupportInfoOpen] = useState(false);
+  /** M8：本地忽略清单。首帧用空数组保证 SSR / 水合一致，挂载后再从 localStorage 补齐。 */
+  const [ignoredQueued, setIgnoredQueued] = useState<IgnoredQueued[]>([]);
+  useEffect(() => {
+    setIgnoredQueued(readIgnoredQueued());
+  }, []);
 
   /*
    * 无凭据引导：一个凭据都没配时，工作台上是一片空白，却没有任何地方
@@ -306,10 +375,53 @@ export function HomeDashboard({
     }
     for (const q of pendingApprovals.queued) {
       if (!q.sessionId) continue;
-      put({ sessionId: q.sessionId, source: "approval-queued", detail: q.reason || q.detail || q.toolName || "" });
+      const ruleKey = queuedRuleKey(q);
+      const at = q.at ?? "";
+      // 本地忽略：只跳过「已被标记处理、且 at 不晚于记录水位」的那一条。
+      // 同一规则之后产生的新条目 at 更大，比对不命中 → 仍会出现（见 IGNORED_KEY 注释）。
+      const ignored = ignoredQueued.some(
+        (r) => r.sessionId === q.sessionId && r.ruleKey === ruleKey && at <= r.at,
+      );
+      if (ignored) continue;
+      put({
+        sessionId: q.sessionId,
+        source: "approval-queued",
+        detail: q.reason || q.detail || q.toolName || "",
+        ignore: {
+          key: queuedIgnoreKey(q.sessionId, ruleKey, at),
+          sessionId: q.sessionId,
+          ruleKey,
+          at,
+        },
+      });
     }
     return [...byId.values()];
-  }, [pendingApprovals, attention, sessionsById]);
+  }, [pendingApprovals, attention, sessionsById, ignoredQueued]);
+  /** M8：标记一条审批队列待办为已处理 —— 只写浏览器本地清单，队列文件与接口零改动。
+   *  waitItems 依赖 ignoredQueued，setState 后 waitCount 当帧即减 1；toast 给一次短时撤销。 */
+  const ignoreWaitItem = (w: WaitItem) => {
+    if (!w.ignore) return;
+    const entry = w.ignore;
+    setIgnoredQueued((prev) => {
+      if (prev.some((r) => r.key === entry.key)) return prev;
+      const next = [...prev, entry];
+      writeIgnoredQueued(next);
+      return next;
+    });
+    toast("已标记处理，这条审批队列待办不再计入「等你处理」", {
+      duration: 6000,
+      action: {
+        label: "撤销",
+        onClick: () => {
+          setIgnoredQueued((prev) => {
+            const next = prev.filter((r) => r.key !== entry.key);
+            writeIgnoredQueued(next);
+            return next;
+          });
+        },
+      },
+    });
+  };
   const waitCount = waitItems.length;
   /** 计数三态：首屏未加载显示 —，更新失败显示 !，只在成功后渲染真值 */
   const attentionCountLabel = !attentionLoaded ? "—" : attentionError ? "!" : waitCount;
@@ -479,25 +591,38 @@ export function HomeDashboard({
                 if (!sess) return null;
                 const danger = w.source === "approval-live";
                 return (
-                  <button
-                    key={w.sessionId}
-                    onClick={() => onOpenSession(sess)}
-                    className="flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-left t-fast hover:bg-hover"
-                  >
-                    <span className={cn("size-1.5 shrink-0 rounded-full anim-pulse-dot", danger ? "bg-danger" : "bg-warn")} />
-                    <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg">
-                      {displayTitle(sess)}
-                    </span>
-                    <span
-                      className={cn(
-                        "shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] font-medium",
-                        danger ? "border-danger/30 bg-danger/10 text-danger" : "border-warn/30 bg-warn/10 text-warn",
-                      )}
+                  <div key={w.sessionId} className="flex items-center rounded-md t-fast hover:bg-hover">
+                    <button
+                      onClick={() => onOpenSession(sess)}
+                      className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 px-1.5 py-1.5 text-left t-fast"
                     >
-                      {WAIT_LABELS[w.source]}
-                    </span>
-                    <span className="ml-1 hidden max-w-[34%] shrink-0 truncate text-[11px] text-dim xl:inline">{w.detail}</span>
-                  </button>
+                      <span className={cn("size-1.5 shrink-0 rounded-full anim-pulse-dot", danger ? "bg-danger" : "bg-warn")} />
+                      <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-fg">
+                        {displayTitle(sess)}
+                      </span>
+                      <span
+                        className={cn(
+                          "shrink-0 rounded-sm border px-1.5 py-0.5 text-[10px] font-medium",
+                          danger ? "border-danger/30 bg-danger/10 text-danger" : "border-warn/30 bg-warn/10 text-warn",
+                        )}
+                      >
+                        {WAIT_LABELS[w.source]}
+                      </span>
+                      <span className="ml-1 hidden max-w-[34%] shrink-0 truncate text-[11px] text-dim xl:inline">{w.detail}</span>
+                    </button>
+                    {/* M8：只有审批队列条目给「忽略」——活审批 / 中断 / 报错都有真实会话状态，
+                        不能靠本地清单假装处理完；忽略只影响本机展示，可撤销。 */}
+                    {w.ignore && (
+                      <button
+                        onClick={() => ignoreWaitItem(w)}
+                        className="btn btn-sm btn-ghost mr-1 shrink-0 px-2"
+                        title="标记已处理：仅在本机忽略这条审批队列待办，不再计入「等你处理」；同一规则之后产生的新条目仍会出现"
+                        aria-label="忽略这条审批队列待办"
+                      >
+                        忽略
+                      </button>
+                    )}
+                  </div>
                 );
               })}
             </div>

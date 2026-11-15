@@ -1644,7 +1644,7 @@ export function SettingsPage({
   return (
     <div className="min-h-0 flex-1 overflow-y-auto" data-page-scroll>
       <div className="page-col-form py-6">
-        <PageHeader icon={<SettingsIcon size={16} />} title="设置" subtitle="工具开关、版本信息与其他偏好" />
+        <PageHeader as="h1" icon={<SettingsIcon size={16} />} title="设置" subtitle="工具开关、版本信息与其他偏好" />
 
         {/* 两列按实测高度配平（xl 起左右并排）：左栏 5 张（行为/账号/外观/关于/宿主提示词）
             ≈1806px，右栏 2 张（工具/安全确认）≈1914px，底边差 <150px。

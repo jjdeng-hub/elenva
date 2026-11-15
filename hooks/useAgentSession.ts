@@ -513,7 +513,8 @@ export function useAgentSession(opts: UseAgentSessionOptions) {
           setEntryIds([]);
           setHistoryCursor(null);
           setHasEarlierMessages(false);
-          setError(null);
+          // 404 不是「空会话」：明确告知并给回工作台的恢复路径（见 ChatView 状态条）。
+          setError("会话不存在或已被删除，请回到工作台重新选择会话");
         }
         return null;
       }

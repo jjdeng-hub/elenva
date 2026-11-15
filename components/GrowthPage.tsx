@@ -127,6 +127,7 @@ export function GrowthPage() {
     <div className="min-h-0 flex-1 overflow-y-auto" data-testid="growth-page">
       <div className="page-col py-6">
         <PageHeader
+          as="h1"
           icon={<TrendingUp size={16} />}
           title="成长"
           subtitle="近 8 周：任务量 / 失败率 / 轮数 / 工具调用 —— 正在变顺还是变钝"

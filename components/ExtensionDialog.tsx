@@ -174,6 +174,9 @@ export function ExtensionDialog({
             )}
           </div>
         )}
+        <p className="mt-2 text-[11px] leading-relaxed text-dim">
+          长时间未处理会按「拒绝」结束本次审批；超时后如需继续，请在会话里重新发起该操作。
+        </p>
       </div>
     </div>
   );

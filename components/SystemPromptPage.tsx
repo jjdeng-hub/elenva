@@ -90,6 +90,7 @@ export function SystemPromptPage({
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="page-col-form py-6">
         <PageHeader
+          as="h1"
           icon={<ScrollText size={16} />}
           title="提示词"
           subtitle="模型每轮实际看到的完整内容（按项目）"

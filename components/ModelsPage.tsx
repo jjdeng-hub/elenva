@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/components/lib/utils";
 import { dialogConfirm, toast } from "@/components/ui/dialog";
 import { relTime } from "@/lib/format";
-import { EmptyState, PageHeader, Skeleton } from "@/components/ui/bits";
+import { EmptyState, PageHeader, Skeleton, SlowHint } from "@/components/ui/bits";
 import { ModelScopeEditor, type ModelScopeSummary } from "@/components/ModelScopeEditor";
 import { ModelSetupDialog } from "@/components/ModelSetupDialog";
 import { CustomProviderDialog, type CustomProviderSource } from "@/components/CustomProviderDialog";
@@ -159,6 +159,7 @@ function ProviderAuthSection({ onOpenSetup }: { onOpenSetup: (providerId: string
               <Skeleton className="ml-auto h-5 w-16 shrink-0 rounded-sm" />
             </div>
           ))}
+          <SlowHint className="mt-2" hint="首次读取厂商目录与本机凭据状态" />
         </div>
       ) : (
         <>
@@ -482,6 +483,7 @@ function ModelHealthSection({
               <Skeleton className="h-5 w-14 shrink-0 rounded-sm" />
             </div>
           ))}
+          <SlowHint className="px-4 pb-3" hint="正在汇总近 14 天的模型调用记录" />
         </div>
       )}
 
@@ -829,6 +831,7 @@ export function ModelsPage() {
         </div>
 
         <PageHeader
+          as="h1"
           icon={<Cpu size={16} />}
           title="模型"
           subtitle="管理模型 Provider、API Key 与连接"
@@ -902,6 +905,7 @@ export function ModelsPage() {
                   </div>
                 </div>
               ))}
+              <SlowHint className="px-4 pb-3" hint="读取自定义 Provider 配置" />
             </div>
           )}
           {!loading && loadError && (

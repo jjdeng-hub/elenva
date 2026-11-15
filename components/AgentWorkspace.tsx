@@ -52,12 +52,13 @@ function readViewFromHash(agentId: string): string | null {
   return seg;
 }
 
-/** 视图写回地址栏：replaceState 而不是 push —— 视图切换不该在浏览器历史上留一串。 */
+/** 视图写回地址栏：pushState 让工作台内 A→B→C 可依次后退（M3）。
+    目标地址已是当前 hash 时不压历史（后退同步 / 重复点同一标签），避免历史条目爆炸。 */
 function writeViewHash(agentId: string, viewId: string): void {
   if (typeof window === "undefined") return;
   const next = `#a/${agentId}/${viewId}`;
   if (window.location.hash === next) return;
-  window.history.replaceState(null, "", next);
+  window.history.pushState(null, "", next);
 }
 
 /** 加载骨架：形状与真实块一致（卡头 + 两行条目），比「加载工作台…」少一次闪烁。 */
@@ -214,12 +215,18 @@ export function AgentWorkspace({ agent, onOpenSession }: { agent: AgentRecord; o
    * 少了这一段，hash 与界面会各说各话 —— 地址是「练」、屏幕还停在「日志」。
    */
   useEffect(() => {
-    const onHashChange = () => {
+    // M3：应用包视图切换改用 pushState，后退可能只派发 popstate；
+    // 与 hashchange 共用同一同步逻辑，保证地址栏 / 选中标签 / 内容一致。
+    const syncViewFromLocation = () => {
       const wanted = readViewFromHash(agent.id);
       if (wanted) setActiveView(wanted);
     };
-    window.addEventListener("hashchange", onHashChange);
-    return () => window.removeEventListener("hashchange", onHashChange);
+    window.addEventListener("hashchange", syncViewFromLocation);
+    window.addEventListener("popstate", syncViewFromLocation);
+    return () => {
+      window.removeEventListener("hashchange", syncViewFromLocation);
+      window.removeEventListener("popstate", syncViewFromLocation);
+    };
   }, [agent.id]);
 
   /**

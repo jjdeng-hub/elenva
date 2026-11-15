@@ -63,6 +63,8 @@ export interface TurnCheckpointsState {
   checkpoints: TurnCheckpoint[];
   /** 最近一轮：已把「子轮次」合并成用户轮（见 mergeRound） */
   latestRound: TurnRound | null;
+  /** 本轮证据读取失败时给出原因：界面不能再把「读失败」显示成一片空白 */
+  error?: string | null;
   restoring: boolean;
   restore: (turnId?: string) => Promise<void>;
   /** 文件级回滚：把「本轮」内的单个文件恢复 / 删除（与整轮共用校验与级联） */
@@ -121,6 +123,7 @@ export function useTurnCheckpoints(
   live = false,
 ): TurnCheckpointsState {
   const [checkpoints, setCheckpoints] = useState<TurnCheckpoint[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
@@ -128,13 +131,18 @@ export function useTurnCheckpoints(
     try {
       const query = limit ? `?limit=${limit}` : "";
       const res = await fetch(`/api/sessions/${encodeURIComponent(sid)}/checkpoints${query}`, { cache: "no-store" });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        setLoadError(`HTTP ${res.status}`);
+        return null;
+      }
       const data = (await res.json()) as { checkpoints?: TurnCheckpoint[] };
       const list = Array.isArray(data.checkpoints) ? data.checkpoints : [];
       setCheckpoints(list);
+      setLoadError(null);
       return list;
     } catch {
-      /* 拿不到就不显示，不打扰 */
+      // 失败要能被看见：本轮证据区会显示原因并提供重新读取。
+      setLoadError("读取失败，请重试");
       return null;
     }
   }, []);
@@ -309,6 +317,7 @@ export function useTurnCheckpoints(
   return {
     checkpoints,
     latestRound,
+    error: loadError,
     restoring,
     restore,
     restoreFile,

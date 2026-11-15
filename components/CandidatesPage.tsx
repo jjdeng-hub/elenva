@@ -195,6 +195,7 @@ export function CandidatesPage({
           与其余页的 32px 对齐不一致 */}
       <div className="page-col flex flex-col gap-3 py-6">
         <PageHeader
+          as="h1"
           icon={<FlaskConical size={16} />}
           title="并行试验"
           subtitle="同一句话同时开几个候选，各自在独立的 git 工作区里跑，跑完并排比改动"

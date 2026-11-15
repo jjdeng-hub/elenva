@@ -429,9 +429,13 @@ export function AppShell() {
     syncedHashRef.current = hash;
   }, [view, selected, newSessionCwd, sideSessionId, activeAgent]);
 
-  /* 浏览器前进/后退（hashchange 只在真实 hash 跳转时触发，replaceState 不会） */
+  /* 浏览器前进/后退：hashchange 与 popstate 统一走同一个 syncFromLocation。
+     M3：平台级与应用包工作台内都用 pushState 产生历史条目，而 pushState 调用本身
+     不触发 hashchange、后退时也可能只派发 popstate，故补一个 popstate 监听。
+     若两类事件在同一次导航都到达，同步函数按当前地址解析且幂等，写回 effect 的
+     syncedHashRef 判等保证不会重复压历史。 */
   useEffect(() => {
-    const onHash = () => {
+    const syncFromLocation = () => {
       const p = parseHash();
       // 前进/后退驱动的同步：记录已同步的 hash，避免随后的写回 effect 再压一条历史
       syncedHashRef.current = window.location.hash;
@@ -470,8 +474,12 @@ export function AppShell() {
       if (p.view === "chat" && !p.newCwd && defaultCwd) setNewSessionCwd(defaultCwd);
       setView(p.view);
     };
-    window.addEventListener("hashchange", onHash);
-    return () => window.removeEventListener("hashchange", onHash);
+    window.addEventListener("hashchange", syncFromLocation);
+    window.addEventListener("popstate", syncFromLocation);
+    return () => {
+      window.removeEventListener("hashchange", syncFromLocation);
+      window.removeEventListener("popstate", syncFromLocation);
+    };
   }, [sessions, defaultCwd, refreshSessions]);
 
   useEffect(() => {

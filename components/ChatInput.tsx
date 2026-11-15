@@ -181,6 +181,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
   const textRef = useRef("");
   /** 附件超限 / 配额不足的提示只弹一次 */
   const draftQuotaWarnedRef = useRef(false);
+  /** 图片草稿未落盘的常驻徽标：一次性 toast 会消失，切会话回来就不知道图会丢 */
+  const [draftWarning, setDraftWarning] = useState<string | null>(null);
   useEffect(() => {
     setDraftKey(draftKeyProp);
     draftKeyRef.current = draftKeyProp;
@@ -190,6 +192,8 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
      附件超 3MB 或触发 localStorage 配额时不静默、不炸，且**文本照存**——
      不能因为图大/配额不足就把文字草稿一起丢；仅图片降级为内存保留 + 一次性提示。 */
   const warnDraftOnce = useCallback((message: string) => {
+    // toast 只弹一次，但徽标常驻，直到图片被清掉 / 发出去。
+    setDraftWarning(message);
     if (draftQuotaWarnedRef.current) return;
     draftQuotaWarnedRef.current = true;
     onNotice?.(message);
@@ -303,6 +307,7 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
     imagesRef.current.forEach((img) => URL.revokeObjectURL(img.previewUrl));
     imagesRef.current = [];
     setImages([]);
+    setDraftWarning(null);
     persistDraft(textRef.current, []);
   }, [persistDraft]);
 
@@ -758,10 +763,16 @@ export const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function Ch
                 ))}
               </div>
             )}
+            {draftWarning && (
+              <div className="mb-1 w-full rounded-md bg-warn/10 px-2 py-1 text-[11px] leading-relaxed text-warn" role="status">
+                {draftWarning}
+              </div>
+            )}
 
             <div className="flex min-h-[44px] items-start">
               <textarea
                 ref={areaRef}
+                aria-label="消息输入框"
                 value={text}
                 onChange={(e) => {
                   const v = e.target.value;

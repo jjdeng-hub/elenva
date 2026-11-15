@@ -157,6 +157,7 @@ export function MemoryPage({ projects }: { projects: MemoryProject[] }) {
     <div ref={agentScrollRef} className="min-h-0 flex-1 overflow-y-auto">
       <div className="page-col-form py-6">
         <PageHeader
+          as="h1"
           icon={<Brain size={16} />}
           title="记忆"
           subtitle="Agent 自己积累的经历 · 你手写的长期指令"

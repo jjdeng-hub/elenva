@@ -42,7 +42,7 @@ SD4m 针对的是「用 mono 装小标签凑科技感」；这里的 mono 只包
 
 ## 5. 一个视图一条链接
 
-`#a/<agentId>/<viewId>` 由 `AgentWorkspace` 自己读写（`replaceState`，视图切换不进浏览器历史），
+`#a/<agentId>/<viewId>` 由 `AgentWorkspace` 自己读写（`pushState`，视图切换进浏览器历史，后退可回到上一个视图；`AppShell` 与 `AgentWorkspace` 同时监听 `hashchange` / `popstate`），
 平台层 `AppShell` 只负责「别把它改写掉」——`home` 视图必须保留地址栏里的视图段，否则深链接
 会在子组件挂载前被抹成 `/home`。这不是路由框架，只是让「我在跟谁说话、在哪个房间」写进地址栏。
 

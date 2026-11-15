@@ -265,11 +265,20 @@ export function ChatView({
      11 处 addNotice 全部静默：切模型失败时界面毫无反应。这里接到 Toast。 */
   const seenNoticeIds = useRef<Set<string>>(new Set());
   const previousRunningRef = useRef(false);
+  /** M6/M13：失败/卡死类提示常驻在输入区上方并给可执行动作；toast 只做补充。 */
+  const [persistentFailure, setPersistentFailure] = useState<{ message: string } | null>(null);
+  const [turnDoneAt, setTurnDoneAt] = useState<number | null>(null);
+  const lastSubmissionRef = useRef<{ text: string; images?: AttachedImage[] } | null>(null);
   /* 新一轮开始时允许同类问题再次提示：原来 seenNoticeIds 永不清空，第二次卡死就再无声息。 */
   useEffect(() => {
-    if (agentRunning && !previousRunningRef.current) seenNoticeIds.current.clear();
+    if (agentRunning && !previousRunningRef.current) {
+      seenNoticeIds.current.clear();
+      setPersistentFailure(null);
+      setTurnDoneAt(null);
+    }
+    if (previousRunningRef.current && !agentRunning && !error) setTurnDoneAt(Date.now());
     previousRunningRef.current = agentRunning;
-  }, [agentRunning]);
+  }, [agentRunning, error]);
   useEffect(() => {
     for (const n of notices) {
       if (seenNoticeIds.current.has(n.id)) continue;
@@ -277,6 +286,7 @@ export function ChatView({
       // 失败 / 断线 / 卡死类提示常驻，并给一个可点动作；其余仍是一次性轻提示。
       const serious = n.type === "warning" || /失败|断开|卡住|无事件|超时|拒绝|没有送达/.test(n.message);
       if (serious) {
+        setPersistentFailure({ message: n.message });
         toast.error(n.message, agentRunning ? { label: "停止本轮", onClick: () => void handleAbort() } : undefined);
       } else {
         toast(n.message);
@@ -583,6 +593,8 @@ export function ChatView({
       }
       // 提交成功才响（send）；不叠 press
       soundEvents.notifySubmit();
+      // 记下这次提交：失败状态条里的「重新发送」要用，避免用户重打一遍。
+      lastSubmissionRef.current = { text: raw, images };
       handleSend(raw, images);
     },
     [handleBuiltinSlashCommand, handleSend, soundEvents],
@@ -1284,7 +1296,7 @@ export function ChatView({
               <button
                 onClick={() => onOpenGit?.(cwd)}
                 title="查看 Git 变更（当前项目）"
-                className="chip hidden cursor-pointer items-center gap-1.5 px-2 t-fast hover:border-accent/40 hover:text-fg lg:flex"
+                className="chip flex cursor-pointer items-center gap-1.5 px-2 t-fast hover:border-accent/40 hover:text-fg"
               >
                 <GitBranch size={12} className="shrink-0 text-dim" />
                 <span className="max-w-28 truncate">{gitInfo.branch || "git"}</span>
@@ -1383,6 +1395,52 @@ export function ChatView({
           />
         )}
         {!isEmpty && statusBar}
+        {!isEmpty && (
+          <div className="mx-auto w-full pb-2" style={{ maxWidth: "var(--chat-col)" }}>
+            {persistentFailure && (
+              <div className="mb-1 flex flex-wrap items-center gap-2 rounded-md bg-danger/10 px-3 py-2 text-[12px] leading-relaxed text-danger" role="status">
+                <span className="min-w-0 flex-1">{persistentFailure.message}</span>
+                {lastSubmissionRef.current && (
+                  <button
+                    onClick={() => {
+                      const s = lastSubmissionRef.current;
+                      setPersistentFailure(null);
+                      if (s) void handleSendWrapped(s.text, s.images);
+                    }}
+                    className="btn btn-sm btn-ghost shrink-0"
+                    title="若上一条其实已送达，请勿重复发送"
+                  >
+                    重新发送
+                  </button>
+                )}
+                {agentRunning && (
+                  <button onClick={() => void handleAbort()} className="btn btn-sm btn-ghost shrink-0">停止本轮</button>
+                )}
+                <button onClick={() => setPersistentFailure(null)} className="btn btn-sm btn-ghost shrink-0">忽略</button>
+              </div>
+            )}
+            {error && (
+              <div className="mb-1 flex flex-wrap items-center gap-2 rounded-md bg-danger/10 px-3 py-2 text-[12px] leading-relaxed text-danger" role="alert">
+                <span className="min-w-0 flex-1">{error}</span>
+                <button onClick={() => window.location.reload()} className="btn btn-sm btn-ghost shrink-0">重新加载</button>
+                {/会话不存在|已被删除/.test(error) && (
+                  <button onClick={onExit} className="btn btn-sm btn-ghost shrink-0">回到工作台</button>
+                )}
+              </div>
+            )}
+            {turn.error && (
+              <div className="mb-1 flex flex-wrap items-center gap-2 rounded-md bg-warn/10 px-3 py-2 text-[12px] text-warn" role="status">
+                <span className="min-w-0 flex-1">本轮证据读取失败：{turn.error}</span>
+                <button onClick={() => turn.reload()} className="btn btn-sm btn-ghost shrink-0">重新读取</button>
+              </div>
+            )}
+            {turnDoneAt && !agentRunning && !persistentFailure && !error && (
+              <div className="mb-1 px-1 text-[11px] text-dim" role="status">
+                本轮完成 · {new Date(turnDoneAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}
+              </div>
+            )}
+          </div>
+        )}
         {!isEmpty && chatInputEl}
           </div>
           {/* 并排副屏：只读，占在对话列与右栏之间的独立一列。窄窗（<1440）不渲染，

@@ -304,6 +304,7 @@ export function IdentityPage() {
     <div className="min-h-0 flex-1 overflow-y-auto" data-page-scroll>
       <div className="page-col-form py-6">
         <PageHeader
+          as="h1"
           icon={<Fingerprint size={16} />}
           title="身份"
           subtitle="设计这个人：分段编辑宿主提示词里的「你是谁」，有版本历史，边改边看生效预览"

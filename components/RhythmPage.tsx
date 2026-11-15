@@ -516,6 +516,7 @@ export function RhythmPage({ profile }: { profile?: string } = {}) {
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="page-col-form py-6">
         <PageHeader
+          as="h1"
           icon={<AlarmClock size={16} />}
           title="节律"
           subtitle="Hermes 定时任务 · 按计划自动执行，投递结果到指定目标"

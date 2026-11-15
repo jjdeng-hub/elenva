@@ -502,7 +502,7 @@ export function PluginsPage({ defaultCwd }: { defaultCwd: string | null }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="page-col py-6">
-        <PageHeader icon={<Plug size={16} />} title="插件" subtitle="安装 Pi 包，扩展能力、技能、命令与主题" />
+        <PageHeader as="h1" icon={<Plug size={16} />} title="插件" subtitle="安装 Pi 包，扩展能力、技能、命令与主题" />
 
         {/* 内置扩展与技能（仓库自带件：发现 + 状态 + 一键安装） */}
         <Card className="mb-4 p-4">

@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { PwaRegistration } from "@/components/PwaRegistration";
 import { ThemeInitScript } from "@/components/ThemeInitScript";
 import { DialogHost, ToastHost } from "@/components/ui/dialog";
+import { ApiFeedbackGuard } from "@/components/ApiFeedbackGuard";
 /* LaTeX 公式排版样式：lib/markdown 的 rehype-katex 会输出 .katex 结构，
    缺了这份样式表公式就是一堆错位的裸 span。 */
 import "katex/dist/katex.min.css";
@@ -37,6 +38,7 @@ export default function RootLayout({
       <body suppressHydrationWarning>
         {children}
         <PwaRegistration />
+        <ApiFeedbackGuard />
         <DialogHost />
         <ToastHost />
       </body>

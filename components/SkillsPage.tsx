@@ -444,6 +444,7 @@ export function SkillsPage({ defaultCwd }: { defaultCwd: string | null }) {
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="page-col py-6">
         <PageHeader
+          as="h1"
           icon={<Library size={16} />}
           title="技能"
           subtitle={
